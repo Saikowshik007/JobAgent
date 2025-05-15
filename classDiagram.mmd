@@ -1,0 +1,142 @@
+classDiagram
+    class JobTrakSystem {
+        +initialize()
+        +start_job_search()
+        +generate_resume()
+        +apply_to_job()
+        +upload_to_simplify()
+    }
+
+    class Database {
+        +save_job()
+        +get_job()
+        +get_all_jobs()
+        +update_job_status()
+        +job_exists()
+        +save_resume()
+        +get_resume()
+        +save_search_history()
+        +update_simplify_upload_status()
+    }
+
+    class APIController {
+        +search_jobs()
+        +get_jobs()
+        +get_job()
+        +update_job_status()
+        +generate_resume()
+        +upload_to_simplify()
+        +get_system_status()
+    }
+
+    class LinkedInDriver {
+        -email: str
+        -password: str
+        -driver: WebDriver
+        +login()
+        +close()
+        +random_delay()
+    }
+
+    class JobSearcher {
+        -linkedin_driver: LinkedInDriver
+        +search_jobs()
+        +extract_job_details()
+        -_apply_filters()
+        -_collect_job_listings()
+    }
+
+    class ResumeGenerator {
+        +create_tailored_resume()
+        +generate_pdf()
+    }
+
+    class SimplifyIntegration {
+        -email: str
+        -password: str
+        -driver: WebDriver
+        +login_to_simplify()
+        +upload_resume()
+        +is_session_valid()
+        +save_cookies()
+        +load_cookies()
+    }
+
+    class Job {
+        +id: str
+        +title: str
+        +company: str
+        +location: str
+        +description: str
+        +url: str
+        +date_found: datetime
+        +status: JobStatus
+        +applied_date: datetime
+        +rejected_date: datetime
+        +resume_id: str
+        +metadata: dict
+    }
+
+    class Resume {
+        +id: str
+        +job_id: str
+        +file_path: str
+        +yaml_content: str
+        +date_created: datetime
+        +uploaded_to_simplify: bool
+    }
+
+    class SearchHistory {
+        +id: str
+        +keywords: str
+        +location: str
+        +filters: dict
+        +date_searched: datetime
+        +job_count: int
+    }
+
+    class JobStatus {
+        <<enumeration>>
+        NEW
+        INTERESTED
+        RESUME_GENERATED
+        APPLIED
+        REJECTED
+        INTERVIEW
+        OFFER
+        DECLINED
+    }
+
+    class BrowserDriverManager {
+        -_driver_instance: LinkedInDriver
+        +get_driver()
+        +release_driver()
+        +close_all_drivers()
+    }
+
+    class Flask {
+        +route()
+        +run()
+    }
+
+    JobTrakSystem --> APIController
+    JobTrakSystem --> BrowserDriverManager
+    JobTrakSystem --> Database
+
+    APIController --> JobSearcher
+    APIController --> ResumeGenerator
+    APIController --> SimplifyIntegration
+    APIController --> Database
+
+    JobSearcher --> LinkedInDriver
+    SimplifyIntegration --> LinkedInDriver
+
+    BrowserDriverManager --> LinkedInDriver
+
+    Database --> Job
+    Database --> Resume
+    Database --> SearchHistory
+
+    Job --> JobStatus
+
+    Flask --> APIController
