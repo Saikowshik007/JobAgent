@@ -1,7 +1,7 @@
 from fastapi import FastAPI, HTTPException, Depends, Query, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
-from typing import Dict, List, Optional, Any, Union
+from typing import List, Optional
 import logging
 import os
 import time
@@ -9,18 +9,26 @@ import hashlib
 from enum import Enum
 from datetime import datetime
 import uvicorn
+from dotenv import load_dotenv
+
+# Load environment variables from .env file if it exists
+load_dotenv()
+
+# Check if we're running in Docker and import the docker_webdriver
+if os.environ.get('SELENIUM_REMOTE_URL'):
+    pass
 
 from data.database import Database
 from job_searcher import JobSearcher
-from linkedin_driver import LinkedInIntegration
-from browser_manager import BrowserDriverManager
-from data_models import Job, JobStatus
+from drivers.linkedin_driver import LinkedInIntegration
+from drivers.browser_manager import BrowserDriverManager
+from data_models import JobStatus
 from data.dbcache_manager import DBCacheManager
 from data.cache import JobCache, SearchCache
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.INFO if not os.environ.get('API_DEBUG') else logging.DEBUG,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
@@ -41,12 +49,75 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+
 # Global LinkedIn driver instance - initialized when needed
 _linkedin_driver = None
+
+# Initialize function to set up application state
+def initialize(db_path=None, job_cache_size=None, search_cache_size=None):
+    """Initialize the FastAPI application with required components."""
+    try:
+        # Get configuration from environment variables if not provided
+        if db_path is None:
+            db_path = os.environ.get('DATABASE_PATH', 'job_tracker.db')
+
+        if job_cache_size is None:
+            job_cache_size = int(os.environ.get('JOB_CACHE_SIZE', 1000))
+
+        if search_cache_size is None:
+            search_cache_size = int(os.environ.get('SEARCH_CACHE_SIZE', 100))
+
+        # Create data directory if it doesn't exist
+        os.makedirs(os.path.dirname(db_path) if '/' in db_path else '.', exist_ok=True)
+
+        # Initialize database
+        db = Database(db_path)
+        logger.info(f"Initialized database at {db_path}")
+
+        # Initialize caches
+        job_cache = JobCache(max_size=job_cache_size)
+        search_cache = SearchCache(max_size=search_cache_size)
+        logger.info(f"Initialized caches with sizes - job: {job_cache_size}, search: {search_cache_size}")
+
+        # Initialize cache manager
+        db_manager = DBCacheManager(
+            database=db,
+            job_cache=job_cache,
+            search_cache=search_cache
+        )
+        logger.info("Initialized database cache manager")
+
+        # Store in application state
+        app.state.db = db
+        app.state.job_cache = job_cache
+        app.state.search_cache = search_cache
+        app.state.db_manager = db_manager
+
+        logger.info("Application initialization complete")
+        return True
+    except Exception as e:
+        logger.error(f"Error initializing application: {e}")
+        return False
+
+# Initialize the application when this module is loaded
+initialize()
 
 # Dependency to get database manager
 def get_db_manager():
     """Get the database manager instance."""
+    if not hasattr(app.state, "db_manager"):
+        # If db_manager is not in app.state, initialize the application
+        logger.warning("Database manager not found in app state. Initializing the application...")
+        initialize()
+
+        if not hasattr(app.state, "db_manager"):
+            # If still not available, raise an exception
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to initialize database manager. Please check server configuration."
+            )
+
     return app.state.db_manager
 
 # Pydantic models for API validation
@@ -162,8 +233,8 @@ def get_linkedin_driver(headless=True, force_new=False):
                 _linkedin_driver = None
 
             # Initialize LinkedIn driver with credentials from environment variables
-            email = os.environ.get('LINKEDIN_EMAIL', 'saianantula007@outlook.com')
-            password = os.environ.get('LINKEDIN_PASSWORD', 'Saikowshik@2000')
+            email = "saianantula007@outlook.com"
+            password = "Saikowshik@2000"
 
             if not email or not password:
                 raise ValueError("LinkedIn credentials not found. Set LINKEDIN_EMAIL and LINKEDIN_PASSWORD environment variables.")
@@ -224,11 +295,21 @@ async def search_jobs(
                 "jobs": []
             }
 
+        # Generate search ID
+        search_id = hashlib.md5(f"{request.keywords}|{request.location}|{str(filters)}".encode()).hexdigest()
+
+        # Save job IDs for reference
+        job_ids = [job.get('id') for job in job_listings if job.get('id')]
+
+        # Save the search results directly here rather than in a background task
+        # This avoids the thread safety issue with SQLite
+        db_manager.save_search_results(request.keywords, request.location, filters, job_listings)
 
         return {
             "message": f"Found {len(job_listings)} jobs matching your criteria",
             "count": len(job_listings),
             "duration_seconds": duration,
+            "search_id": search_id,
             "jobs": job_listings
         }
 
@@ -438,40 +519,9 @@ def shutdown_event():
     except Exception as e:
         logger.error(f"Error cleaning up resources: {e}")
 
-# Initialize function to set up application state
-def initialize(db_path="job_tracker.db", job_cache_size=1000, search_cache_size=100):
-    """Initialize the FastAPI application with required components."""
-    try:
-        # Initialize database
-        db = Database(db_path)
-        logger.info(f"Initialized database at {db_path}")
-
-        # Initialize caches
-        job_cache = JobCache(max_size=job_cache_size)
-        search_cache = SearchCache(max_size=search_cache_size)
-        logger.info(f"Initialized caches with sizes - job: {job_cache_size}, search: {search_cache_size}")
-
-        # Initialize cache manager
-        db_manager = DBCacheManager(
-            database=db,
-            job_cache=job_cache,
-            search_cache=search_cache
-        )
-        logger.info("Initialized database cache manager")
-
-        # Store in application state
-        app.state.db = db
-        app.state.job_cache = job_cache
-        app.state.search_cache = search_cache
-        app.state.db_manager = db_manager
-
-        logger.info("Application initialization complete")
-        return True
-    except Exception as e:
-        logger.error(f"Error initializing application: {e}")
-        return False
-
 # Run the server if this file is executed directly
+# Initialize the application when the module is loaded
+initialize()
 if __name__ == "__main__":
     # Initialize application
     if not initialize():
@@ -479,4 +529,9 @@ if __name__ == "__main__":
         exit(1)
 
     # Run the FastAPI app with Uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    host = os.environ.get('API_HOST', '0.0.0.0')
+    port = int(os.environ.get('API_PORT', 8000))
+    debug = os.environ.get('API_DEBUG', '').lower() in ('true', '1', 'yes')
+
+    logger.info(f"Starting API server on {host}:{port} (debug={debug})")
+    uvicorn.run(app, host=host, port=port, log_level="debug" if debug else "info")

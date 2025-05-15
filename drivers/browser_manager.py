@@ -19,7 +19,7 @@ class BrowserDriverManager:
     """
 
     _driver_instance = None
-    _cookies_dir = Path("cookies")
+    _cookies_dir = Path("../cookies")
 
     @classmethod
     def get_driver(cls, headless=True, force_new=False):

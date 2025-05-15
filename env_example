@@ -1,9 +1,9 @@
 # LinkedIn Credentials (required)
-LINKEDIN_EMAIL=your_email@example.com
-LINKEDIN_PASSWORD=your_password
+LINKEDIN_EMAIL=saianantula007@outlook.com
+LINKEDIN_PASSWORD=Saikowshik@1
 
 # API Configuration (optional)
-API_DEBUG=false
+API_DEBUG=true
 API_HOST=0.0.0.0
 API_PORT=8000
 

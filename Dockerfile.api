@@ -1,3 +1,5 @@
+
+# Dockerfile.api for JobTrak API Service
 FROM python:3.10-slim
 
 WORKDIR /app
@@ -29,5 +31,4 @@ ENV PYTHONUNBUFFERED=1 \
 # Expose the port
 EXPOSE 8000
 
-# Set the entrypoint
-CMD ["uvicorn", "api_controller:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["python", "-m", "api_controller.py"]

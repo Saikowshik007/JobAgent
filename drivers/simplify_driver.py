@@ -8,7 +8,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 
-from browser_manager import BrowserDriverManager
+from drivers.browser_manager import BrowserDriverManager
 
 # Configure logging
 logger = logging.getLogger(__name__)

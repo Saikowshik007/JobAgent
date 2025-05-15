@@ -7,7 +7,7 @@ from pathlib import Path
 from data.cache import JobCache, SearchCache
 from data.database import Database
 from data.dbcache_manager import DBCacheManager
-from linkedin_driver import LinkedInIntegration
+from drivers.linkedin_driver import LinkedInIntegration
 
 
 # Configure logging
