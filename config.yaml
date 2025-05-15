@@ -1,0 +1,110 @@
+# LinkedIn and Authentication settings
+linkedin:
+  email: saianantula007@outlook.com
+  password: Saikowshik@2000
+
+# OpenAI API settings
+openai:
+  api_key: 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
+  model: gpt-4o  # Options: gpt-4o, gpt-3.5-turbo, etc.
+
+# Personal information for applications
+personal_info:
+  phone: "+1 (470) 815-6620"
+  location: "Austin, TX"
+  website: "https://saikowshik007.github.io/"
+  github: "https://github.com/Saikowshik007/"
+  linkedin: "https://www.linkedin.com/in/ask7/"
+
+# File paths and directories
+paths:
+  resume: "resume.yaml"  # Path to your resume YAML file
+  output_dir: "output"  # Directory to save output files
+
+# Search settings
+search_parameters:
+  job_title: "Software Engineer"  # Job title to search for
+  location: "United States"  # Location to search in
+  max_jobs: 1 # Maximum number of job listings to process
+
+# Application limits
+application_limits:
+  max_applications: 5  # Maximum number of applications to submit
+  compatibility_threshold: 0.7  # Minimum compatibility score to apply
+
+# Browser settings
+browser_settings:
+  headless: false  # Run browser in headless mode
+
+# Execution settings
+execution:
+  dry_run: false  # If true, don't actually submit applications
+
+# Search filters
+search_filters:
+  experience_level:
+    - "Mid-Senior level"
+    - "Associate"
+  job_type:
+    - "Full-time"
+  date_posted: "Past Week"
+  remote: true
+  easy_apply: false
+
+# Standard application answers
+application_answers:
+  demographics:
+    gender: "Male"  # Options: "Male", "Female", "Non-binary", "Prefer not to say"
+    ethnicity: "Asian"  # E.g., "White", "Black", "Hispanic", "Asian", "Native American", "Prefer not to say"
+    veteran_status: "I am not a protected veteran"
+    disability_status: "I do not have a disability"
+
+  work_authorization:
+    authorized_to_work: true
+    require_sponsorship: false
+    citizenship_status: "U.S. Citizen"
+
+  relocation:
+    willing_to_relocate: true
+    preferred_locations:
+      - "Austin, TX"
+      - "San Francisco, CA"
+      - "Seattle, WA"
+
+  salary_expectations:
+    minimum: 110000
+    target: 135000
+
+  job_preferences:
+    remote_work: "Prefer remote"  # Options: "Remote only", "Prefer remote", "Hybrid", "On-site"
+    start_date: "2 weeks notice"
+    preferred_work_environment: "Collaborative team with opportunities for mentorship"
+
+  education:
+    highest_degree: "Master's in Computer Science"
+    graduation_year: 2023
+
+  professional:
+    years_of_experience: 3
+    leadership_experience: true
+    management_experience: false
+    programming_languages:
+      - Java
+      - Python
+      - JavaScript
+    cloud_platforms:
+      - AWS
+      - GCP
+
+  availability:
+    interview_availability: "Weekdays after 5pm EST or anytime on weekends"
+    start_date: "Available to start within 2 weeks after offer"
+
+  references:
+    provide_references: true
+    reference_stage: "Upon request at later stages of the interview process"
+
+# Cover letter preferences
+cover_letter:
+  style: "professional"  # Options: "professional", "enthusiastic", "concise", "technical"
+  include_cover_letter: true  # Set to false to skip cover letter steps when possible

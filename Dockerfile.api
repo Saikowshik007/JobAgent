@@ -1,0 +1,33 @@
+FROM python:3.10-slim
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    gnupg \
+    unzip \
+    wget \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy source code
+COPY . .
+
+# Create necessary directories
+RUN mkdir -p /app/data /app/output /app/logs
+
+# Default environment variables
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH=/app \
+    SELENIUM_REMOTE_URL=http://selenium-chrome:4444/wd/hub
+
+# Expose the port
+EXPOSE 8000
+
+# Set the entrypoint
+CMD ["uvicorn", "api_controller:app", "--host", "0.0.0.0", "--port", "8000"]

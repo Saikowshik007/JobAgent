@@ -1,0 +1,23 @@
+# LinkedIn Credentials (required)
+LINKEDIN_EMAIL=your_email@example.com
+LINKEDIN_PASSWORD=your_password
+
+# API Configuration (optional)
+API_DEBUG=false
+API_HOST=0.0.0.0
+API_PORT=8000
+
+# Selenium Configuration (optional)
+SELENIUM_REMOTE_URL=http://selenium-chrome:4444/wd/hub
+SELENIUM_HEADLESS=true
+
+# Database Configuration (optional)
+DATABASE_PATH=/app/data/job_tracker.db
+
+# Cache Configuration (optional)
+JOB_CACHE_SIZE=1000
+SEARCH_CACHE_SIZE=100
+
+# Streamlit Configuration
+OPENAI_API_KEY=your_openai_api_key
+JOBTRAK_API_URL=http://jobtrak-api:8000
