@@ -78,7 +78,7 @@ class JobSearcher:
             "Hybrid": "3"
         }
 
-    def search_jobs(
+    async def search_jobs(
             self,
             keywords: str,
             location: str,
@@ -102,7 +102,7 @@ class JobSearcher:
         """
         # Check if we can get results from database cache
         if self.db_manager:
-            cached_results = self.db_manager.get_cached_search_results(keywords, location, filters or {}, user_id)
+            cached_results = await self.db_manager.get_cached_search_results(keywords, location, filters or {}, user_id)
             if cached_results:
                 logger.info(f"Using cached results for search: {keywords} in {location} for user {user_id}")
                 return cached_results
@@ -144,11 +144,11 @@ class JobSearcher:
                     self._dump_page_for_debugging()
 
             # Collect job listings
-            job_listings = self._collect_job_listings(max_listings, scroll_pages, user_id)
+            job_listings = await self._collect_job_listings(max_listings, scroll_pages, user_id)
 
             # Save search results to database if available
             if self.db_manager and job_listings:
-                self.db_manager.save_search_results(keywords, location, filters or {}, job_listings, user_id)
+                await self.db_manager.save_search_results(keywords, location, filters or {}, job_listings, user_id)
                 logger.info(f"Saved search history for: {keywords} in {location} for user {user_id}")
 
             return job_listings
@@ -202,7 +202,7 @@ class JobSearcher:
             logger.error(f"Error applying filters via All Filters modal: {e}")
             self._dump_page_for_debugging()
 
-    def _collect_job_listings(self, max_listings: int, scroll_pages: int, user_id: str) -> List[Dict[str, Any]]:
+    async def _collect_job_listings(self, max_listings: int, scroll_pages: int, user_id: str) -> List[Dict[str, Any]]:
         """Collect job listings from search results.
 
         Args:
@@ -282,7 +282,7 @@ class JobSearcher:
                         job_url = job_link.get_attribute('href')
                         if job_url:
                             # Check if this URL is already in our tracking system
-                            if self.db_manager and self.db_manager.job_exists(job_url, user_id):
+                            if self.db_manager and await self.db_manager.job_exists(job_url, user_id):
                                 logger.debug(f"Job already exists in database for user {user_id}: {job_url}")
                                 continue
 
@@ -306,13 +306,13 @@ class JobSearcher:
         # Extract details for each job
         job_details_list = []
         for job_url in list(job_urls)[:max_listings]:
-            job_details = self.extract_job_details(job_url, user_id)
+            job_details = await self.extract_job_details(job_url, user_id)
             job_details['status']=JobStatus.NEW
             if job_details:
                 if self.db_manager:
                     # Convert to Job object
                     job_obj = self._convert_to_job_object(job_details)
-                    self.db_manager.save_job(job_obj, user_id)
+                    await  self.db_manager.save_job(job_obj, user_id)
 
                 job_details_list.append(job_details)
 
@@ -336,7 +336,7 @@ class JobSearcher:
         except Exception as e:
             logger.warning(f"Failed to dump debug info: {e}")
 
-    def extract_job_details(self, job_url: str, user_id: str) -> Optional[Dict[str, Any]]:
+    async def extract_job_details(self, job_url: str, user_id: str) -> Optional[Dict[str, Any]]:
         """Extract details from a job posting.
 
         Args:
@@ -348,9 +348,9 @@ class JobSearcher:
         """
         # Check if job exists in database
         if self.db_manager:
-            existing_job_id = self.db_manager.job_exists(job_url, user_id)
+            existing_job_id = await self.db_manager.job_exists(job_url, user_id)
             if existing_job_id:
-                job = self.db_manager.get_job(existing_job_id, user_id)
+                job = await self.db_manager.get_job(existing_job_id, user_id)
                 if job:
                     logger.info(f"Job retrieved from database for user {user_id}: {job_url}")
                     return job
@@ -645,7 +645,7 @@ class JobSearcher:
             # Save to database if available
             if self.db_manager:
                 job_obj = self._convert_to_job_object(job_details)
-                self.db_manager.save_job(job_obj, user_id)
+                await self.db_manager.save_job(job_obj, user_id)
 
             return job_details
 

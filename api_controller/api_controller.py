@@ -125,7 +125,8 @@ def get_db_manager():
     return app.state.db_manager
 
 # Dependency to get user_id from header or use default
-async def get_user_id(x_user_id: Optional[str] = Header(None)):
+# Change the parameter name to match HTTP convention
+async def get_user_id(x_user_id: Optional[str] = Header(None, alias="X_user_id")):
     """Get user_id from header or use default if not provided."""
     if not x_user_id:
         logger.warning("No user_id provided in header, using default")
@@ -251,7 +252,7 @@ async def search_jobs(
         if request.filters:
             filters = {k: v for k, v in request.filters.dict().items() if v is not None}
 
-        job_listings = job_searcher.search_jobs(
+        job_listings = await job_searcher.search_jobs(
             keywords=request.keywords,
             location=request.location,
             user_id=user_id,
@@ -276,7 +277,7 @@ async def search_jobs(
         # Save job IDs for reference
         job_ids = [job.get('id') for job in job_listings if job.get('id')]
 
-        db_manager.save_search_results(request.keywords, request.location, filters, job_listings, user_id)
+        await db_manager.save_search_results(request.keywords, request.location, filters, job_listings, user_id)
 
         return {
             "message": f"Found {len(job_listings)} jobs matching your criteria",

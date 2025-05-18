@@ -30,7 +30,7 @@ class DBCacheManager:
         self.job_cache = job_cache
         self.search_cache = search_cache
 
-    def get_cached_search_results(self, keywords: str, location: str, filters: Dict[str, Any], user_id: str) -> List[Dict[str, Any]]:
+    async def get_cached_search_results(self, keywords: str, location: str, filters: Dict[str, Any], user_id: str) -> List[Dict[str, Any]]:
         """
         Get search results from cache or database.
         Implementation of the method expected by JobSearcher.
@@ -75,7 +75,7 @@ class DBCacheManager:
         # If not in memory cache or incomplete, try database
         if self.db:
             try:
-                db_results = self.db.get_cached_search_results(keywords, location, filters, user_id)
+                db_results = await self.db.get_cached_search_results(keywords, location, filters, user_id)
                 if db_results:
                     # Update in-memory caches with these results
                     if self.search_cache:
@@ -97,8 +97,8 @@ class DBCacheManager:
         # No results found in either cache
         return []
 
-    def save_search_results(self, keywords: str, location: str, filters: Dict[str, Any],
-                            job_listings: List[Dict[str, Any]], user_id: str) -> bool:
+    async def save_search_results(self, keywords: str, location: str, filters: Dict[str, Any],
+                                  job_listings: List[Dict[str, Any]], user_id: str) -> bool:
         """
         Save search results to both database and in-memory cache.
 
@@ -130,13 +130,13 @@ class DBCacheManager:
                     from dataModels.data_models import Job
                     try:
                         job = Job.from_dict(job_dict)
-                        self.db.save_job(job, user_id)
+                        await self.db.save_job(job, user_id)
                     except Exception as e:
                         logger.error(f"Error saving job to database for user {user_id}: {e}")
                         success = False
 
                 # Then save the search history
-                success = success and self.db.save_search_history(keywords, location, filters, job_ids, user_id, search_id)
+                success = success and await self.db.save_search_history(keywords, location, filters, job_ids, user_id, search_id)
             except Exception as e:
                 logger.error(f"Error saving search history to database for user {user_id}: {e}")
                 success = False
@@ -163,7 +163,7 @@ class DBCacheManager:
 
         return success
 
-    def job_exists(self, url: str, user_id: str) -> Optional[str]:
+    async def job_exists(self, url: str, user_id: str) -> Optional[str]:
         """
         Check if a job with the given URL exists in cache or database.
 
@@ -183,13 +183,13 @@ class DBCacheManager:
         # If not in memory cache, try database
         if self.db:
             try:
-                return self.db.job_exists(url, user_id)
+                return await self.db.job_exists(url, user_id)
             except Exception as e:
                 logger.error(f"Error checking if job exists in database for user {user_id}: {e}")
 
         return None
 
-    def get_job(self, job_id: str, user_id: str) -> Optional[Dict[str, Any]]:
+    async def get_job(self, job_id: str, user_id: str) -> Optional[Dict[str, Any]]:
         """
         Get a job by ID from cache or database.
 
@@ -209,7 +209,7 @@ class DBCacheManager:
         # If not in memory cache, try database
         if self.db:
             try:
-                job = self.db.get_job(job_id, user_id)
+                job = await self.db.get_job(job_id, user_id)
                 if job:
                     # Update cache with this job
                     if self.job_cache:
@@ -220,7 +220,7 @@ class DBCacheManager:
 
         return None
 
-    def save_job(self, job, user_id: str) -> bool:
+    async def save_job(self, job, user_id: str) -> bool:
         """
         Save a job to both database and cache.
 
@@ -236,7 +236,7 @@ class DBCacheManager:
         # Save to database
         if self.db:
             try:
-                success = self.db.save_job(job, user_id)
+                success = await self.db.save_job(job, user_id)
             except Exception as e:
                 logger.error(f"Error saving job to database for user {user_id}: {e}")
                 success = False
