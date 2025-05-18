@@ -1,6 +1,6 @@
 import logging
 import json
-import yaml
+from config import config
 import datetime
 from pathlib import Path
 
@@ -17,45 +17,17 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-def load_config(config_file="config.yaml"):
-    """Load configuration from YAML file."""
-    try:
-        with open(config_file, 'r') as f:
-            config = yaml.safe_load(f)
-        logger.info(f"Configuration loaded successfully from {config_file}")
-        return config
-    except Exception as e:
-        logger.error(f"Error loading configuration: {e}")
-        return None
-
-def validate_config(config):
-    """Validate configuration has required fields."""
-    required_fields = [
-        "linkedin",
-        "search_parameters",
-        "paths",
-        "browser_settings"
-    ]
-
-    for field in required_fields:
-        if field not in config:
-            logger.error(f"Missing required configuration field: {field}")
-            return False
-
-    logger.info("Configuration validation successful")
-    return True
-
-def setup_output_dir(config):
+def setup_output_dir():
     """Create output directory if it doesn't exist."""
-    output_dir = Path(config["paths"]["output_dir"])
+    output_dir = Path(config.get("paths.output_dir"))
     output_dir.mkdir(parents=True, exist_ok=True)
     return output_dir
 
-def search_jobs(config):
+def search_jobs():
     """Search for jobs based on configuration."""
     # Initialize the LinkedIn driver with credentials from config
-    linkedin_config = config["linkedin"]
-    browser_config = config["browser_settings"]
+    linkedin_config = config.get("credentials.linkedin")
+    browser_config = config.get("selenium")
 
     try:
         linkedin_driver = LinkedInIntegration(
@@ -68,7 +40,7 @@ def search_jobs(config):
         if not linkedin_driver.login():
             logger.error("Failed to log in to LinkedIn")
             return None
-        db = Database("job_tracker.db")
+        db = Database(config.get("database.path"))
         job_cache = JobCache()
         search_cache = SearchCache()
 
@@ -126,17 +98,11 @@ def search_jobs(config):
 
 def main():
     """Main function to run the job search."""
-    # Load and validate configuration
-    config = load_config()
-    if not config or not validate_config(config):
-        logger.error("Invalid configuration. Exiting.")
-        return
-
     # Create output directory
-    output_dir = setup_output_dir(config)
+    output_dir = setup_output_dir()
 
     # Search for jobs
-    job_listings = search_jobs(config)
+    job_listings = search_jobs()
 
     if not job_listings:
         logger.error("No job listings found. Exiting.")

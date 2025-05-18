@@ -11,6 +11,10 @@ from datetime import datetime
 import uvicorn
 from dotenv import load_dotenv
 
+import config
+from dataModels.api_models import JobSearchRequest, JobStatusUpdateRequest, GenerateResumeRequest, \
+    UploadToSimplifyRequest
+
 # Load environment variables from .env file if it exists
 load_dotenv()
 
@@ -19,16 +23,16 @@ if os.environ.get('SELENIUM_REMOTE_URL'):
     pass
 
 from data.database import Database
-from job_searcher import JobSearcher
+from drivers.job_searcher import JobSearcher
 from drivers.linkedin_driver import LinkedInIntegration
 from drivers.browser_manager import BrowserDriverManager
-from data_models import JobStatus
+from dataModels.data_models import JobStatus
 from data.dbcache_manager import DBCacheManager
 from data.cache import JobCache, SearchCache
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO if not os.environ.get('API_DEBUG') else logging.DEBUG,
+    level=config.get("api.level"),
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
@@ -60,13 +64,14 @@ def initialize(db_path=None, job_cache_size=None, search_cache_size=None):
     try:
         # Get configuration from environment variables if not provided
         if db_path is None:
-            db_path = os.environ.get('DATABASE_PATH', 'job_tracker.db')
+            db_path = config.get("database.path")
 
         if job_cache_size is None:
-            job_cache_size = int(os.environ.get('JOB_CACHE_SIZE', 1000))
+            job_cache_size = int(config.get("cache.job_cache_size",1000))
 
         if search_cache_size is None:
-            search_cache_size = int(os.environ.get('SEARCH_CACHE_SIZE', 100))
+            search_cache_size = int(config.get("cache.search"
+                                               "_cache_size",1000))
 
         # Create data directory if it doesn't exist
         os.makedirs(os.path.dirname(db_path) if '/' in db_path else '.', exist_ok=True)
@@ -119,49 +124,6 @@ def get_db_manager():
             )
 
     return app.state.db_manager
-
-# Pydantic models for API validation
-class JobStatusEnum(str, Enum):
-    """Enum for job status values matching the JobStatus class."""
-    NEW = "NEW"
-    INTERESTED = "INTERESTED"
-    RESUME_GENERATED = "RESUME_GENERATED"
-    APPLIED = "APPLIED"
-    REJECTED = "REJECTED"
-    INTERVIEW = "INTERVIEW"
-    OFFER = "OFFER"
-    DECLINED = "DECLINED"
-
-class FilterOptions(BaseModel):
-    """Search filter options."""
-    experience_level: Optional[List[str]] = None
-    job_type: Optional[List[str]] = None
-    date_posted: Optional[str] = None
-    workplace_type: Optional[List[str]] = None
-    easy_apply: Optional[bool] = None
-
-class JobSearchRequest(BaseModel):
-    """Job search request model."""
-    keywords: str = Field(..., description="Job title or keywords")
-    location: str = Field(..., description="Job location")
-    filters: Optional[FilterOptions] = Field(default_factory=FilterOptions, description="Search filters")
-    max_jobs: Optional[int] = Field(default=20, description="Maximum number of jobs to return")
-    headless: Optional[bool] = Field(default=True, description="Run browser in headless mode")
-
-class JobStatusUpdateRequest(BaseModel):
-    """Job status update request model."""
-    status: JobStatusEnum = Field(..., description="New job status")
-
-class GenerateResumeRequest(BaseModel):
-    """Resume generation request model."""
-    job_id: str = Field(..., description="ID of the job to generate resume for")
-    template: Optional[str] = Field("standard", description="Resume template to use")
-    customize: Optional[bool] = Field(True, description="Whether to customize resume for the job")
-
-class UploadToSimplifyRequest(BaseModel):
-    """Resume upload to Simplify request model."""
-    job_id: str = Field(..., description="ID of the job")
-    resume_id: Optional[str] = None
 
 # System status endpoint
 @app.get("/api/status", tags=["System"])
@@ -217,7 +179,6 @@ async def get_system_status(db_manager: DBCacheManager = Depends(get_db_manager)
         logger.error(f"Error getting system status: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-# Initialize or get LinkedIn driver
 def get_linkedin_driver(headless=True, force_new=False):
     """Initialize LinkedIn driver if not already initialized."""
     global _linkedin_driver
@@ -233,8 +194,8 @@ def get_linkedin_driver(headless=True, force_new=False):
                 _linkedin_driver = None
 
             # Initialize LinkedIn driver with credentials from environment variables
-            email = "saianantula007@outlook.com"
-            password = "Saikowshik@2000"
+            email = config.get("credentials.linkedin.email")
+            password = config.get("credentials.linkedin.password")
 
             if not email or not password:
                 raise ValueError("LinkedIn credentials not found. Set LINKEDIN_EMAIL and LINKEDIN_PASSWORD environment variables.")
@@ -301,8 +262,6 @@ async def search_jobs(
         # Save job IDs for reference
         job_ids = [job.get('id') for job in job_listings if job.get('id')]
 
-        # Save the search results directly here rather than in a background task
-        # This avoids the thread safety issue with SQLite
         db_manager.save_search_results(request.keywords, request.location, filters, job_listings)
 
         return {

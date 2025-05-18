@@ -85,7 +85,7 @@ class DBCacheManager:
                     if self.job_cache:
                         for job_dict in db_results:
                             # Convert dict to Job object
-                            from data_models import Job
+                            from dataModels.data_models import Job
                             job = Job.from_dict(job_dict)
                             self.job_cache.add_job(job)
 
@@ -125,7 +125,7 @@ class DBCacheManager:
                 # Save individual jobs first to ensure they exist
                 for job_dict in job_listings:
                     # Convert dict to Job object
-                    from data_models import Job
+                    from dataModels.data_models import Job
                     try:
                         job = Job.from_dict(job_dict)
                         self.db.save_job(job)
@@ -148,7 +148,7 @@ class DBCacheManager:
             if self.job_cache:
                 for job_dict in job_listings:
                     # Convert dict to Job object
-                    from data_models import Job
+                    from dataModels.data_models import Job
                     try:
                         job = Job.from_dict(job_dict)
                         self.job_cache.add_job(job)

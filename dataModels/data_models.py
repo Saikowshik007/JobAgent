@@ -28,7 +28,8 @@ class Job:
         company: str,
         location: str,
         description: str,
-        url: str,
+        linkedin_url: str,
+        job_url:Optional[str]= None,
         status: Union[JobStatus, str] = JobStatus.NEW,
         date_found: Optional[datetime] = None,
         applied_date: Optional[datetime] = None,
@@ -45,7 +46,8 @@ class Job:
             company: Company name
             location: Job location
             description: Job description
-            url: URL to the job posting
+            linkedin_url: URL to the job posting
+            job_url: URL for website
             status: Current status of the job application
             date_found: Date the job was found
             applied_date: Date applied to the job
@@ -58,7 +60,8 @@ class Job:
         self.company = company
         self.location = location
         self.description = description
-        self.url = url
+        self.linkedin_url = linkedin_url
+        self.job_url = job_url
         
         # Convert string status to enum if needed
         if isinstance(status, str):
@@ -83,7 +86,8 @@ class Job:
             "company": self.company,
             "location": self.location,
             "description": self.description,
-            "url": self.url,
+            "linkedin_url": self.linkedin_url,
+            "job_url": self.job_url,
             "status": str(self.status),
             "date_found": self.date_found.isoformat() if self.date_found else None,
             "applied_date": self.applied_date.isoformat() if self.applied_date else None,
@@ -106,7 +110,8 @@ class Job:
             company=data["company"],
             location=data["location"],
             description=data["description"],
-            url=data["url"],
+            linkedin_url=data["linkedin_url"],
+            job_url=data["job_url"],
             status=data["status"],
             date_found=date_found,
             applied_date=applied_date,

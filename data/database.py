@@ -6,7 +6,7 @@ from datetime import datetime
 import sqlite3
 import uuid
 
-from data_models import Job, Resume, SearchHistory, JobStatus
+from dataModels.data_models import Job, Resume, SearchHistory, JobStatus
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -78,7 +78,8 @@ class Database:
                 company TEXT NOT NULL,
                 location TEXT NOT NULL,
                 description TEXT,
-                url TEXT NOT NULL,
+                linkedin_url TEXT NOT NULL,
+                job_url TEXT NOT NULL,
                 status TEXT NOT NULL,
                 date_found TEXT,
                 applied_date TEXT,
@@ -169,26 +170,27 @@ class Database:
                 cursor.execute('''
                 UPDATE jobs
                 SET title = ?, company = ?, location = ?, description = ?,
-                    url = ?, status = ?, date_found = ?, applied_date = ?,
+                    linkedin_url = ?, job_url = ?, status = ?, date_found = ?, applied_date = ?,
                     rejected_date = ?, resume_id = ?, metadata = ?
                 WHERE id = ?
                 ''', (
                     job_dict["title"], job_dict["company"], job_dict["location"],
-                    job_dict["description"], job_dict["url"], job_dict["status"],
+                    job_dict["description"], job_dict["linkedin_url"], job_dict["job_url"], job_dict["status"],
                     job_dict["date_found"], job_dict["applied_date"], job_dict["rejected_date"],
                     job_dict["resume_id"], job_dict["metadata"], job_dict["id"]
                 ))
                 logger.info(f"Updated job: {job_dict['id']}")
             else:
+                logger.error(f"error:{job.to_dict()}")
                 # Insert new job
                 cursor.execute('''
                 INSERT INTO jobs (id, title, company, location, description,
-                                 url, status, date_found, applied_date,
+                                 linkedin_url, job_url, status, date_found, applied_date,
                                  rejected_date, resume_id, metadata)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (
                     job_dict["id"], job_dict["title"], job_dict["company"],
-                    job_dict["location"], job_dict["description"], job_dict["url"],
+                    job_dict["location"], job_dict["description"], job_dict["linkedin_url"], job_dict["job_url"],
                     job_dict["status"], job_dict["date_found"], job_dict["applied_date"],
                     job_dict["rejected_date"], job_dict["resume_id"], job_dict["metadata"]
                 ))
@@ -340,7 +342,7 @@ class Database:
             conn = self.get_connection()
             cursor = conn.cursor()
 
-            cursor.execute("SELECT id FROM jobs WHERE url = ?", (url,))
+            cursor.execute("SELECT id FROM jobs WHERE linkedin_url = ?", (url,))
             row = cursor.fetchone()
 
             if row:

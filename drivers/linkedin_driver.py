@@ -206,7 +206,7 @@ class LinkedInIntegration:
             return None
 
         try:
-            from job_searcher import JobSearcher
+            from drivers.job_searcher import JobSearcher
             # Initialize the JobSearcher with self as the driver
             job_searcher = JobSearcher(self,dbm)
             return job_searcher

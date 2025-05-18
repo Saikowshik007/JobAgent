@@ -5,8 +5,6 @@ import pickle
 from pathlib import Path
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service
-from typing import Optional, Dict, Any
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -16,6 +14,8 @@ class BrowserDriverManager:
     Manage shared browser driver instances and cookies.
     This singleton class helps avoid multiple browser instances while managing
     cookies for different services to maintain sessions.
+
+    This version is optimized for Docker environments using Selenium Grid.
     """
 
     _driver_instance = None
@@ -24,7 +24,7 @@ class BrowserDriverManager:
     @classmethod
     def get_driver(cls, headless=True, force_new=False):
         """
-        Get a shared WebDriver instance.
+        Get a shared WebDriver instance connected to Selenium Grid.
 
         Args:
             headless: Whether to run browser in headless mode
@@ -51,23 +51,24 @@ class BrowserDriverManager:
                 chrome_options.add_argument("--disable-notifications")
                 chrome_options.add_argument("--start-maximized")
 
-                # Add options that might help avoid detection
+                # Add options that help avoid detection
                 chrome_options.add_argument("--disable-blink-features=AutomationControlled")
                 chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
                 chrome_options.add_experimental_option("useAutomationExtension", False)
 
                 # Set a more realistic user agent
-                chrome_options.add_argument(f"user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+                chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 
-                # Initialize WebDriver
-                try:
-                    service = Service('/usr/local/bin/chromedriver')
-                    driver = webdriver.Chrome(service=service, options=chrome_options)
-                except:
-                    # Fall back to automatic installation
-                    from webdriver_manager.chrome import ChromeDriverManager
-                    service = Service(ChromeDriverManager().install())
-                    driver = webdriver.Chrome(service=service, options=chrome_options)
+                # Get the remote URL from environment variable with a fallback
+                remote_url = os.environ.get('SELENIUM_REMOTE_URL', 'http://selenium-chrome:4444/wd/hub')
+
+                logger.info(f"Connecting to Selenium Grid at {remote_url}")
+
+                # Initialize Remote WebDriver
+                driver = webdriver.Remote(
+                    command_executor=remote_url,
+                    options=chrome_options
+                )
 
                 # Execute CDP commands to prevent detection
                 driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
@@ -79,13 +80,13 @@ class BrowserDriverManager:
                 })
 
                 cls._driver_instance = driver
-                logger.info("Created new WebDriver instance")
+                logger.info("Successfully connected to Selenium Grid")
 
                 # Create cookies directory if it doesn't exist
                 cls._cookies_dir.mkdir(exist_ok=True)
 
             except Exception as e:
-                logger.error(f"Failed to initialize WebDriver: {e}")
+                logger.error(f"Failed to connect to Selenium Grid: {e}")
                 raise
 
         return cls._driver_instance
@@ -96,9 +97,9 @@ class BrowserDriverManager:
         if cls._driver_instance:
             try:
                 cls._driver_instance.quit()
-                logger.info("WebDriver closed successfully")
+                logger.info("WebDriver session closed successfully")
             except Exception as e:
-                logger.error(f"Error closing WebDriver: {e}")
+                logger.error(f"Error closing WebDriver session: {e}")
             finally:
                 cls._driver_instance = None
 

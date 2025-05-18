@@ -1,11 +1,10 @@
 import hashlib
 import logging
 import json
-from typing import Dict, List, Optional, Any, Set, Tuple
-from functools import lru_cache
+from typing import Dict, List, Optional, Any
 from datetime import datetime, timedelta
 
-from data_models import Job, Resume, SearchHistory
+from dataModels.data_models import Job, Resume
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -57,8 +56,8 @@ class JobCache:
         self.job_cache[job.id] = job
         
         # Add URL mapping
-        if job.url:
-            self.url_to_id[job.url] = job.id
+        if job.linkedin_url:
+            self.url_to_id[job.linkedin_url] = job.id
         
         # Add signature mapping (for fuzzy matching)
         signature = self._generate_job_signature(job)

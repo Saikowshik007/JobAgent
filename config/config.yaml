@@ -1,0 +1,62 @@
+# LinkedIn Credentials
+credentials:
+  linkedin:
+    email: saianantula007@outlook.com
+    password: Saikowshik@2000
+  openai:
+    api_key: your_openai_api_key
+
+# API Configuration
+api:
+  level: INFO
+  host: 0.0.0.0
+  port: 8000
+  jobtrack_url: http://jobtrak-api:8000
+
+# Selenium Configuration
+selenium:
+  remote_url: http://selenium-chrome:4444/wd/hub
+  headless: true
+
+# Database Configuration
+database:
+  path: /app/database/job_tracker.db
+
+# Cache Configuration
+cache:
+  job_cache_size: 1000
+  search_cache_size: 100
+
+# Model Configuration
+model:
+  provider: openai
+  name: gpt-4o-mini
+  temperature: 0.5
+
+# Project Paths
+paths:
+  project: /app
+  resume: /app/resume
+  data: /app/data
+  resources: /app/resources
+  prompts: /app/prompts
+  config: /app/config
+  output_dir: output
+  background_tasks_log: /app/data/background_tasks/tasks.log
+
+# Default Files
+files:
+  default_resume: resume.yaml
+  prompts_yaml: /app/prompts/prompts.yaml
+  descriptions_yaml: /app/prompts/extractor_descriptions.yaml
+
+# Application Settings
+settings:
+  max_concurrent_workers: 4
+  max_retries: 3
+  backoff_factor: 5
+  open_file_command: notepad
+
+# Request Headers
+request_headers:
+  user_agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/70.0.3538.102 Safari/537.36 Edge/18.19582

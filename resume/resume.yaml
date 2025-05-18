@@ -1,0 +1,154 @@
+editing: true
+debug: false
+basic:
+  name: Sai Kowshik Ananthula
+  address: Austin, TX
+  email: askowshik@outlook.com
+  phone: +1 (470)-815-6620
+  websites:
+    - https://linkedin.com/in/ask7
+    - https://saikowshik007.github.io
+
+objective: A highly skilled Software Engineer with expertise in cloud computing, cybersecurity, and full-stack development. Proven track record in developing and optimizing enterprise-level applications, implementing cloud solutions, and enhancing system performance. Proficient in Java, Python, AWS, and various development frameworks with a strong focus on scalable and secure solutions.
+
+education:
+  - school: Georgia State University
+    degrees:
+      - names:
+          - M.S. Computer Science
+        gpa: 3.9
+        dates: August 2021-May 2023
+  - school: GITAM University
+    degrees:
+      - names:
+          - B.S. Computer Science
+        dates: June 2017-May 2021
+        gpa: 3.9
+
+experiences:
+  - company: International Business Machines (IBM)
+    skip_name: false
+    location: Austin, TX
+    titles:
+      - name: Software Engineer (Cloud and Cyber security products)
+        startdate: January 2024
+        enddate: Present
+    highlights:
+      - Led end-to-end development of mission-critical Digital Badge system projected to save $16M annually, architecting and implementing scalable backend services that transformed physical access management for 350K+ IBM employees
+      - Designed and implemented high-performance REST APIs and database schemas using PostgreSQL/MSSQL, achieving 99.99% uptime and <100ms latency through optimized query patterns and connection pooling
+      - Engineered secure authentication system using TLS 1.2 and WebSphere, enabling seamless integration with enterprise identity providers while maintaining SOC2 compliance
+      - Spearheaded cross-functional collaboration with external clients, gathering requirements and delivering technical presentations to C-level stakeholders
+      - Architected and deployed critical upgrade of IBM MaaS360 VPN infrastructure serving Fortune 500 clients (NASA, Pfizer), achieving 20% performance improvement through low-level network optimization while maintaining zero-downtime deployment
+      - Engineered distributed real-time notification system leveraging AWS IoT Core and Apache Kafka, reducing end-to-end latency by 30% (500ms to 350ms) while handling 1M+ daily events
+      - Optimized distributed system performance by implementing shared subscription patterns and load balancing, resulting in 50% reduction in message processing overhead and improved system resilience
+      - Led migration to OpenShift Container Platform across US and India teams, implementing automated testing and CI/CD pipelines that reduced deployment times by 60% and system downtime by 40%
+  - company: Global Payments Inc
+    skip_name: false
+    location: Columbus, GA
+    titles:
+      - name: Software Engineer
+        startdate: January 2023
+        enddate: December 2023
+    highlights:
+      - Spearheaded the development of enterprise-level applications using Java and Spring Boot, resulting in a 50% increase in system efficiency. Successfully implemented RESTful web services, improving data processing speed by 30%.
+      - Engineered a highly efficient, low latency client transaction pipeline system utilizing Airflow, Kubernetes, Kafka, and Docker; achieved 60% increase in batch-processing efficiency, leading to better productivity and faster transactions.
+      - Architected and launched back-end API and front-end UI using Java, React JS, Spring Boot, EC2, S3, and REST API in AWS, Elevated scalability and robustness of the mainframe pipeline by 80%.
+      - Pioneered the development of dynamic and responsive user interfaces using React JS, contributing to a 50% reduction in page load times and a 35% increase in user engagement metrics.
+      - Developed POJOs and DAOs for 80+ database entities using Spring JDBC and MyBatis, optimizing backend connectivity and performance within a Controller-Service layered architecture.
+      - Implemented CI/CD pipelines using Jenkins, which accelerated deployment cycles by 40% and improved code integration efficiency. Facilitated the deployment of applications on AWS, achieving a 20% less operational costs and a 30% increase in deployment speed.
+      - Utilized AWS technologies (EC2, S3, Lambda) to enhance system resilience by 50% and reduce operational costs by 30%. Achieved a 40% faster deployment speed, showcasing proficiency in cloud-based solutions.
+
+  - company: Georgia State University
+    skip_name: false
+    location: Atlanta, GA
+    titles:
+      - name: Graduate Software Engineer (Research)
+        startdate: August 2021
+        enddate: December 2022
+    highlights:
+      - Conducted experiments to enhance scalable automobile safety using object detection and IoT sensors, resulting in a 30% reduction in overall system power using Python, JavaScript, SQL, and Java.
+      - Innovated a collision detection algorithm that performed 80% more adeptly than current models and published an IEEE paper on visual light communication, generating 1.6 million in revenue for M.O.R.S.E studio development.
+      - Developed a Python script to automate assignment management, reducing evaluation time by 95% using REST API.
+
+  - company: Global Payments Inc
+    skip_name: false
+    location: Atlanta, GA
+    titles:
+      - name: Software Engineer Intern
+        startdate: June 2022
+        enddate: August 2022
+    highlights:
+      - Developed and optimized the Correspondence API leveraging Java and Spring framework, resulting in 40% reduction in account lookup time for client users and improved overall system response, following Agile Scrum development sprints.
+      - Engineered REST APIs by Spring Boot and Java features Collections Framework, Exception Handling, I/O System, Multi-Threading, and JDBC, resulting in 60% system efficiency and integration with external services.
+      - Constructed Spring components such as Controller, Validator, Resource Mapping using annotations to handle requests, built custom view templates, and devised Unit and Integration tests leveraging JUnit and Mockitos.
+      - Led problem-solving initiatives for complex full-stack projects, resolving over 95% of critical bugs within deadlines. Minimized downtime and maintained high standards of software quality and reliability.
+
+projects:
+  - name: GSU IoT ThingsBoard | Kafka, Python, AWS
+    technologies: Python, Flutter, Raspberry Pi, PostgreSQL, Kafka, Rest API
+    link: https://www.github.com/username/project
+    hyperlink: false
+    show_link: false
+    highlights:
+      - Built a scalable IoT platform processing 1M+ daily sensor readings, improving data ingestion efficiency by 70% (1s to 0.3s/request).
+
+  - name: Smart Parking System | Java, Design Patterns
+    technologies: DEVS Java, Gradle, Git, design patterns
+    link: https://www.github.com/username/project
+    hyperlink: False
+    show_link: False
+    highlights:
+      - Reduced parking wait times by 40% using queue optimization and Abstract Factory pattern, improving space utilization by 60%.
+
+  - name: Database Hits Optimizer | Python, Redis, MongoDB
+    technologies: Python, MongoDB, Redis, SQL, NoSQL
+    link: https://www.github.com/username/project
+    hyperlink: False
+    show_link: False
+    highlights:
+      - Reduced database hits by 60% (from 10k/day to 4k/day) using a hybrid Redis-MongoDB caching layer, cutting query latency by 80% (200ms to 40ms).
+
+skills:
+  - category: Technical
+    skills:
+      - Java
+      - Python
+      - JavaScript
+      - SQL
+      - CSS
+      - HTML
+      - Oracle
+      - PostgreSQL
+      - Redis
+      - MySQL
+      - MongoDB
+      - Spring Boot
+      - REST API
+      - React.js
+      - Airflow
+      - Flutter
+      - AWS
+      - Lambda
+      - Kafka
+      - Spark
+      - Docker
+      - Jenkins
+      - Git
+      - Maven
+      - GCP
+      - JUnit
+      - Mockito
+      - Postman
+      - SoapUI
+      - Gradle
+  - category: Non-technical
+    skills:
+      - Agile Methodologies
+      - Project Management
+      - Team Leadership
+      - Problem Solving
+      - Technical Documentation
+      - Code Review
+      - SDLC
+      - Product Engineering
+      - Cross-functional Collaboration

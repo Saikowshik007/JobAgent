@@ -8,13 +8,15 @@ services:
       dockerfile: Dockerfile.api
     ports:
       - "8000:8000"
+      - "5678:5678"  # Debug port for remote debugging
     volumes:
       - .:/app
-      - ./data:/app/data
-    environment:
-      - LINKEDIN_EMAIL=${LINKEDIN_EMAIL}
-      - LINKEDIN_PASSWORD=${LINKEDIN_PASSWORD}
+      - ./database:/app/database
     restart: unless-stopped
+    environment:
+      - PYTHONPATH=/app
+      - PYTHONUNBUFFERED=1
+      - SELENIUM_REMOTE_URL=http://selenium-chrome:4444/wd/hub
     healthcheck:
       test: ["CMD", "curl", "--fail", "http://localhost:8000/api/status"]
       interval: 30s
@@ -22,6 +24,8 @@ services:
       retries: 3
     depends_on:
       - selenium-chrome
+    # Command to run with debugger enabled
+    command: ["python", "-m", "debugpy", "--listen", "0.0.0.0:5678", "-m", "api_controller.api_controller"]
 
   # Selenium Chrome service for web automation
   selenium-chrome:

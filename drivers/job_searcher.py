@@ -3,14 +3,15 @@ from typing import Dict, List, Optional, Any
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import NoSuchElementException, TimeoutException, ElementNotInteractableException
+from selenium.common.exceptions import NoSuchElementException, TimeoutException
 import time
 import uuid
 import hashlib
 from datetime import datetime
+import re
 
 from selenium.webdriver.support.wait import WebDriverWait
-from data_models import Job, JobStatus
+from dataModels.data_models import Job, JobStatus
 
 logger = logging.getLogger(__name__)
 
@@ -305,7 +306,6 @@ class JobSearcher:
             job_details = self.extract_job_details(job_url)
             job_details['status']=JobStatus.NEW
             if job_details:
-                # Save job to database if available
                 if self.db_manager:
                     # Convert to Job object
                     job_obj = self._convert_to_job_object(job_details)
@@ -374,14 +374,52 @@ class JobSearcher:
             ]
             company_name = self._get_text_by_selectors(company_selectors, "Unknown Company")
 
-            # Extract location
-            location_selectors = [
-                "//span[contains(@class, 'job-location')]",
-                "//span[contains(@class, 'location')]",
-                "//span[contains(@class, 'topcard__flavor--bullet')]",
-                "//span[contains(@class, 'workplace-type')]"
+            # NEW: Extract tertiary description data (location, date posted, applicants)
+            tertiary_container_selectors = [
+                "//div[contains(@class, 'job-details-jobs-unified-top-card__tertiary-description-container')]",
+                "//div[contains(@class, 'tertiary-description-container')]",
+                "//div[contains(@class, 't-black--light mt2')]"
             ]
-            location = self._get_text_by_selectors(location_selectors, "Unknown Location")
+
+            # Initialize with default values
+            location = "Unknown Location"
+            date_posted = ""
+            applicants_count = ""
+
+            # Try to extract from tertiary container
+            tertiary_container = self._get_element_by_selectors(tertiary_container_selectors)
+            if tertiary_container:
+                # Get all text spans in the container
+                spans = tertiary_container.find_elements(By.XPATH, ".//span[contains(@class, 'tvm__text')]")
+
+                for span in spans:
+                    span_text = span.text.strip()
+
+                    # Skip empty spans or separators
+                    if not span_text or span_text == "·" or span_text == " ":
+                        continue
+
+                    # Check if this is a location (usually contains comma or city/state pattern)
+                    if "," in span_text or any(state in span_text for state in [" CA", " NY", " TX", " FL", " IL"]):
+                        location = span_text
+                    # Check if this is a date posted (contains 'ago')
+                    elif "ago" in span_text.lower():
+                        date_posted = span_text
+                    # Check if this is applicant count (contains 'applicant')
+                    elif "applicant" in span_text.lower():
+                        applicants_count = span_text
+
+            # If we couldn't extract location from tertiary container, try fallback methods
+            if location == "Unknown Location":
+                location_selectors = [
+                    "//span[contains(@class, 'job-location')]",
+                    "//span[contains(@class, 'location')]",
+                    "//span[contains(@class, 'topcard__flavor--bullet')]",
+                    "//span[contains(@class, 'workplace-type')]"
+                ]
+                fallback_location = self._get_text_by_selectors(location_selectors)
+                if fallback_location:
+                    location = fallback_location
 
             # Extract job description
             description_selectors = [
@@ -433,6 +471,12 @@ class JobSearcher:
             except NoSuchElementException:
                 pass
 
+            # Add new extracted data to metadata
+            if date_posted:
+                metadata["date_posted"] = date_posted
+            if applicants_count:
+                metadata["applicants_count"] = applicants_count
+
             # Check if it's an Easy Apply job
             try:
                 easy_apply_selectors = [
@@ -444,6 +488,137 @@ class JobSearcher:
             except NoSuchElementException:
                 is_easy_apply = False
 
+            # Store the original LinkedIn URL
+            linkedin_url = job_url
+            external_url = None
+
+            # Check for external apply button and try multiple methods to get the external URL
+            external_url = None
+
+            try:
+                # Method 1: Try to find direct href or data attributes on apply button or surrounding elements
+                apply_button_selectors = [
+                    "//button[@id='jobs-apply-button-id']",
+                    "//button[contains(@class, 'jobs-apply-button')]",
+                    "//a[contains(@class, 'jobs-apply-button')]",
+                    "//div[contains(@class, 'jobs-apply-button--top-card')]//button",
+                    "//button[contains(., 'Apply') and not(contains(., 'on company site'))]"
+                ]
+
+                for selector in apply_button_selectors:
+                    try:
+                        apply_button = self.driver.driver.find_element(By.XPATH, selector)
+                        if apply_button:
+                            # Check for href attribute (rare but possible)
+                            href = apply_button.get_attribute('href')
+                            if href and href.startswith(('http://', 'https://')):
+                                external_url = href
+                                logger.info(f"Found external URL from href attribute: {external_url}")
+                                break
+
+                            # Check for data attributes that might contain URL
+                            for attr in ['data-url', 'data-apply-url', 'data-redirect-url']:
+                                url_attr = apply_button.get_attribute(attr)
+                                if url_attr and url_attr.startswith(('http://', 'https://')):
+                                    external_url = url_attr
+                                    logger.info(f"Found external URL from {attr}: {external_url}")
+                                    break
+
+                            # If we found a URL from any attribute, break the outer loop
+                            if external_url:
+                                break
+
+                            # Store button for fallback method
+                            external_apply_button = apply_button
+                    except NoSuchElementException:
+                        continue
+
+                # Method 2: Look for parent elements with metadata about the external link
+                if not external_url:
+                    try:
+                        # Look for data in the page source that might contain application URL
+                        page_source = self.driver.driver.page_source
+                        # Common patterns in LinkedIn's hidden data
+                        url_patterns = [
+                            r'applyUrl":"(https?://[^"]+)"',
+                            r'companyApplyUrl":"(https?://[^"]+)"',
+                            r'externalApplyUrl":"(https?://[^"]+)"',
+                            r'redirectUrl":"(https?://[^"]+)"'
+                        ]
+
+                        for pattern in url_patterns:
+                            matches = re.search(pattern, page_source)
+                            if matches:
+                                external_url = matches.group(1)
+                                # Replace escaped characters
+                                external_url = external_url.replace('\\u002F', '/').replace('\\/', '/')
+                                logger.info(f"Found external URL from page source: {external_url}")
+                                break
+                    except Exception as e:
+                        logger.warning(f"Error searching for URL in page source: {e}")
+
+                # Method 3 (Fallback): Click button and get URL from new tab
+                if not external_url and 'external_apply_button' in locals() and external_apply_button:
+                    logger.info("Using fallback method: clicking apply button to extract URL")
+
+                    # Store the current window handle
+                    main_window = self.driver.driver.current_window_handle
+
+                    # Click the button (it will likely open in a new tab)
+                    self.driver.driver.execute_script("arguments[0].click();", external_apply_button)
+                    self.driver.random_delay(2)  # Wait for new tab to open
+
+                    # Wait for new window and switch to it
+                    wait_time = 0
+                    max_wait = 5  # seconds
+                    while len(self.driver.driver.window_handles) <= 1 and wait_time < max_wait:
+                        time.sleep(0.5)
+                        wait_time += 0.5
+
+                    if len(self.driver.driver.window_handles) > 1:
+                        # Find a window that's not the main window
+                        for handle in self.driver.driver.window_handles:
+                            if handle != main_window:
+                                try:
+                                    # Switch to the new window and get the URL
+                                    self.driver.driver.switch_to.window(handle)
+                                    external_url = self.driver.driver.current_url
+
+                                    # Make sure we got a valid URL
+                                    if external_url and external_url.startswith(('http://', 'https://')) and 'linkedin.com' not in external_url:
+                                        logger.info(f"Found external job URL from new tab: {external_url}")
+                                    else:
+                                        # If the URL is still LinkedIn, it probably didn't redirect properly
+                                        external_url = None
+                                        logger.warning("New tab URL is still on LinkedIn, not a valid external URL")
+
+                                    # Close the new tab
+                                    self.driver.driver.close()
+                                except Exception as e:
+                                    logger.warning(f"Error handling new tab: {e}")
+                                    try:
+                                        self.driver.driver.close()
+                                    except:
+                                        pass
+                                finally:
+                                    # Always switch back to the main window
+                                    self.driver.driver.switch_to.window(main_window)
+                                break
+                    else:
+                        logger.warning("No new window opened after clicking the apply button")
+
+            except Exception as e:
+                logger.warning(f"Error trying to get external job URL: {e}")
+                # Make sure we're back on the main window
+                try:
+                    if 'main_window' in locals():
+                        self.driver.driver.switch_to.window(main_window)
+                except Exception:
+                    pass
+
+            # Use the external URL if we got one, otherwise use the LinkedIn URL
+            job_url_to_use = external_url if external_url else linkedin_url
+
             # Generate a unique ID for this job based on URL
             job_id = hashlib.md5(job_url.encode()).hexdigest()
 
@@ -453,7 +628,8 @@ class JobSearcher:
                 "company": company_name,
                 "location": location,
                 "description": job_description,
-                "url": job_url,
+                "linkedin_url": linkedin_url,  # Always keep the original LinkedIn URL
+                "job_url": job_url_to_use,     # Use external URL when available
                 "is_easy_apply": is_easy_apply,
                 "metadata": metadata,
                 "date_found": datetime.now().isoformat()
@@ -491,6 +667,24 @@ class JobSearcher:
             except NoSuchElementException:
                 continue
         return default_value
+
+    def _get_element_by_selectors(self, selectors: List[str]) -> Optional[Any]:
+        """Try multiple XPath selectors and return the first element that works.
+
+        Args:
+            selectors: List of XPath selectors to try
+
+        Returns:
+            The first element found, or None if no element found
+        """
+        for selector in selectors:
+            try:
+                element = self.driver.driver.find_element(By.XPATH, selector)
+                if element:
+                    return element
+            except NoSuchElementException:
+                continue
+        return None
 
     def _element_exists(self, selectors: List[str]) -> bool:
         """Check if any of the elements specified by the selectors exists.
@@ -536,7 +730,8 @@ class JobSearcher:
             company=job_details.get("company", "Unknown Company"),
             location=job_details.get("location", "Unknown Location"),
             description=job_details.get("description", ""),
-            url=job_details.get("url", ""),
+            linkedin_url=job_details.get("linkedin_url", ""),
+            job_url=job_details.get("job_url", ""),
             status=JobStatus.NEW,
             date_found=date_found,
             metadata=job_details.get("metadata", {})
