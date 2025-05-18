@@ -82,6 +82,7 @@ class JobSearcher:
             self,
             keywords: str,
             location: str,
+            user_id: str,
             filters: Dict[str, Any] = None,
             max_listings: int = 50,
             scroll_pages: int = 3
@@ -91,6 +92,7 @@ class JobSearcher:
         Args:
             keywords: Job title or keywords
             location: Job location
+            user_id: ID of the user who is performing the search
             filters: Additional filters like experience level, job type, etc.
             max_listings: Maximum number of job listings to return
             scroll_pages: Number of pages to scroll through
@@ -100,9 +102,9 @@ class JobSearcher:
         """
         # Check if we can get results from database cache
         if self.db_manager:
-            cached_results = self.db_manager.get_cached_search_results(keywords, location, filters or {})
+            cached_results = self.db_manager.get_cached_search_results(keywords, location, filters or {}, user_id)
             if cached_results:
-                logger.info(f"Using cached results for search: {keywords} in {location}")
+                logger.info(f"Using cached results for search: {keywords} in {location} for user {user_id}")
                 return cached_results
 
         # Clear session cache for new search
@@ -142,17 +144,17 @@ class JobSearcher:
                     self._dump_page_for_debugging()
 
             # Collect job listings
-            job_listings = self._collect_job_listings(max_listings, scroll_pages)
+            job_listings = self._collect_job_listings(max_listings, scroll_pages, user_id)
 
             # Save search results to database if available
             if self.db_manager and job_listings:
-                self.db_manager.save_search_results(keywords, location, filters or {}, job_listings)
-                logger.info(f"Saved search history for: {keywords} in {location}")
+                self.db_manager.save_search_results(keywords, location, filters or {}, job_listings, user_id)
+                logger.info(f"Saved search history for: {keywords} in {location} for user {user_id}")
 
             return job_listings
 
         except Exception as e:
-            logger.error(f"Job search failed: {e}")
+            logger.error(f"Job search failed for user {user_id}: {e}")
             self._dump_page_for_debugging()
             return []
 
@@ -200,12 +202,13 @@ class JobSearcher:
             logger.error(f"Error applying filters via All Filters modal: {e}")
             self._dump_page_for_debugging()
 
-    def _collect_job_listings(self, max_listings: int, scroll_pages: int) -> List[Dict[str, Any]]:
+    def _collect_job_listings(self, max_listings: int, scroll_pages: int, user_id: str) -> List[Dict[str, Any]]:
         """Collect job listings from search results.
 
         Args:
             max_listings: Maximum number of job listings to collect
             scroll_pages: Number of pages to scroll through
+            user_id: ID of the user who is performing the search
 
         Returns:
             List of job details dictionaries
@@ -279,8 +282,8 @@ class JobSearcher:
                         job_url = job_link.get_attribute('href')
                         if job_url:
                             # Check if this URL is already in our tracking system
-                            if self.db_manager and self.db_manager.job_exists(job_url):
-                                logger.debug(f"Job already exists in database: {job_url}")
+                            if self.db_manager and self.db_manager.job_exists(job_url, user_id):
+                                logger.debug(f"Job already exists in database for user {user_id}: {job_url}")
                                 continue
 
                             # Check if we've already seen this URL in this session
@@ -303,17 +306,17 @@ class JobSearcher:
         # Extract details for each job
         job_details_list = []
         for job_url in list(job_urls)[:max_listings]:
-            job_details = self.extract_job_details(job_url)
+            job_details = self.extract_job_details(job_url, user_id)
             job_details['status']=JobStatus.NEW
             if job_details:
                 if self.db_manager:
                     # Convert to Job object
                     job_obj = self._convert_to_job_object(job_details)
-                    self.db_manager.save_job(job_obj)
+                    self.db_manager.save_job(job_obj, user_id)
 
                 job_details_list.append(job_details)
 
-        logger.info(f"Found {len(job_details_list)} jobs matching search criteria")
+        logger.info(f"Found {len(job_details_list)} jobs matching search criteria for user {user_id}")
         return job_details_list
 
     def _dump_page_for_debugging(self):
@@ -333,23 +336,24 @@ class JobSearcher:
         except Exception as e:
             logger.warning(f"Failed to dump debug info: {e}")
 
-    def extract_job_details(self, job_url: str) -> Optional[Dict[str, Any]]:
+    def extract_job_details(self, job_url: str, user_id: str) -> Optional[Dict[str, Any]]:
         """Extract details from a job posting.
 
         Args:
             job_url: URL of the job posting
+            user_id: ID of the user who is viewing the job
 
         Returns:
             Dictionary containing job details or None if extraction fails
         """
         # Check if job exists in database
         if self.db_manager:
-            existing_job_id = self.db_manager.job_exists(job_url)
+            existing_job_id = self.db_manager.job_exists(job_url, user_id)
             if existing_job_id:
-                job = self.db_manager.get_job(existing_job_id)
+                job = self.db_manager.get_job(existing_job_id, user_id)
                 if job:
-                    logger.info(f"Job retrieved from database: {job_url}")
-                    return job.to_dict()
+                    logger.info(f"Job retrieved from database for user {user_id}: {job_url}")
+                    return job
 
         try:
             self.driver.driver.get(job_url)
@@ -635,18 +639,18 @@ class JobSearcher:
                 "date_found": datetime.now().isoformat()
             }
 
-            logger.info(f"Extracted job details for: {job_title} at {company_name}")
+            logger.info(f"Extracted job details for user {user_id}: {job_title} at {company_name}")
             self.jobs_viewed += 1
 
             # Save to database if available
             if self.db_manager:
                 job_obj = self._convert_to_job_object(job_details)
-                self.db_manager.save_job(job_obj)
+                self.db_manager.save_job(job_obj, user_id)
 
             return job_details
 
         except Exception as e:
-            logger.error(f"Failed to extract job details: {e}")
+            logger.error(f"Failed to extract job details for user {user_id}: {e}")
             return None
 
     def _get_text_by_selectors(self, selectors: List[str], default_value: str = "") -> str:

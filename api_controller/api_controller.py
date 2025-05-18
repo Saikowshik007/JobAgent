@@ -1,12 +1,10 @@
-from fastapi import FastAPI, HTTPException, Depends, Query, BackgroundTasks
+from fastapi import FastAPI, HTTPException, Depends, Query, BackgroundTasks, Header
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
 from typing import List, Optional
 import logging
 import os
 import time
 import hashlib
-from enum import Enum
 from datetime import datetime
 import uvicorn
 from dotenv import load_dotenv
@@ -53,7 +51,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
+# Default user ID if none provided
+DEFAULT_USER_ID = "default_user"
 
 # Global LinkedIn driver instance - initialized when needed
 _linkedin_driver = None
@@ -125,9 +124,20 @@ def get_db_manager():
 
     return app.state.db_manager
 
+# Dependency to get user_id from header or use default
+async def get_user_id(x_user_id: Optional[str] = Header(None)):
+    """Get user_id from header or use default if not provided."""
+    if not x_user_id:
+        logger.warning("No user_id provided in header, using default")
+        return DEFAULT_USER_ID
+    return x_user_id
+
 # System status endpoint
 @app.get("/api/status", tags=["System"])
-async def get_system_status(db_manager: DBCacheManager = Depends(get_db_manager)):
+async def get_system_status(
+        db_manager: DBCacheManager = Depends(get_db_manager),
+        user_id: str = Depends(get_user_id)
+):
     """Get the overall status of the job tracking system."""
     try:
         # Check database connection
@@ -138,15 +148,15 @@ async def get_system_status(db_manager: DBCacheManager = Depends(get_db_manager)
 
         try:
             if db:
-                job_count = len(db.get_all_jobs())
+                job_count = len(await db.get_all_jobs(user_id))
                 job_stats = {
                     "total": job_count,
-                    "new": len(db.get_all_jobs(status=JobStatus.NEW)),
-                    "interested": len(db.get_all_jobs(status=JobStatus.INTERESTED)),
-                    "applied": len(db.get_all_jobs(status=JobStatus.APPLIED)),
-                    "interviews": len(db.get_all_jobs(status=JobStatus.INTERVIEW)),
-                    "offers": len(db.get_all_jobs(status=JobStatus.OFFER)),
-                    "rejected": len(db.get_all_jobs(status=JobStatus.REJECTED))
+                    "new": len(await db.get_all_jobs(user_id, status=JobStatus.NEW)),
+                    "interested": len(await db.get_all_jobs(user_id, status=JobStatus.INTERESTED)),
+                    "applied": len(await db.get_all_jobs(user_id, status=JobStatus.APPLIED)),
+                    "interviews": len(await db.get_all_jobs(user_id, status=JobStatus.INTERVIEW)),
+                    "offers": len(await db.get_all_jobs(user_id, status=JobStatus.OFFER)),
+                    "rejected": len(await db.get_all_jobs(user_id, status=JobStatus.REJECTED))
                 }
         except Exception as e:
             db_status = f"Error: {str(e)}"
@@ -169,6 +179,7 @@ async def get_system_status(db_manager: DBCacheManager = Depends(get_db_manager)
         return {
             "status": "online",
             "timestamp": datetime.now().isoformat(),
+            "user_id": user_id,
             "components": {
                 "database": db_status,
                 "linkedin": linkedin_status
@@ -176,7 +187,7 @@ async def get_system_status(db_manager: DBCacheManager = Depends(get_db_manager)
             "job_stats": job_stats
         }
     except Exception as e:
-        logger.error(f"Error getting system status: {e}")
+        logger.error(f"Error getting system status for user {user_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 def get_linkedin_driver(headless=True, force_new=False):
@@ -220,7 +231,8 @@ def get_linkedin_driver(headless=True, force_new=False):
 async def search_jobs(
         request: JobSearchRequest,
         background_tasks: BackgroundTasks,
-        db_manager: DBCacheManager = Depends(get_db_manager)
+        db_manager: DBCacheManager = Depends(get_db_manager),
+        user_id: str = Depends(get_user_id)
 ):
     """Search for jobs on LinkedIn based on provided criteria."""
     try:
@@ -231,7 +243,7 @@ async def search_jobs(
         job_searcher = JobSearcher(linkedin_driver, db_manager=db_manager)
 
         # Perform job search
-        logger.info(f"Searching for jobs: {request.keywords} in {request.location}")
+        logger.info(f"Searching for jobs: {request.keywords} in {request.location} for user {user_id}")
         start_time = time.time()
 
         # Extract filters from request
@@ -242,6 +254,7 @@ async def search_jobs(
         job_listings = job_searcher.search_jobs(
             keywords=request.keywords,
             location=request.location,
+            user_id=user_id,
             filters=filters,
             max_listings=request.max_jobs
         )
@@ -253,27 +266,29 @@ async def search_jobs(
                 "message": "No jobs found matching your criteria",
                 "count": 0,
                 "duration_seconds": duration,
+                "user_id": user_id,
                 "jobs": []
             }
 
         # Generate search ID
-        search_id = hashlib.md5(f"{request.keywords}|{request.location}|{str(filters)}".encode()).hexdigest()
+        search_id = hashlib.md5(f"{user_id}|{request.keywords}|{request.location}|{str(filters)}".encode()).hexdigest()
 
         # Save job IDs for reference
         job_ids = [job.get('id') for job in job_listings if job.get('id')]
 
-        db_manager.save_search_results(request.keywords, request.location, filters, job_listings)
+        db_manager.save_search_results(request.keywords, request.location, filters, job_listings, user_id)
 
         return {
             "message": f"Found {len(job_listings)} jobs matching your criteria",
             "count": len(job_listings),
             "duration_seconds": duration,
             "search_id": search_id,
+            "user_id": user_id,
             "jobs": job_listings
         }
 
     except Exception as e:
-        logger.error(f"Error searching for jobs: {e}")
+        logger.error(f"Error searching for jobs for user {user_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # Get jobs endpoint
@@ -283,14 +298,15 @@ async def get_jobs(
         company: Optional[str] = None,
         limit: int = Query(100, ge=1, le=1000),
         offset: int = Query(0, ge=0),
-        db_manager: DBCacheManager = Depends(get_db_manager)
+        db_manager: DBCacheManager = Depends(get_db_manager),
+        user_id: str = Depends(get_user_id)
 ):
     """Get jobs from the database with optional filtering."""
     try:
         db = db_manager.db
 
-        # Get all jobs first
-        jobs = db.get_all_jobs(status=status if status else None)
+        # Get all jobs for this user
+        jobs = await db.get_all_jobs(user_id, status=status if status else None)
 
         # Apply additional filters
         if company:
@@ -310,33 +326,35 @@ async def get_jobs(
             "total": total_count,
             "offset": offset,
             "limit": limit,
+            "user_id": user_id,
             "jobs": jobs_dict
         }
 
     except Exception as e:
-        logger.error(f"Error getting jobs: {e}")
+        logger.error(f"Error getting jobs for user {user_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # Get specific job endpoint
 @app.get("/api/jobs/{job_id}", tags=["Jobs"])
 async def get_job(
         job_id: str,
-        db_manager: DBCacheManager = Depends(get_db_manager)
+        db_manager: DBCacheManager = Depends(get_db_manager),
+        user_id: str = Depends(get_user_id)
 ):
     """Get a specific job by ID."""
     try:
         db = db_manager.db
-        job = db.get_job(job_id)
+        job = await db.get_job(job_id, user_id)
 
         if not job:
-            raise HTTPException(status_code=404, detail=f"Job not found with ID: {job_id}")
+            raise HTTPException(status_code=404, detail=f"Job not found with ID: {job_id} for user: {user_id}")
 
         return job.to_dict()
 
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error getting job {job_id}: {e}")
+        logger.error(f"Error getting job {job_id} for user {user_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # Update job status endpoint
@@ -344,7 +362,8 @@ async def get_job(
 async def update_job_status(
         job_id: str,
         request: JobStatusUpdateRequest,
-        db_manager: DBCacheManager = Depends(get_db_manager)
+        db_manager: DBCacheManager = Depends(get_db_manager),
+        user_id: str = Depends(get_user_id)
 ):
     """Update the status of a job."""
     try:
@@ -362,33 +381,35 @@ async def update_job_status(
                 detail=f"Invalid status value: {status}. Valid values are: {valid_statuses}"
             )
 
-        success = db.update_job_status(job_id, status_enum)
+        success = await db.update_job_status(job_id, user_id, status_enum)
 
         if not success:
             raise HTTPException(
                 status_code=404,
-                detail=f"Failed to update job status. Job may not exist: {job_id}"
+                detail=f"Failed to update job status. Job may not exist: {job_id} for user: {user_id}"
             )
 
         # Get the updated job
-        job = db.get_job(job_id)
+        job = await db.get_job(job_id, user_id)
 
         return {
             "message": f"Job status updated to {status}",
+            "user_id": user_id,
             "job": job.to_dict() if job else None
         }
 
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error updating job status for {job_id}: {e}")
+        logger.error(f"Error updating job status for {job_id} for user {user_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # Generate resume endpoint (placeholder, to be implemented later)
 @app.post("/api/resume/generate", tags=["Resume"])
 async def generate_resume(
         request: GenerateResumeRequest,
-        db_manager: DBCacheManager = Depends(get_db_manager)
+        db_manager: DBCacheManager = Depends(get_db_manager),
+        user_id: str = Depends(get_user_id)
 ):
     """Generate a tailored resume for a specific job."""
     # This is a placeholder - you'll implement the actual resume generation later
@@ -396,14 +417,15 @@ async def generate_resume(
         db = db_manager.db
 
         # Check if job exists
-        job = db.get_job(request.job_id)
+        job = await db.get_job(request.job_id, user_id)
         if not job:
-            raise HTTPException(status_code=404, detail=f"Job not found with ID: {request.job_id}")
+            raise HTTPException(status_code=404, detail=f"Job not found with ID: {request.job_id} for user: {user_id}")
 
         # Placeholder response
         return {
             "message": "Resume generation functionality will be implemented in a future update",
             "job_id": request.job_id,
+            "user_id": user_id,
             "template": request.template,
             "customize": request.customize,
             "job": job.to_dict()
@@ -412,14 +434,15 @@ async def generate_resume(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error generating resume for job {request.job_id}: {e}")
+        logger.error(f"Error generating resume for job {request.job_id} for user {user_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # Upload to Simplify endpoint (placeholder, to be implemented later)
 @app.post("/api/resume/upload-to-simplify", tags=["Resume"])
 async def upload_to_simplify(
         request: UploadToSimplifyRequest,
-        db_manager: DBCacheManager = Depends(get_db_manager)
+        db_manager: DBCacheManager = Depends(get_db_manager),
+        user_id: str = Depends(get_user_id)
 ):
     """Upload a resume to Simplify.jobs."""
     # This is a placeholder - you'll implement the actual Simplify integration later
@@ -427,24 +450,25 @@ async def upload_to_simplify(
         db = db_manager.db
 
         # Check if job exists
-        job = db.get_job(request.job_id)
+        job = await db.get_job(request.job_id, user_id)
         if not job:
-            raise HTTPException(status_code=404, detail=f"Job not found with ID: {request.job_id}")
+            raise HTTPException(status_code=404, detail=f"Job not found with ID: {request.job_id} for user: {user_id}")
 
         # Check if resume exists
         resume_id = request.resume_id or job.resume_id
         if not resume_id:
             raise HTTPException(status_code=400, detail="No resume ID provided or associated with this job")
 
-        resume = db.get_resume(resume_id)
+        resume = await db.get_resume(resume_id, user_id)
         if not resume:
-            raise HTTPException(status_code=404, detail=f"Resume not found with ID: {resume_id}")
+            raise HTTPException(status_code=404, detail=f"Resume not found with ID: {resume_id} for user: {user_id}")
 
         # Placeholder response
         return {
             "message": "Simplify.jobs upload functionality will be implemented in a future update",
             "job_id": request.job_id,
             "resume_id": resume_id,
+            "user_id": user_id,
             "job": job.to_dict(),
             "resume": resume.to_dict()
         }
@@ -452,7 +476,7 @@ async def upload_to_simplify(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error uploading resume to Simplify for job {request.job_id}: {e}")
+        logger.error(f"Error uploading resume to Simplify for job {request.job_id} for user {user_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # Shutdown event - clean up resources
@@ -478,8 +502,6 @@ def shutdown_event():
     except Exception as e:
         logger.error(f"Error cleaning up resources: {e}")
 
-# Run the server if this file is executed directly
-# Initialize the application when the module is loaded
 initialize()
 if __name__ == "__main__":
     # Initialize application
