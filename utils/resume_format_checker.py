@@ -215,7 +215,7 @@ def check_resume_format(yaml_file_path: str) -> bool:
             if issues["incorrect"]:
                 for sub_key, actual_type, expected_type in issues["incorrect"]:
                     logger_error+=f"The value for '{sub_key}' in the '{main_key}' section is of type '{actual_type}'. \nExpected type: '{expected_type}'. Make sure it is formatted like this example:\n\n```yaml\n{example_snippet}\n```"
-        config.logger.error(logger_error)
+        config.getLogger("resume_format_checker").error(logger_error)
         return False
     else:
         return True

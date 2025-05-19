@@ -47,12 +47,12 @@ DEBUG_STYLE = ("GRID", (0, 0), (-1, -1), 0, colors.black)
 
 PAGE_WIDTH, PAGE_HEIGHT = A4
 FULL_COLUMN_WIDTH = PAGE_WIDTH - 1 * inch
-JSON_PATH = os.path.join(config.DATA_PATH, "data.json")
+JSON_PATH = os.path.join(config.get("paths.data"), "data.json")
 
 FONT_PATHS = {
-    "regular": os.path.join(config.RESOURCES_PATH, "fonts/calibri.ttf"),
-    "bold": os.path.join(config.RESOURCES_PATH, "fonts/calibrib.ttf"),
-    "italic": os.path.join(config.RESOURCES_PATH, "fonts/calibrii.ttf"),
+    "regular": os.path.join(config.get("paths.resources"), "fonts/calibri.ttf"),
+    "bold": os.path.join(config.get("paths.resources"), "fonts/calibrib.ttf"),
+    "italic": os.path.join(config.get("paths.resources"), "fonts/calibrii.ttf"),
 }
 FONT_NAMES = {
     "regular": "FONT_Regular",

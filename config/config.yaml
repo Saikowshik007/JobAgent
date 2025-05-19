@@ -37,7 +37,7 @@ model:
 paths:
   project: /app
   resume: /app/resume
-  data: /app/data
+  data: /app/output/data
   resources: /app/resources
   prompts: /app/prompts
   config: /app/config
@@ -46,7 +46,7 @@ paths:
 
 # Default Files
 files:
-  default_resume: resume.yaml
+  default_resume: resume/resume.yaml
   prompts_yaml: /app/prompts/prompts.yaml
   descriptions_yaml: /app/prompts/extractor_descriptions.yaml
 

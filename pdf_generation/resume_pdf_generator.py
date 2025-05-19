@@ -21,6 +21,8 @@ from reportlab.platypus import (
     Spacer,
     HRFlowable,
 )
+
+from utils import yaml_handler
 from . import resume_pdf_styles
 
 
@@ -506,5 +508,5 @@ class ResumePDFGenerator:
             job_data_location (str): The path where the PDF will be saved.
         """
         return self.generate_resume(
-            job_data_location, utils.read_yaml(filename=yaml_path)
+            job_data_location, yaml_handler.read_yaml(filename=yaml_path)
         )

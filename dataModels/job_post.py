@@ -3,6 +3,7 @@ from typing import List, Optional
 from prompts.prompts import Prompts
 import config
 import services
+from langchain_openai import ChatOpenAI
 
 Prompts.initialize()
 
@@ -47,14 +48,15 @@ class JobDescription(BaseModel):
 
 
 class JobPost:
-    def __init__(self, posting: str):
+    def __init__(self, posting: str, api_key:str):
         """Initialize JobPost with the job posting string."""
         self.posting = posting
         self.extractor_llm = services.langchain_helpers.create_llm(
-            chat_model=config.CHAT_MODEL,
-            model_name=config.MODEL_NAME,
-            temperature=config.TEMPERATURE,
+            chat_model=ChatOpenAI,
+            model_name=config.get("model.name"),
+            temperature=config.config.get("model.temperature"),
             cache=True,
+            api_key=api_key
         )
         self.parsed_job = None
 

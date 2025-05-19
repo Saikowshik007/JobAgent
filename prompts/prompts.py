@@ -17,8 +17,8 @@ class Prompts:
         """
         Initialize the Prompts class by loading the YAML files and setting up the lookup dictionary.
         """
-        cls.lookup = cls._load_prompts(config.PROMPTS_YAML)
-        cls.descriptions = cls._load_descriptions(config.DESCRIPTIONS_YAML)
+        cls.lookup = cls._load_prompts(config.get("files.prompts_yaml"))
+        cls.descriptions = cls._load_descriptions(config.get("files.descriptions_yaml"))
 
     @staticmethod
     def _load_prompts(yaml_path: str) -> dict:

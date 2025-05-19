@@ -1,7 +1,5 @@
-import os
 from typing import Union, List, Generator, Optional
 import config
-import utils
 
 
 def read_jobfile(filename: str) -> str:
@@ -18,12 +16,12 @@ def read_jobfile(filename: str) -> str:
         with open(filename, "r") as stream:
             return stream.read().strip()
     except OSError as e:
-        config.logger.error(f"The {filename} could not be read.")
+        config.getLogger("file_handler").error(f"The {filename} could not be read.")
         raise e
 
 
 def generator_key_in_nested_dict(
-    keys: Union[str, List[str]], nested_dict: dict
+        keys: Union[str, List[str]], nested_dict: dict
 ) -> Generator:
     """
     Generates values for specified keys in a nested dictionary.
@@ -40,10 +38,12 @@ def generator_key_in_nested_dict(
             if (isinstance(keys, list) and key in keys) or key == keys:
                 yield value
             if isinstance(value, dict):
-                yield from utils.generator_key_in_nested_dict(keys, value)
+                # Don't use utils. prefix for a function in the same module
+                yield from generator_key_in_nested_dict(keys, value)
             elif isinstance(value, list):
                 for item in value:
-                    yield from utils.generator_key_in_nested_dict(keys, item)
+                    # Don't use utils. prefix for a function in the same module
+                    yield from generator_key_in_nested_dict(keys, item)
 
 
 def get_dict_field(field: str, data_dict: dict) -> Optional[dict]:
@@ -61,5 +61,5 @@ def get_dict_field(field: str, data_dict: dict) -> Optional[dict]:
         return data_dict[field]
     except KeyError as e:
         message = f"`{field}` is missing in raw resume."
-        config.logger.warning(message)
+        config.getLogger("file_handler").warning(message)
     return None

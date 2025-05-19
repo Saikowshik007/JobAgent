@@ -1,39 +1,31 @@
 import os
-import time
 import subprocess
-from datetime import datetime
-import streamlit as st
 from typing import List, Optional
 
-import streamlit
 from bs4 import BeautifulSoup
-import uuid
 import requests
 from langchain.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnableSequence
-from langchain_core.output_parsers import StrOutputParser
-from models.resume import (
+from dataModels.resume import (
     ResumeImproverOutput,
     ResumeSkillsMatcherOutput,
     ResumeSummarizerOutput,
     ResumeSectionHighlighterOutput,
 )
-import utils
-import config
 from services.langchain_helpers import *
 from prompts import Prompts
-from models.job_post import JobPost
+from dataModels.job_post import JobPost
 from pdf_generation import ResumePDFGenerator
-import concurrent.futures
 from fp.fp import FreeProxy
 import time
 from config import config
 from services.background_runner import BackgroundRunner
+from utils import resume_format_checker, yaml_handler, file_handler
 
-
+logger = config.getLogger("ResumeImprover")
 class ResumeImprover:
 
-    def __init__(self, url, resume_location=None, llm_kwargs: dict = None):
+    def __init__(self, url, api_key, resume_location=None, llm_kwargs: dict = None):
         """Initialize ResumeImprover with the job post URL and optional resume location.
 
         Args:
@@ -49,28 +41,29 @@ class ResumeImprover:
         self.job_post = None
         self.parsed_job = None
         self.llm_kwargs = llm_kwargs or {}
+        self.api_key = api_key
         self.editing = False
         self.clean_url = None
         self.job_data_location = None
         self.yaml_loc = None
         self.url = url
         self.download_and_parse_job_post()
-        self.resume_location = resume_location or config.DEFAULT_RESUME_PATH
+        self.resume_location = resume_location or config.get("paths.resume")
         self._update_resume_fields()
 
     def _update_resume_fields(self):
         """Update the resume fields based on the current resume location."""
-        utils.check_resume_format(self.resume_location)
-        self.resume = utils.read_yaml(filename=self.resume_location)
+        resume_format_checker.check_resume_format(self.resume_location)
+        self.resume = yaml_handler.read_yaml(filename=self.resume_location)
         self.degrees = self._get_degrees(self.resume)
-        self.basic_info = utils.get_dict_field(field="basic", data_dict=self.resume)
-        self.education = utils.get_dict_field(field="education", data_dict=self.resume)
-        self.experiences = utils.get_dict_field(
+        self.basic_info = file_handler.get_dict_field(field="basic", data_dict=self.resume)
+        self.education = file_handler.get_dict_field(field="education", data_dict=self.resume)
+        self.experiences = file_handler.get_dict_field(
             field="experiences", data_dict=self.resume
         )
-        self.projects = utils.get_dict_field(field="projects", data_dict=self.resume)
-        self.skills = utils.get_dict_field(field="skills", data_dict=self.resume)
-        self.objective = utils.get_dict_field(field="objective", data_dict=self.resume)
+        self.projects = file_handler.get_dict_field(field="projects", data_dict=self.resume)
+        self.skills = file_handler.get_dict_field(field="skills", data_dict=self.resume)
+        self.objective = file_handler.get_dict_field(field="objective", data_dict=self.resume)
 
     def update_resume(self, new_resume_location):
         """Update the resume location and refresh the dependent fields.
@@ -91,7 +84,7 @@ class ResumeImprover:
             soup = BeautifulSoup(self.job_post_html_data, "html.parser")
             self.job_post_raw = soup.get_text(separator=" ", strip=True)
         except Exception as e:
-            config.logger.error(f"Failed to extract HTML data: {e}")
+            logger.error(f"Failed to extract HTML data: {e}")
             raise
 
     def _download_url(self, url=None):
@@ -106,8 +99,8 @@ class ResumeImprover:
         if url:
             self.url = url
 
-        max_retries = config.MAX_RETRIES
-        backoff_factor = config.BACKOFF_FACTOR
+        max_retries = config.get("settings.max_retries")
+        backoff_factor = config.get("settings.backoff_factor")
         use_proxy = False
 
         for attempt in range(max_retries):
@@ -118,7 +111,7 @@ class ResumeImprover:
                     proxies = {"http": proxy, "https": proxy}
 
                 response = requests.get(
-                    self.url, headers=config.REQUESTS_HEADERS, proxies=proxies
+                    self.url, headers=config.get("request_headers"), proxies=proxies
                 )
                 response.raise_for_status()
                 self.job_post_html_data = response.text
@@ -126,16 +119,16 @@ class ResumeImprover:
 
             except requests.RequestException as e:
                 if response.status_code == 429:
-                    config.logger.warning(
+                    logger.warning(
                         f"Rate limit exceeded. Retrying in {backoff_factor * 2 ** attempt} seconds..."
                     )
                     time.sleep(backoff_factor * 2**attempt)
                     use_proxy = True
                 else:
-                    config.logger.error(f"Failed to download URL {self.url}: {e}")
+                    logger.error(f"Failed to download URL {self.url}: {e}")
                     return False
 
-        config.logger.error(f"Exceeded maximum retries for URL {self.url}")
+        logger.error(f"Exceeded maximum retries for URL {self.url}")
         return False
 
     def download_and_parse_job_post(self, url=None):
@@ -148,7 +141,7 @@ class ResumeImprover:
             self.url = url
         self._download_url()
         self._extract_html_data()
-        self.job_post = JobPost(self.job_post_raw)
+        self.job_post = JobPost(self.job_post_raw, self.api_key)
         self.parsed_job = self.job_post.parse_job_post(verbose=False)
         try:
             filename = self.parsed_job["company"] + "_" + self.parsed_job["job_title"]
@@ -163,10 +156,10 @@ class ResumeImprover:
             if len(url_paths) > 1:
                 filename = filename + "." + url_paths[-1]
         self.clean_url = filename
-        filepath = os.path.join(config.DATA_PATH, self.clean_url)
+        filepath = os.path.join(config.get("paths.data"), self.clean_url)
         self.job_data_location = filepath
         os.makedirs(self.job_data_location, exist_ok=True)
-        utils.write_yaml(
+        yaml_handler.write_yaml(
             self.parsed_job, filename=os.path.join(self.job_data_location, "job.yaml")
         )
 
@@ -178,7 +171,7 @@ class ResumeImprover:
         """
         self.job_post_html_data = raw_html
         self._extract_html_data()
-        self.job_post = JobPost(self.job_post_raw)
+        self.job_post = JobPost(self.job_post_raw,self.api_key)
         self.parsed_job = self.job_post.parse_job_post(verbose=False)
         try:
             filename = self.parsed_job["company"] + "_" + self.parsed_job["job_title"]
@@ -193,16 +186,15 @@ class ResumeImprover:
             if len(url_paths) > 1:
                 filename = filename + "." + url_paths[-1]
         self.clean_url = filename
-        filepath = os.path.join(config.DATA_PATH, self.clean_url)
+        filepath = os.path.join(config.get("paths.data"), self.clean_url)
         self.job_data_location = filepath
         os.makedirs(self.job_data_location, exist_ok=True)
-        utils.write_yaml(
+        yaml_handler.write_yaml(
             self.parsed_job, filename=os.path.join(self.job_data_location, "job.yaml")
         )
-        st.session_state.resume_improver["job_description"] = self.parsed_job
 
     def create_draft_tailored_resume(
-        self, auto_open=True, manual_review=True, skip_pdf_create=False
+            self, auto_open=True, manual_review=True, skip_pdf_create=False
     ):
         """Run a full review of the resume against the job post.
 
@@ -210,15 +202,15 @@ class ResumeImprover:
             auto_open (bool, optional): Whether to automatically open the generated resume. Defaults to True.
             manual_review (bool, optional): Whether to wait for manual review. Defaults to True.
         """
-        config.logger.info("Extracting matched skills...")
+        logger.info("Extracting matched skills...")
         self.skills = self.extract_matched_skills(verbose=False)
-        config.logger.info("Writing objective...")
+        logger.info("Writing objective...")
         # self.objective = self.write_objective(verbose=False)
-        config.logger.info("Updating bullet points...")
+        logger.info("Updating bullet points...")
         self.experiences = self.rewrite_unedited_experiences(verbose=False)
-        config.logger.info("Updating projects...")
+        logger.info("Updating projects...")
         self.projects = self.rewrite_unedited_projects(verbose=False)
-        config.logger.info("Done updating...")
+        logger.info("Done updating...")
         self.yaml_loc = os.path.join(self.job_data_location, "resume.yaml")
         resume_dict = dict(
             editing=True,
@@ -229,20 +221,20 @@ class ResumeImprover:
             projects=self.projects,
             skills=self.skills,
         )
-        utils.write_yaml(resume_dict, filename=self.yaml_loc)
-        self.resume_yaml = utils.read_yaml(filename=self.yaml_loc)
+        yaml_handler.write_yaml(resume_dict, filename=self.yaml_loc)
+        self.resume_yaml = yaml_handler.read_yaml(filename=self.yaml_loc)
         # if auto_open:
         #     subprocess.run(config.OPEN_FILE_COMMAND.split(" ") + [self.yaml_loc])
-        while manual_review and utils.read_yaml(filename=self.yaml_loc)["editing"]:
+        while manual_review and yaml_handler.read_yaml(filename=self.yaml_loc)["editing"]:
             time.sleep(5)
-        config.logger.info("Saving PDF")
+        logger.info("Saving PDF")
         if not skip_pdf_create:
             self.create_pdf(auto_open=auto_open)
 
     pass
 
     def _create_tailored_resume_in_background(
-        self, auto_open=True, manual_review=True, background_runner=None
+            self, auto_open=True, manual_review=True, background_runner=None
     ):
         """Run a full review of the resume against the job post.
 
@@ -251,9 +243,9 @@ class ResumeImprover:
             manual_review (bool, optional): Whether to wait for manual review. Defaults to True.
         """
         if background_runner is not None:
-            logger = background_runner.logger
+            logger = config.getLogger("background runner")
         else:
-            logger = config.logger
+            logger = config.getLogger("without background runner")
         logger.info("Extracting matched skills...")
         self.skills = self.extract_matched_skills(verbose=False)
         logger.info("Writing objective...")
@@ -273,8 +265,8 @@ class ResumeImprover:
             projects=self.projects,
             skills=self.skills,
         )
-        utils.write_yaml(resume_dict, filename=self.yaml_loc)
-        self.resume_yaml = utils.read_yaml(filename=self.yaml_loc)
+        yaml_handler.write_yaml(resume_dict, filename=self.yaml_loc)
+        self.resume_yaml = yaml_handler.read_yaml(filename=self.yaml_loc)
 
     def create_draft_tailored_resumes_in_background(background_configs: List[dict]):
         """Run 'create_draft_tailored_resume' for multiple configurations in the background.
@@ -328,15 +320,22 @@ class ResumeImprover:
         return output_dict
 
     def _chain_updater(
-        self, prompt_msgs, pydantic_object, **chain_kwargs
+            self, prompt_msgs, pydantic_object, **chain_kwargs
     ) -> RunnableSequence:
         """Create a chain based on the prompt messages.
 
         Returns:
             RunnableSequence: The chain for highlighting resume sections, matching skills, or improving resume content.
         """
+
+
+        logger.info(f"Creating LLM with kwargs: {self.llm_kwargs}")
+
         prompt = ChatPromptTemplate(messages=prompt_msgs)
-        llm = create_llm(**self.llm_kwargs)
+
+
+        llm = create_llm(api_key=self.api_key, **self.llm_kwargs)
+
         runnable = prompt | llm.with_structured_output(schema=pydantic_object)
         return runnable
 
@@ -350,7 +349,7 @@ class ResumeImprover:
             list: A list of degree names.
         """
         result = []
-        for degrees in utils.generator_key_in_nested_dict("degrees", resume):
+        for degrees in file_handler.generator_key_in_nested_dict("degrees", resume):
             for degree in degrees:
                 if isinstance(degree["names"], list):
                     result.extend(degree["names"])
@@ -538,8 +537,8 @@ class ResumeImprover:
         pdf_generator = ResumePDFGenerator()
         pdf_location = pdf_generator.generate_resume(
             job_data_location=self.job_data_location,
-            data=utils.read_yaml(filename=self.yaml_loc),
+            data=yaml_handler.read_yaml(filename=self.yaml_loc),
         )
         if auto_open:
-            subprocess.run(config.OPEN_FILE_COMMAND.split(" ") + [pdf_location])
+            subprocess.run(config.get("settings.open_file_command").split(" ") + [pdf_location])
         return pdf_location

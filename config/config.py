@@ -7,6 +7,11 @@ import os
 import yaml
 from typing import Any, Dict, List, Optional, Union
 from functools import lru_cache
+import logging
+import os
+from datetime import datetime
+
+import config
 
 
 class ConfigProvider:
@@ -98,3 +103,59 @@ def reload() -> None:
     """Force reload the configuration from the file."""
     ConfigProvider.reload()
 
+def getLogger(name=None):
+    """
+    Get a configured logger instance.
+
+    Args:
+        name (str, optional): The name for the logger. If None, uses the root logger.
+        log_level (str, optional): The logging level to use. If None, uses the level from config.
+            Valid values: 'DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'
+
+    Returns:
+        logging.Logger: A configured logger instance
+    """
+    # Use the provided name or default to 'jobtrak'
+    log_level = config.get("api.level")
+    logger_name = name if name else 'jobtrak'
+    logger = logging.getLogger(logger_name)
+
+    # If the logger already has handlers, return it to avoid duplicate handlers
+    if logger.handlers:
+        return logger
+
+    # Get log level from config or parameter, default to INFO
+    if log_level:
+        level = getattr(logging, log_level.upper())
+    else:
+        level = getattr(logging, get("logging.level", "INFO"))
+
+    logger.setLevel(level)
+
+    # Create log directory if it doesn't exist
+    log_dir = get("paths.logs", "logs")
+    os.makedirs(log_dir, exist_ok=True)
+
+    # Create a file handler
+    log_file = os.path.join(log_dir, f"{logger_name}_{datetime.now().strftime('%Y%m%d')}.log")
+    file_handler = logging.FileHandler(log_file)
+    file_handler.setLevel(level)
+
+    # Create a console handler with a higher log level (to reduce console noise)
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(max(level, logging.INFO))  # At least INFO for console
+
+    # Create a formatter and set it for both handlers
+    log_format = get("logging.format", "%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+    formatter = logging.Formatter(log_format)
+    file_handler.setFormatter(formatter)
+    console_handler.setFormatter(formatter)
+
+    # Add the handlers to the logger
+    logger.addHandler(file_handler)
+    logger.addHandler(console_handler)
+
+    # Prevent logs from being passed to the root logger
+    logger.propagate = False
+
+    return logger

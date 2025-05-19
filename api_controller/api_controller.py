@@ -1,4 +1,6 @@
-from fastapi import FastAPI, HTTPException, Depends, Query, BackgroundTasks, Header
+import io
+
+from fastapi import FastAPI, HTTPException, Depends, Query, BackgroundTasks, Header, UploadFile, Form, File
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List, Optional
 import logging
@@ -8,10 +10,12 @@ import hashlib
 from datetime import datetime
 import uvicorn
 from dotenv import load_dotenv
+from starlette.responses import StreamingResponse, FileResponse
 
 import config
 from dataModels.api_models import JobSearchRequest, JobStatusUpdateRequest, GenerateResumeRequest, \
     UploadToSimplifyRequest
+from services.resume_generator import ResumeGenerator
 
 # Load environment variables from .env file if it exists
 load_dotenv()
@@ -124,14 +128,21 @@ def get_db_manager():
 
     return app.state.db_manager
 
-# Dependency to get user_id from header or use default
-# Change the parameter name to match HTTP convention
 async def get_user_id(x_user_id: Optional[str] = Header(None, alias="X_user_id")):
     """Get user_id from header or use default if not provided."""
     if not x_user_id:
         logger.warning("No user_id provided in header, using default")
         return DEFAULT_USER_ID
     return x_user_id
+
+async def get_user_key(x_api_key: Optional[str] = Header(None, alias="X-Api-Key")):
+    if not x_api_key:
+        logger.warning("No api_key provided in header, using default")
+        raise HTTPException(
+            status_code=500,
+            detail="No api key provided"
+        )
+    return x_api_key
 
 # System status endpoint
 @app.get("/api/status", tags=["System"])
@@ -405,37 +416,138 @@ async def update_job_status(
         logger.error(f"Error updating job status for {job_id} for user {user_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-# Generate resume endpoint (placeholder, to be implemented later)
 @app.post("/api/resume/generate", tags=["Resume"])
 async def generate_resume(
         request: GenerateResumeRequest,
+        background_tasks: BackgroundTasks,
+        db_manager: DBCacheManager = Depends(get_db_manager),
+        user_id: str = Depends(get_user_id),
+        api_key:str = Depends(get_user_key)
+):
+    """Generate a tailored resume for a specific job."""
+    try:
+        # Initialize resume generator
+        resume_generator = ResumeGenerator(db_manager, user_id, api_key)
+
+        # Start the resume generation process
+        resume_info = await resume_generator.generate_resume(
+            job_id=request.job_id,
+            template=request.template or "standard",
+            customize=request.customize
+        )
+
+        # Get necessary information for background task
+        job = await db_manager.db.get_job(request.job_id, user_id)
+        resume_id = resume_info["resume_id"]
+
+        # Create job directory if it doesn't exist
+        job_dir = os.path.join(config.get("paths.data"), user_id, job.id)
+        resume_path = os.path.join(job_dir, f"resume_{resume_id}.yaml")
+        pdf_path = os.path.join(job_dir, f"resume_{resume_id}.pdf")
+
+        # Start resume generation in background
+        background_tasks.add_task(
+            resume_generator.generate_resume_background,
+            job=job,
+            resume_id=resume_id,
+            resume_path=resume_path,
+            pdf_path=pdf_path,
+            template=request.template or "standard",
+            customize=request.customize
+        )
+
+        return resume_info
+
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error generating resume for job {request.job_id} for user {user_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/resume/{resume_id}/status", tags=["Resume"])
+async def check_resume_status(
+        resume_id: str,
         db_manager: DBCacheManager = Depends(get_db_manager),
         user_id: str = Depends(get_user_id)
 ):
-    """Generate a tailored resume for a specific job."""
-    # This is a placeholder - you'll implement the actual resume generation later
+    """Check the status of a resume generation process."""
     try:
-        db = db_manager.db
+        # Initialize resume generator
+        resume_generator = ResumeGenerator(db_manager, user_id, "")
 
-        # Check if job exists
-        job = await db.get_job(request.job_id, user_id)
-        if not job:
-            raise HTTPException(status_code=404, detail=f"Job not found with ID: {request.job_id} for user: {user_id}")
+        # Check resume status
+        return await resume_generator.check_resume_status(resume_id)
 
-        # Placeholder response
-        return {
-            "message": "Resume generation functionality will be implemented in a future update",
-            "job_id": request.job_id,
-            "user_id": user_id,
-            "template": request.template,
-            "customize": request.customize,
-            "job": job.to_dict()
-        }
-
-    except HTTPException:
-        raise
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
-        logger.error(f"Error generating resume for job {request.job_id} for user {user_id}: {e}")
+        logger.error(f"Error checking resume status for {resume_id} for user {user_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/resume/{resume_id}/download", tags=["Resume"])
+async def download_resume(
+        resume_id: str,
+        format: str = Query("pdf", regex="^(pdf|yaml)$"),
+        db_manager: DBCacheManager = Depends(get_db_manager),
+        user_id: str = Depends(get_user_id)
+):
+    """Download a generated resume in PDF or YAML format."""
+    try:
+        # Initialize resume generator
+        resume_generator = ResumeGenerator(db_manager, user_id,"")
+
+        # Get resume file path or content
+        file_path_or_content = await resume_generator.get_resume_file_path(resume_id, format)
+
+        if format.lower() == "pdf":
+            # Return the PDF file
+            return FileResponse(
+                path=file_path_or_content,
+                filename=f"resume_{resume_id}.pdf",
+                media_type="application/pdf"
+            )
+        else:  # yaml format
+            # Convert string content to file-like object
+            yaml_stream = io.StringIO(file_path_or_content)
+
+            return StreamingResponse(
+                iter([yaml_stream.getvalue()]),
+                media_type="application/x-yaml",
+                headers={"Content-Disposition": f"attachment; filename=resume_{resume_id}.yaml"}
+            )
+
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error downloading resume {resume_id} for user {user_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/resume/upload", tags=["Resume"])
+async def upload_resume(
+        file: UploadFile = File(...),
+        job_id: str = Form(None),
+        db_manager: DBCacheManager = Depends(get_db_manager),
+        user_id: str = Depends(get_user_id)
+):
+    """Upload a custom resume."""
+    try:
+        # Initialize resume generator
+        resume_generator = ResumeGenerator(db_manager, user_id,"")
+
+        # Read file content
+        content = await file.read()
+
+        # Upload the resume
+        return await resume_generator.upload_resume(
+            file_path=file.filename,
+            file_content=content,
+            job_id=job_id
+        )
+
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error uploading resume for user {user_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # Upload to Simplify endpoint (placeholder, to be implemented later)
