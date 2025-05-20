@@ -95,11 +95,6 @@ class Database:
                 CREATE TABLE jobs (
                     id TEXT PRIMARY KEY,
                     user_id TEXT NOT NULL,
-                    title TEXT NOT NULL,
-                    company TEXT NOT NULL,
-                    location TEXT NOT NULL,
-                    description TEXT,
-                    linkedin_url TEXT NOT NULL,
                     job_url TEXT NOT NULL,
                     status TEXT NOT NULL,
                     date_found TEXT,
@@ -232,13 +227,11 @@ class Database:
                     # Update existing job
                     await conn.execute('''
                     UPDATE jobs
-                    SET title = $1, company = $2, location = $3, description = $4,
-                        linkedin_url = $5, job_url = $6, status = $7, date_found = $8, applied_date = $9,
-                        rejected_date = $10, resume_id = $11, metadata = $12
-                    WHERE id = $13 AND user_id = $14
+                    SET job_url = $1, status = $2, date_found = $3, applied_date = $4,
+                        rejected_date = $5, resume_id = $6, metadata = $7
+                    WHERE id = $8 AND user_id = $9
                     ''',
-                                       job_dict["title"], job_dict["company"], job_dict["location"],
-                                       job_dict["description"], job_dict["linkedin_url"], job_dict["job_url"], job_dict["status"],
+                                       job_dict["job_url"], job_dict["status"],
                                        job_dict["date_found"], job_dict["applied_date"], job_dict["rejected_date"],
                                        job_dict["resume_id"], json.dumps(job_dict.get("metadata", {})), job_dict["id"], user_id
                                        )
@@ -246,15 +239,13 @@ class Database:
                 else:
                     # Insert new job
                     await conn.execute('''
-                    INSERT INTO jobs (id, user_id, title, company, location, description,
-                                    linkedin_url, job_url, status, date_found, applied_date,
+                    INSERT INTO jobs (id, user_id, job_url, status, date_found, applied_date,
                                     rejected_date, resume_id, metadata)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
                     ''',
-                                       job_dict["id"], user_id, job_dict["title"], job_dict["company"],
-                                       job_dict["location"], job_dict["description"], job_dict["linkedin_url"], job_dict["job_url"],
-                                       job_dict["status"], job_dict["date_found"], job_dict["applied_date"],
-                                       job_dict["rejected_date"], job_dict["resume_id"], json.dumps(job_dict.get("metadata", {}))
+                                       job_dict["id"], user_id, job_dict["job_url"], job_dict["status"],
+                                       job_dict["date_found"], job_dict["applied_date"], job_dict["rejected_date"],
+                                       job_dict["resume_id"], json.dumps(job_dict.get("metadata", {}))
                                        )
                     logger.info(f"Inserted new job: {job_dict['id']} for user: {user_id}")
 
@@ -288,7 +279,19 @@ class Database:
                     else:
                         job_dict["metadata"] = {}
 
-                    return Job.from_dict(job_dict)
+                    # Extract only the fields needed for the new Job class
+                    filtered_dict = {
+                        "id": job_dict["id"],
+                        "job_url": job_dict["job_url"],
+                        "status": job_dict["status"],
+                        "date_found": job_dict["date_found"],
+                        "applied_date": job_dict["applied_date"],
+                        "rejected_date": job_dict["rejected_date"],
+                        "resume_id": job_dict.get("resume_id"),
+                        "metadata": job_dict["metadata"]
+                    }
+
+                    return Job.from_dict(filtered_dict)
                 else:
                     return None
         except Exception as e:
@@ -326,12 +329,44 @@ class Database:
                     else:
                         job_dict["metadata"] = {}
 
-                    jobs.append(Job.from_dict(job_dict))
+                    # Extract only the fields needed for the new Job class
+                    filtered_dict = {
+                        "id": job_dict["id"],
+                        "job_url": job_dict["job_url"],
+                        "status": job_dict["status"],
+                        "date_found": job_dict["date_found"],
+                        "applied_date": job_dict["applied_date"],
+                        "rejected_date": job_dict["rejected_date"],
+                        "resume_id": job_dict.get("resume_id"),
+                        "metadata": job_dict["metadata"]
+                    }
+
+                    jobs.append(Job.from_dict(filtered_dict))
 
                 return jobs
         except Exception as e:
             logger.error(f"Error getting jobs for user {user_id}: {e}")
             return []
+
+    async def job_exists(self, url: str, user_id: str) -> Optional[str]:
+        """
+        Check if a job with the given URL already exists in the database for this user.
+
+        Args:
+            url: URL of the job posting
+            user_id: ID of the user who owns the job
+
+        Returns:
+            Job ID if it exists, None otherwise
+        """
+        try:
+            async with self.get_connection() as conn:
+                # Updated to use job_url instead of linkedin_url
+                job_id = await conn.fetchval("SELECT id FROM jobs WHERE job_url = $1 AND user_id = $2", url, user_id)
+                return job_id
+        except Exception as e:
+            logger.error(f"Error checking if job exists for user {user_id}: {e}")
+            return None
 
     async def update_job_status(self, job_id: str, user_id: str, status: Union[JobStatus, str]) -> bool:
         """
@@ -376,25 +411,6 @@ class Database:
         except Exception as e:
             logger.error(f"Error updating job status: {e}")
             return False
-
-    async def job_exists(self, url: str, user_id: str) -> Optional[str]:
-        """
-        Check if a job with the given URL already exists in the database for this user.
-
-        Args:
-            url: URL of the job posting
-            user_id: ID of the user who owns the job
-
-        Returns:
-            Job ID if it exists, None otherwise
-        """
-        try:
-            async with self.get_connection() as conn:
-                job_id = await conn.fetchval("SELECT id FROM jobs WHERE linkedin_url = $1 AND user_id = $2", url, user_id)
-                return job_id
-        except Exception as e:
-            logger.error(f"Error checking if job exists for user {user_id}: {e}")
-            return None
 
     # Resume methods
 

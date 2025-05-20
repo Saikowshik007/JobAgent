@@ -1,6 +1,6 @@
 # Pydantic models for API validation
 from enum import Enum
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 
 from pydantic import BaseModel, Field
 
@@ -41,6 +41,7 @@ class GenerateResumeRequest(BaseModel):
     job_id: str = Field(..., description="ID of the job to generate resume for")
     template: Optional[str] = Field("standard", description="Resume template to use")
     customize: Optional[bool] = Field(True, description="Whether to customize resume for the job")
+    resume_data: Optional[Dict[str, Any]] = Field(None, description="User's resume data in YAML format")
 
 class UploadToSimplifyRequest(BaseModel):
     """Resume upload to Simplify request model."""

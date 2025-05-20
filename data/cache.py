@@ -60,8 +60,8 @@ class JobCache:
         self.job_cache[cache_key] = job
 
         # Add URL mapping
-        if job.linkedin_url:
-            url_key = f"{user_id}:{job.linkedin_url}"
+        if job.job_url:
+            url_key = f"{user_id}:{job.job_url}"
             self.url_to_id[url_key] = job.id
 
         # Add signature mapping (for fuzzy matching)
@@ -200,8 +200,8 @@ class JobCache:
             job = self.job_cache.pop(cache_key)
 
             # Remove from URL mapping
-            if job.linkedin_url:
-                url_key = f"{user_id}:{job.linkedin_url}"
+            if job.job_url:  # Changed from linkedin_url to job_url
+                url_key = f"{user_id}:{job.job_url}"
                 if url_key in self.url_to_id:
                     del self.url_to_id[url_key]
 
@@ -263,10 +263,16 @@ class JobCache:
         Returns:
             String signature
         """
+        # Extract fields from metadata
+        metadata = job.metadata or {}
+        title = metadata.get('title', '')
+        company = metadata.get('company', '')
+        location = metadata.get('location', '')
+
         # Normalize strings by lowercasing and removing extra whitespace
-        title = ' '.join(job.title.lower().split())
-        company = ' '.join(job.company.lower().split())
-        location = ' '.join(job.location.lower().split())
+        title = ' '.join(title.lower().split())
+        company = ' '.join(company.lower().split())
+        location = ' '.join(location.lower().split())
 
         # Create signature with user_id included
         signature = f"{user_id}|{title}|{company}|{location}"
@@ -655,33 +661,3 @@ class ResumeCache:
                 del self.access_times[cache_key]
 
             logger.debug(f"Removed resume {resume_id} for user {user_id} from cache")
-
-    def _clean_cache(self) -> None:
-        """
-        Clean up the cache by removing expired entries and least recently used entries.
-        """
-        now = datetime.now()
-
-        # First, remove expired entries
-        expired_keys = [cache_key for cache_key, expiry in self.expiration_times.items()
-                        if now > expiry]
-
-        for cache_key in expired_keys:
-            # Extract user_id and resume_id from the cache_key
-            if ":" in cache_key:
-                user_id, resume_id = cache_key.split(":", 1)
-                self._remove_resume(resume_id, user_id)
-
-        # If we still need to clean up, remove least recently used
-        if len(self.resume_cache) > self.max_size * 0.9:  # Clean up to 90% capacity
-            # Sort by oldest access time
-            all_keys = sorted(self.resume_cache.keys(),
-                              key=lambda key: self.access_times.get(key, datetime.min))
-
-            # Remove the oldest entries
-            to_remove = all_keys[:int(self.max_size * 0.2)]  # Remove 20% of entries
-            for cache_key in to_remove:
-                # Extract user_id and resume_id from the cache_key
-                if ":" in cache_key:
-                    user_id, resume_id = cache_key.split(":", 1)
-                    self._remove_resume(resume_id, user_id)

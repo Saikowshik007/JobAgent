@@ -1,4 +1,6 @@
 import io
+import hashlib
+from datetime import datetime
 
 from fastapi import FastAPI, HTTPException, Depends, Query, BackgroundTasks, Header, UploadFile, Form, File
 from fastapi.middleware.cors import CORSMiddleware
@@ -6,29 +8,22 @@ from typing import List, Optional
 import logging
 import os
 import time
-import hashlib
 from datetime import datetime
 import uvicorn
 from dotenv import load_dotenv
 from starlette.responses import StreamingResponse, FileResponse
 
 import config
-from dataModels.api_models import JobSearchRequest, JobStatusUpdateRequest, GenerateResumeRequest, \
+from dataModels.api_models import JobStatusUpdateRequest, GenerateResumeRequest, \
     UploadToSimplifyRequest
 from services.resume_generator import ResumeGenerator
+from services.resume_improver import ResumeImprover  # Import the ResumeImprover class
 
 # Load environment variables from .env file if it exists
 load_dotenv()
 
-# Check if we're running in Docker and import the docker_webdriver
-if os.environ.get('SELENIUM_REMOTE_URL'):
-    pass
-
 from data.database import Database
-from drivers.job_searcher import JobSearcher
-from drivers.linkedin_driver import LinkedInIntegration
-from drivers.browser_manager import BrowserDriverManager
-from dataModels.data_models import JobStatus
+from dataModels.data_models import JobStatus, Job
 from data.dbcache_manager import DBCacheManager
 from data.cache import JobCache, SearchCache
 
@@ -42,7 +37,7 @@ logger = logging.getLogger(__name__)
 # FastAPI app instance
 app = FastAPI(
     title="JobTrak API",
-    description="API for searching and tracking job applications from LinkedIn",
+    description="API for analyzing job postings and tracking job applications",
     version="1.0.0"
 )
 
@@ -57,9 +52,6 @@ app.add_middleware(
 
 # Default user ID if none provided
 DEFAULT_USER_ID = "default_user"
-
-# Global LinkedIn driver instance - initialized when needed
-_linkedin_driver = None
 
 # Initialize function to set up application state
 def initialize(db_path=None, job_cache_size=None, search_cache_size=None):
@@ -182,19 +174,12 @@ async def get_system_status(
                 "rejected": 0
             }
 
-        # Check LinkedIn connection
-        linkedin_status = "Not Connected"
-        global _linkedin_driver
-        if _linkedin_driver and _linkedin_driver.logged_in:
-            linkedin_status = "Connected"
-
         return {
             "status": "online",
             "timestamp": datetime.now().isoformat(),
             "user_id": user_id,
             "components": {
-                "database": db_status,
-                "linkedin": linkedin_status
+                "database": db_status
             },
             "job_stats": job_stats
         }
@@ -202,106 +187,62 @@ async def get_system_status(
         logger.error(f"Error getting system status for user {user_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-def get_linkedin_driver(headless=True, force_new=False):
-    """Initialize LinkedIn driver if not already initialized."""
-    global _linkedin_driver
-
-    try:
-        if _linkedin_driver is None or force_new:
-            # Close existing driver if forcing new
-            if force_new and _linkedin_driver:
-                try:
-                    _linkedin_driver.driver.quit()
-                except:
-                    pass
-                _linkedin_driver = None
-
-            # Initialize LinkedIn driver with credentials from environment variables
-            email = config.get("credentials.linkedin.email")
-            password = config.get("credentials.linkedin.password")
-
-            if not email or not password:
-                raise ValueError("LinkedIn credentials not found. Set LINKEDIN_EMAIL and LINKEDIN_PASSWORD environment variables.")
-
-            _linkedin_driver = LinkedInIntegration(
-                email=email,
-                password=password,
-                headless=headless
-            )
-
-            # Login to LinkedIn
-            if not _linkedin_driver.login():
-                raise ValueError("Failed to login to LinkedIn. Check credentials.")
-
-        return _linkedin_driver
-    except Exception as e:
-        logger.error(f"Error initializing LinkedIn driver: {e}")
-        raise HTTPException(status_code=500, detail=f"LinkedIn driver error: {str(e)}")
-
-# Job search endpoint
-@app.post("/api/jobs/search", tags=["Jobs"])
-async def search_jobs(
-        request: JobSearchRequest,
-        background_tasks: BackgroundTasks,
+# Job analysis endpoint
+@app.post("/api/jobs/analyze", tags=["Jobs"])
+async def analyze_job(
+        job_url: str = Form(...),
+        status: Optional[str] = Form(None),
+        resume_id: Optional[str] = Form(None),
         db_manager: DBCacheManager = Depends(get_db_manager),
-        user_id: str = Depends(get_user_id)
+        user_id: str = Depends(get_user_id),
+        api_key: str = Depends(get_user_key)
 ):
-    """Search for jobs on LinkedIn based on provided criteria."""
+    """Analyze a job posting from a URL."""
     try:
-        # Get LinkedIn driver
-        linkedin_driver = get_linkedin_driver(headless=request.headless)
+        job_exist = await db_manager.job_exists(url=job_url,user_id=user_id)
+        if job_exist:
+            raise HTTPException(status_code=409, detail="Job already exists!!")
+        # Initialize ResumeImprover with the job URL
+        resume_improver = ResumeImprover(url=job_url, api_key=api_key)
+        resume_improver.download_and_parse_job_post()
+        # The job is already parsed during initialization of ResumeImprover
+        job_details = resume_improver.parsed_job
 
-        # Create job searcher
-        job_searcher = JobSearcher(linkedin_driver, db_manager=db_manager)
+        # Create a job ID
+        job_id = hashlib.md5(f"{user_id}|{job_url}|{datetime.now().isoformat()}".encode()).hexdigest()
 
-        # Perform job search
-        logger.info(f"Searching for jobs: {request.keywords} in {request.location} for user {user_id}")
-        start_time = time.time()
+        # Handle status if provided
+        job_status = JobStatus.NEW
+        if status:
+            try:
+                job_status = JobStatus(status)
+            except ValueError:
+                logger.warning(f"Invalid status '{status}' provided, using default NEW")
 
-        # Extract filters from request
-        filters = {}
-        if request.filters:
-            filters = {k: v for k, v in request.filters.dict().items() if v is not None}
-
-        job_listings = await job_searcher.search_jobs(
-            keywords=request.keywords,
-            location=request.location,
-            user_id=user_id,
-            filters=filters,
-            max_listings=request.max_jobs
+        job = Job(
+            id=job_id,
+            job_url=job_url,
+            status=JobStatus.NEW,
+            date_found=datetime.now(),
+            metadata= job_details
         )
 
-        duration = time.time() - start_time
-
-        if not job_listings:
-            return {
-                "message": "No jobs found matching your criteria",
-                "count": 0,
-                "duration_seconds": duration,
-                "user_id": user_id,
-                "jobs": []
-            }
-
-        # Generate search ID
-        search_id = hashlib.md5(f"{user_id}|{request.keywords}|{request.location}|{str(filters)}".encode()).hexdigest()
-
-        # Save job IDs for reference
-        job_ids = [job.get('id') for job in job_listings if job.get('id')]
-
-        await db_manager.save_search_results(request.keywords, request.location, filters, job_listings, user_id)
+        # Associate the job with the user
+        job.metadata["user_id"] = user_id
+        await db_manager.db.save_job(job, user_id)
 
         return {
-            "message": f"Found {len(job_listings)} jobs matching your criteria",
-            "count": len(job_listings),
-            "duration_seconds": duration,
-            "search_id": search_id,
+            "message": "Job analyzed successfully",
+            "job_id": job_id,
+            "job_url": job_url,
             "user_id": user_id,
-            "jobs": job_listings
+            "job_details": job.to_dict()
         }
 
     except Exception as e:
-        logger.error(f"Error searching for jobs for user {user_id}: {e}")
+        logger.error(f"Error analyzing job for user {user_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
 
 # Get jobs endpoint
 @app.get("/api/jobs", tags=["Jobs"])
@@ -422,38 +363,37 @@ async def generate_resume(
         background_tasks: BackgroundTasks,
         db_manager: DBCacheManager = Depends(get_db_manager),
         user_id: str = Depends(get_user_id),
-        api_key:str = Depends(get_user_key)
+        api_key: str = Depends(get_user_key)
 ):
-    """Generate a tailored resume for a specific job."""
+    """Generate a tailored resume for a specific job using the provided resume data."""
     try:
         # Initialize resume generator
         resume_generator = ResumeGenerator(db_manager, user_id, api_key)
 
-        # Start the resume generation process
+        # Start the resume generation process with the provided resume data
         resume_info = await resume_generator.generate_resume(
             job_id=request.job_id,
             template=request.template or "standard",
-            customize=request.customize
+            customize=request.customize,
+            resume_data=request.resume_data  # Pass the resume data to the generator
         )
 
         # Get necessary information for background task
         job = await db_manager.db.get_job(request.job_id, user_id)
+        if not job:
+            raise HTTPException(status_code=404, detail=f"Job not found with ID: {request.job_id} for user: {user_id}")
+
         resume_id = resume_info["resume_id"]
 
-        # Create job directory if it doesn't exist
-        job_dir = os.path.join(config.get("paths.data"), user_id, job.id)
-        resume_path = os.path.join(job_dir, f"resume_{resume_id}.yaml")
-        pdf_path = os.path.join(job_dir, f"resume_{resume_id}.pdf")
-
-        # Start resume generation in background
+        # No need to create directories or file paths since we're not using local files
+        # Just start the background task with minimum required parameters
         background_tasks.add_task(
             resume_generator.generate_resume_background,
             job=job,
             resume_id=resume_id,
-            resume_path=resume_path,
-            pdf_path=pdf_path,
             template=request.template or "standard",
-            customize=request.customize
+            customize=request.customize,
+            resume_data=request.resume_data  # Pass the resume data to the background task
         )
 
         return resume_info
@@ -462,6 +402,35 @@ async def generate_resume(
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         logger.error(f"Error generating resume for job {request.job_id} for user {user_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Updated download endpoint to clarify that PDFs are generated client-side
+@app.get("/api/resume/{resume_id}/download", tags=["Resume"])
+async def download_resume(
+        resume_id: str,
+        format: str = Query("yaml", regex="^(yaml)$"),  # Only YAML is supported now
+        db_manager: DBCacheManager = Depends(get_db_manager),
+        user_id: str = Depends(get_user_id)
+):
+    """Download a generated resume in YAML format for client-side rendering."""
+    try:
+        # Initialize resume generator
+        resume_generator = ResumeGenerator(db_manager, user_id, "")
+
+        # Get resume content
+        yaml_content = await resume_generator.get_resume_file_path(resume_id, format)
+
+        # Return the YAML content directly
+        return {
+            "content": yaml_content,
+            "format": format,
+            "resume_id": resume_id
+        }
+
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error downloading resume {resume_id} for user {user_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/resume/{resume_id}/status", tags=["Resume"])
@@ -482,44 +451,6 @@ async def check_resume_status(
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         logger.error(f"Error checking resume status for {resume_id} for user {user_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/api/resume/{resume_id}/download", tags=["Resume"])
-async def download_resume(
-        resume_id: str,
-        format: str = Query("pdf", regex="^(pdf|yaml)$"),
-        db_manager: DBCacheManager = Depends(get_db_manager),
-        user_id: str = Depends(get_user_id)
-):
-    """Download a generated resume in PDF or YAML format."""
-    try:
-        # Initialize resume generator
-        resume_generator = ResumeGenerator(db_manager, user_id,"")
-
-        # Get resume file path or content
-        file_path_or_content = await resume_generator.get_resume_file_path(resume_id, format)
-
-        if format.lower() == "pdf":
-            # Return the PDF file
-            return FileResponse(
-                path=file_path_or_content,
-                filename=f"resume_{resume_id}.pdf",
-                media_type="application/pdf"
-            )
-        else:  # yaml format
-            # Convert string content to file-like object
-            yaml_stream = io.StringIO(file_path_or_content)
-
-            return StreamingResponse(
-                iter([yaml_stream.getvalue()]),
-                media_type="application/x-yaml",
-                headers={"Content-Disposition": f"attachment; filename=resume_{resume_id}.yaml"}
-            )
-
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except Exception as e:
-        logger.error(f"Error downloading resume {resume_id} for user {user_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/resume/upload", tags=["Resume"])
@@ -597,21 +528,7 @@ async def upload_to_simplify(
 def shutdown_event():
     """Clean up resources when the application shuts down."""
     try:
-        global _linkedin_driver
-        if _linkedin_driver:
-            try:
-                _linkedin_driver.driver.quit()
-            except:
-                pass
-            finally:
-                _linkedin_driver = None
-
-        # Also make sure BrowserDriverManager releases any driver
-        BrowserDriverManager.release_driver()
-        BrowserDriverManager.close_all_drivers()
-
         logger.info("Successfully cleaned up resources on shutdown")
-
     except Exception as e:
         logger.error(f"Error cleaning up resources: {e}")
 

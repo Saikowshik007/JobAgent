@@ -1,6 +1,6 @@
 import os
 import subprocess
-from typing import List, Optional
+from typing import List, Optional, Generator, Union
 
 from bs4 import BeautifulSoup
 import requests
@@ -15,12 +15,12 @@ from dataModels.resume import (
 from services.langchain_helpers import *
 from prompts import Prompts
 from dataModels.job_post import JobPost
-from pdf_generation import ResumePDFGenerator
+
 from fp.fp import FreeProxy
 import time
 from config import config
 from services.background_runner import BackgroundRunner
-from utils import resume_format_checker, yaml_handler, file_handler
+from utils import resume_format_checker
 
 logger = config.getLogger("ResumeImprover")
 class ResumeImprover:
@@ -45,34 +45,7 @@ class ResumeImprover:
         self.editing = False
         self.clean_url = None
         self.job_data_location = None
-        self.yaml_loc = None
         self.url = url
-        self.download_and_parse_job_post()
-        self.resume_location = resume_location or config.get("paths.resume")
-        self._update_resume_fields()
-
-    def _update_resume_fields(self):
-        """Update the resume fields based on the current resume location."""
-        resume_format_checker.check_resume_format(self.resume_location)
-        self.resume = yaml_handler.read_yaml(filename=self.resume_location)
-        self.degrees = self._get_degrees(self.resume)
-        self.basic_info = file_handler.get_dict_field(field="basic", data_dict=self.resume)
-        self.education = file_handler.get_dict_field(field="education", data_dict=self.resume)
-        self.experiences = file_handler.get_dict_field(
-            field="experiences", data_dict=self.resume
-        )
-        self.projects = file_handler.get_dict_field(field="projects", data_dict=self.resume)
-        self.skills = file_handler.get_dict_field(field="skills", data_dict=self.resume)
-        self.objective = file_handler.get_dict_field(field="objective", data_dict=self.resume)
-
-    def update_resume(self, new_resume_location):
-        """Update the resume location and refresh the dependent fields.
-
-        Args:
-            new_resume_location (str): The new file path to the resume.
-        """
-        self.resume_location = new_resume_location
-        self._update_resume_fields()
 
     def _extract_html_data(self):
         """Extract text content from HTML, removing all HTML tags.
@@ -143,25 +116,7 @@ class ResumeImprover:
         self._extract_html_data()
         self.job_post = JobPost(self.job_post_raw, self.api_key)
         self.parsed_job = self.job_post.parse_job_post(verbose=False)
-        try:
-            filename = self.parsed_job["company"] + "_" + self.parsed_job["job_title"]
-            filename = filename.replace(" ", "_")
-        except KeyError:
-            if "://" in self.url:
-                filename = self.url.split("://")[1]
-            else:
-                filename = self.url
-            url_paths = filename.split("/")
-            filename = url_paths[0]
-            if len(url_paths) > 1:
-                filename = filename + "." + url_paths[-1]
-        self.clean_url = filename
-        filepath = os.path.join(config.get("paths.data"), self.clean_url)
-        self.job_data_location = filepath
-        os.makedirs(self.job_data_location, exist_ok=True)
-        yaml_handler.write_yaml(
-            self.parsed_job, filename=os.path.join(self.job_data_location, "job.yaml")
-        )
+
 
     def parse_raw_job_post(self, raw_html):
         """Download and parse the job post from the provided URL.
@@ -173,25 +128,7 @@ class ResumeImprover:
         self._extract_html_data()
         self.job_post = JobPost(self.job_post_raw,self.api_key)
         self.parsed_job = self.job_post.parse_job_post(verbose=False)
-        try:
-            filename = self.parsed_job["company"] + "_" + self.parsed_job["job_title"]
-            filename = filename.replace(" ", "_")
-        except KeyError:
-            if "://" in self.url:
-                filename = self.url.split("://")[1]
-            else:
-                filename = self.url
-            url_paths = filename.split("/")
-            filename = url_paths[0]
-            if len(url_paths) > 1:
-                filename = filename + "." + url_paths[-1]
-        self.clean_url = filename
-        filepath = os.path.join(config.get("paths.data"), self.clean_url)
-        self.job_data_location = filepath
-        os.makedirs(self.job_data_location, exist_ok=True)
-        yaml_handler.write_yaml(
-            self.parsed_job, filename=os.path.join(self.job_data_location, "job.yaml")
-        )
+
 
     def create_draft_tailored_resume(
             self, auto_open=True, manual_review=True, skip_pdf_create=False
@@ -221,15 +158,6 @@ class ResumeImprover:
             projects=self.projects,
             skills=self.skills,
         )
-        yaml_handler.write_yaml(resume_dict, filename=self.yaml_loc)
-        self.resume_yaml = yaml_handler.read_yaml(filename=self.yaml_loc)
-        # if auto_open:
-        #     subprocess.run(config.OPEN_FILE_COMMAND.split(" ") + [self.yaml_loc])
-        while manual_review and yaml_handler.read_yaml(filename=self.yaml_loc)["editing"]:
-            time.sleep(5)
-        logger.info("Saving PDF")
-        if not skip_pdf_create:
-            self.create_pdf(auto_open=auto_open)
 
     pass
 
@@ -265,8 +193,6 @@ class ResumeImprover:
             projects=self.projects,
             skills=self.skills,
         )
-        yaml_handler.write_yaml(resume_dict, filename=self.yaml_loc)
-        self.resume_yaml = yaml_handler.read_yaml(filename=self.yaml_loc)
 
     def create_draft_tailored_resumes_in_background(background_configs: List[dict]):
         """Run 'create_draft_tailored_resume' for multiple configurations in the background.
@@ -327,10 +253,6 @@ class ResumeImprover:
         Returns:
             RunnableSequence: The chain for highlighting resume sections, matching skills, or improving resume content.
         """
-
-
-        logger.info(f"Creating LLM with kwargs: {self.llm_kwargs}")
-
         prompt = ChatPromptTemplate(messages=prompt_msgs)
 
 
@@ -349,7 +271,7 @@ class ResumeImprover:
             list: A list of degree names.
         """
         result = []
-        for degrees in file_handler.generator_key_in_nested_dict("degrees", resume):
+        for degrees in generator_key_in_nested_dict("degrees", resume):
             for degree in degrees:
                 if isinstance(degree["names"], list):
                     result.extend(degree["names"])
@@ -525,20 +447,27 @@ class ResumeImprover:
             skills=self.skills,
         )
 
-    def create_pdf(self, auto_open=True):
-        """Create a PDF of the resume.
+def generator_key_in_nested_dict(
+        keys: Union[str, List[str]], nested_dict: dict
+) -> Generator:
+    """
+    Generates values for specified keys in a nested dictionary.
 
-        Args:
-            auto_open (bool, optional): Whether to automatically open the generated PDF. Defaults to True.
+    Args:
+        keys (Union[str, List[str]]): Key or list of keys to search for.
+        nested_dict (dict): The nested dictionary to search in.
 
-        Returns:
-            str: The file path to the generated PDF.
-        """
-        pdf_generator = ResumePDFGenerator()
-        pdf_location = pdf_generator.generate_resume(
-            job_data_location=self.job_data_location,
-            data=yaml_handler.read_yaml(filename=self.yaml_loc),
-        )
-        if auto_open:
-            subprocess.run(config.get("settings.open_file_command").split(" ") + [pdf_location])
-        return pdf_location
+    Yields:
+        Generator: Values corresponding to the specified keys.
+    """
+    if hasattr(nested_dict, "items"):
+        for key, value in nested_dict.items():
+            if (isinstance(keys, list) and key in keys) or key == keys:
+                yield value
+            if isinstance(value, dict):
+                # Don't use utils. prefix for a function in the same module
+                yield from generator_key_in_nested_dict(keys, value)
+            elif isinstance(value, list):
+                for item in value:
+                    # Don't use utils. prefix for a function in the same module
+                    yield from generator_key_in_nested_dict(keys, item)

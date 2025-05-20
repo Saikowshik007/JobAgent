@@ -24,11 +24,6 @@ class Job:
     def __init__(
         self,
         id: str,
-        title: str,
-        company: str,
-        location: str,
-        description: str,
-        linkedin_url: str,
         job_url:Optional[str]= None,
         status: Union[JobStatus, str] = JobStatus.NEW,
         date_found: Optional[datetime] = None,
@@ -42,11 +37,6 @@ class Job:
         
         Args:
             id: Unique identifier for the job
-            title: Job title
-            company: Company name
-            location: Job location
-            description: Job description
-            linkedin_url: URL to the job posting
             job_url: URL for website
             status: Current status of the job application
             date_found: Date the job was found
@@ -56,11 +46,6 @@ class Job:
             metadata: Additional metadata about the job
         """
         self.id = id
-        self.title = title
-        self.company = company
-        self.location = location
-        self.description = description
-        self.linkedin_url = linkedin_url
         self.job_url = job_url
         
         # Convert string status to enum if needed
@@ -82,11 +67,6 @@ class Job:
         """Convert Job instance to a dictionary for database storage."""
         return {
             "id": self.id,
-            "title": self.title,
-            "company": self.company,
-            "location": self.location,
-            "description": self.description,
-            "linkedin_url": self.linkedin_url,
             "job_url": self.job_url,
             "status": str(self.status),
             "date_found": self.date_found.isoformat() if self.date_found else None,
@@ -106,11 +86,6 @@ class Job:
         
         return cls(
             id=data["id"],
-            title=data["title"],
-            company=data["company"],
-            location=data["location"],
-            description=data["description"],
-            linkedin_url=data["linkedin_url"],
             job_url=data["job_url"],
             status=data["status"],
             date_found=date_found,

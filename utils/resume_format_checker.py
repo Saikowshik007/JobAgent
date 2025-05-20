@@ -11,8 +11,6 @@ def check_resume_format(yaml_file_path: str) -> bool:
         bool: True if the format is correct, False otherwise.
     """
     expected_format = {
-        "editing": bool,
-        "debug": bool,
         "basic": {
             "name": str,
             "address": str,

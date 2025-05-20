@@ -36,7 +36,7 @@ model:
 # Project Paths
 paths:
   project: /app
-  resume: /app/resume
+  resume: /app/resume/resume.yaml
   data: /app/output/data
   resources: /app/resources
   prompts: /app/prompts
