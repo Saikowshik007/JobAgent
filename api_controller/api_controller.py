@@ -67,10 +67,6 @@ def initialize(db_path=None, job_cache_size=None, search_cache_size=None):
         if search_cache_size is None:
             search_cache_size = int(config.get("cache.search"
                                                "_cache_size",1000))
-
-        # Create data directory if it doesn't exist
-        os.makedirs(os.path.dirname(db_path) if '/' in db_path else '.', exist_ok=True)
-
         # Initialize database
         db = Database(db_path)
         logger.info(f"Initialized database at {db_path}")
