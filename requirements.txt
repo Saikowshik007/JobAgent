@@ -26,3 +26,6 @@ langchain_community
 reportlab
 free-proxy
 ruamel.yaml
+async-timeout
+psutil
+backoff

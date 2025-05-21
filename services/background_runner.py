@@ -12,7 +12,7 @@ class BackgroundRunner:
     def _create_logger(self):
         """Creates a custom logger for the BackgroundRunner."""
         logger = logging.getLogger(__name__)
-        handler = logging.FileHandler(config.BACKGROUND_TASKS_LOG)
+        handler = logging.FileHandler("Background runner")
         formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
         handler.setFormatter(formatter)
         logger.addHandler(handler)

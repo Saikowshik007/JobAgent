@@ -519,6 +519,41 @@ async def upload_to_simplify(
         logger.error(f"Error uploading resume to Simplify for job {request.job_id} for user {user_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
+@app.post("/api/resume/{resume_id}/update-yaml", tags=["Resume"])
+async def update_resume_yaml(
+        resume_id: str,
+        yaml_content: str = Form(...),
+        db_manager: DBCacheManager = Depends(get_db_manager),
+        user_id: str = Depends(get_user_id)
+):
+    """Update the YAML content of a resume."""
+    try:
+        # Get the existing resume
+        resume = await db_manager.db.get_resume(resume_id, user_id)
+        if not resume:
+            raise HTTPException(status_code=404, detail=f"Resume not found with ID: {resume_id} for user: {user_id}")
+
+        # Update the YAML content
+        resume.yaml_content = yaml_content
+
+        # Save the updated resume
+        success = await db_manager.db.save_resume(resume, user_id)
+
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to save updated resume YAML")
+
+        return {
+            "message": "Resume YAML updated successfully",
+            "resume_id": resume_id,
+            "user_id": user_id
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating resume YAML for {resume_id} for user {user_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 # Shutdown event - clean up resources
 @app.on_event("shutdown")
 def shutdown_event():
