@@ -1,6 +1,8 @@
+import asyncio
 import hashlib
 import logging
 import json
+from enum import Enum
 from typing import Dict, List, Optional, Any
 from datetime import datetime, timedelta
 
@@ -494,170 +496,50 @@ class SearchCache:
         return hashlib.md5(key_str.encode('utf-8')).hexdigest()
 
 
-class ResumeCache:
-    """
-    Cache for resume data to improve performance.
-    """
+class ResumeGenerationStatus(Enum):
+    """Status of resume generation process."""
+    PENDING = "pending"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    FAILED = "failed"
 
-    def __init__(self, max_size=50, ttl_seconds=7200):
-        """
-        Initialize the resume cache.
+class ResumeGenerationCache:
+    """Cache for tracking resume generation status and data."""
 
-        Args:
-            max_size: Maximum size of the cache
-            ttl_seconds: Time-to-live in seconds for cache entries
-        """
-        self.max_size = max_size
-        self.ttl_seconds = ttl_seconds
+    def __init__(self):
+        self._cache = {}
+        self._lock = asyncio.Lock()
 
-        # Resume ID to Resume object mapping
-        self.resume_cache = {}
+    async def set_status(self, resume_id: str, user_id: str, status: ResumeGenerationStatus,
+                         data: Optional[Dict] = None, error: Optional[str] = None):
+        """Set resume generation status and optional data."""
+        async with self._lock:
+            cache_key = f"{user_id}:{resume_id}"
+            self._cache[cache_key] = {
+                "status": status,
+                "data": data,
+                "error": error,
+                "updated_at": datetime.now(),
+                "user_id": user_id,
+                "resume_id": resume_id
+            }
 
-        # Job ID to Resume ID mapping
-        self.job_to_resume = {}
+    async def get_status(self, resume_id: str, user_id: str) -> Optional[Dict]:
+        """Get resume generation status and data."""
+        async with self._lock:
+            cache_key = f"{user_id}:{resume_id}"
+            return self._cache.get(cache_key)
 
-        # Cache expiration timestamps
-        self.expiration_times = {}
+    async def remove(self, resume_id: str, user_id: str):
+        """Remove resume from cache."""
+        async with self._lock:
+            cache_key = f"{user_id}:{resume_id}"
+            if cache_key in self._cache:
+                del self._cache[cache_key]
 
-        # LRU tracking
-        self.access_times = {}
-
-    def add_resume(self, resume: Resume, user_id: str) -> None:
-        """
-        Add a resume to the cache.
-
-        Args:
-            resume: Resume object to add
-            user_id: ID of the user who owns the resume
-        """
-        # Check if we need to clean up the cache
-        if len(self.resume_cache) >= self.max_size:
-            self._clean_cache()
-
-        # Create composite key with user_id and resume_id
-        cache_key = f"{user_id}:{resume.id}"
-
-        # Add resume to cache
-        self.resume_cache[cache_key] = resume
-
-        # Add job ID mapping if applicable
-        if resume.job_id:
-            job_key = f"{user_id}:{resume.job_id}"
-            self.job_to_resume[job_key] = resume.id
-
-        # Set expiration time
-        self.expiration_times[cache_key] = datetime.now() + timedelta(seconds=self.ttl_seconds)
-
-        # Set access time
-        self.access_times[cache_key] = datetime.now()
-
-        logger.debug(f"Added resume {resume.id} for user {user_id} to cache")
-
-    def get_resume(self, resume_id: str, user_id: str) -> Optional[Resume]:
-        """
-        Get a resume from the cache by ID.
-
-        Args:
-            resume_id: ID of the resume to retrieve
-            user_id: ID of the user who owns the resume
-
-        Returns:
-            Resume object if in cache, None otherwise
-        """
-        cache_key = f"{user_id}:{resume_id}"
-
-        if cache_key in self.resume_cache:
-            # Check if expired
-            if datetime.now() > self.expiration_times.get(cache_key, datetime.min):
-                self._remove_resume(resume_id, user_id)
-                return None
-
-            # Update access time
-            self.access_times[cache_key] = datetime.now()
-
-            # Refresh expiration time
-            self.expiration_times[cache_key] = datetime.now() + timedelta(seconds=self.ttl_seconds)
-
-            return self.resume_cache[cache_key]
-
-        return None
-
-    def get_resume_for_job(self, job_id: str, user_id: str) -> Optional[Resume]:
-        """
-        Get a resume for a specific job.
-
-        Args:
-            job_id: ID of the job
-            user_id: ID of the user who owns the job and resume
-
-        Returns:
-            Resume object if in cache, None otherwise
-        """
-        job_key = f"{user_id}:{job_id}"
-        resume_id = self.job_to_resume.get(job_key)
-        return self.get_resume(resume_id, user_id) if resume_id else None
-
-    def clear(self, user_id: Optional[str] = None) -> None:
-        """
-        Clear the entire cache or just for a specific user.
-
-        Args:
-            user_id: Optional user ID to clear cache for. If None, clears entire cache.
-        """
-        if user_id is None:
-            # Clear entire cache
-            self.resume_cache.clear()
-            self.job_to_resume.clear()
-            self.expiration_times.clear()
-            self.access_times.clear()
-            logger.debug("Resume cache cleared")
-        else:
-            # Clear only for specific user
-            # Find all keys belonging to this user
-            cache_keys_to_remove = [k for k in self.resume_cache if k.startswith(f"{user_id}:")]
-            job_keys_to_remove = [k for k in self.job_to_resume if k.startswith(f"{user_id}:")]
-
-            # Remove from resume cache
-            for key in cache_keys_to_remove:
-                if key in self.resume_cache:
-                    del self.resume_cache[key]
-                if key in self.expiration_times:
-                    del self.expiration_times[key]
-                if key in self.access_times:
-                    del self.access_times[key]
-
-            # Remove from job to resume mapping
-            for key in job_keys_to_remove:
-                if key in self.job_to_resume:
-                    del self.job_to_resume[key]
-
-            logger.debug(f"Resume cache cleared for user {user_id}")
-
-    def _remove_resume(self, resume_id: str, user_id: str) -> None:
-        """
-        Remove a resume from the cache.
-
-        Args:
-            resume_id: ID of the resume to remove
-            user_id: ID of the user who owns the resume
-        """
-        cache_key = f"{user_id}:{resume_id}"
-
-        if cache_key in self.resume_cache:
-            resume = self.resume_cache.pop(cache_key)
-
-            # Remove job ID mapping if applicable
-            if resume.job_id:
-                job_key = f"{user_id}:{resume.job_id}"
-                if job_key in self.job_to_resume:
-                    del self.job_to_resume[job_key]
-
-            # Remove from expiration times
-            if cache_key in self.expiration_times:
-                del self.expiration_times[cache_key]
-
-            # Remove from access times
-            if cache_key in self.access_times:
-                del self.access_times[cache_key]
-
-            logger.debug(f"Removed resume {resume_id} for user {user_id} from cache")
+    async def clear_user_cache(self, user_id: str):
+        """Clear all cache entries for a user."""
+        async with self._lock:
+            keys_to_remove = [k for k in self._cache.keys() if k.startswith(f"{user_id}:")]
+            for key in keys_to_remove:
+                del self._cache[key]

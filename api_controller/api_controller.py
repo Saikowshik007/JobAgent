@@ -1,3 +1,4 @@
+import asyncio
 import io
 import hashlib
 from datetime import datetime
@@ -14,6 +15,7 @@ from dotenv import load_dotenv
 from starlette.responses import StreamingResponse, FileResponse
 
 import config
+from data.cache_manager import cache_manager
 from dataModels.api_models import JobStatusUpdateRequest, GenerateResumeRequest, \
     UploadToSimplifyRequest
 from services.resume_generator import ResumeGenerator
@@ -62,11 +64,11 @@ def initialize(db_path=None, job_cache_size=None, search_cache_size=None):
             db_path = config.get("database.path")
 
         if job_cache_size is None:
-            job_cache_size = int(config.get("cache.job_cache_size",1000))
+            job_cache_size = int(config.get("cache.job_cache_size", 1000))
 
         if search_cache_size is None:
-            search_cache_size = int(config.get("cache.search"
-                                               "_cache_size",1000))
+            search_cache_size = int(config.get("cache.search_cache_size", 1000))
+
         # Initialize database
         db = Database(db_path)
         logger.info(f"Initialized database at {db_path}")
@@ -89,6 +91,7 @@ def initialize(db_path=None, job_cache_size=None, search_cache_size=None):
         app.state.job_cache = job_cache
         app.state.search_cache = search_cache
         app.state.db_manager = db_manager
+        app.state.cache_manager = cache_manager  # Add global cache manager
 
         logger.info("Application initialization complete")
         return True
@@ -138,9 +141,9 @@ async def get_system_status(
         db_manager: DBCacheManager = Depends(get_db_manager),
         user_id: str = Depends(get_user_id)
 ):
-    """Get the overall status of the job tracking system."""
+    """Get the overall status of the job tracking system - now non-blocking."""
     try:
-        # Check database connection
+        # This should now be much faster since resume generation doesn't block
         db = db_manager.db if db_manager else None
         db_status = "OK"
         job_count = 0
@@ -148,15 +151,26 @@ async def get_system_status(
 
         try:
             if db:
-                job_count = len(await db.get_all_jobs(user_id))
+                # Use asyncio.gather to run queries concurrently
+                all_jobs, new_jobs, interested_jobs, applied_jobs, interview_jobs, offer_jobs, rejected_jobs = await asyncio.gather(
+                    db.get_all_jobs(user_id),
+                    db.get_all_jobs(user_id, status=JobStatus.NEW),
+                    db.get_all_jobs(user_id, status=JobStatus.INTERESTED),
+                    db.get_all_jobs(user_id, status=JobStatus.APPLIED),
+                    db.get_all_jobs(user_id, status=JobStatus.INTERVIEW),
+                    db.get_all_jobs(user_id, status=JobStatus.OFFER),
+                    db.get_all_jobs(user_id, status=JobStatus.REJECTED)
+                )
+
+                job_count = len(all_jobs)
                 job_stats = {
                     "total": job_count,
-                    "new": len(await db.get_all_jobs(user_id, status=JobStatus.NEW)),
-                    "interested": len(await db.get_all_jobs(user_id, status=JobStatus.INTERESTED)),
-                    "applied": len(await db.get_all_jobs(user_id, status=JobStatus.APPLIED)),
-                    "interviews": len(await db.get_all_jobs(user_id, status=JobStatus.INTERVIEW)),
-                    "offers": len(await db.get_all_jobs(user_id, status=JobStatus.OFFER)),
-                    "rejected": len(await db.get_all_jobs(user_id, status=JobStatus.REJECTED))
+                    "new": len(new_jobs),
+                    "interested": len(interested_jobs),
+                    "applied": len(applied_jobs),
+                    "interviews": len(interview_jobs),
+                    "offers": len(offer_jobs),
+                    "rejected": len(rejected_jobs)
                 }
         except Exception as e:
             db_status = f"Error: {str(e)}"
@@ -283,6 +297,49 @@ async def get_jobs(
         logger.error(f"Error getting jobs for user {user_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.delete("/api/cache/clear", tags=["System"])
+async def clear_cache(
+        user_id: str = Depends(get_user_id)
+):
+    """Clear user's cache data."""
+    try:
+        # Clear job cache
+        if hasattr(app.state, 'job_cache'):
+            app.state.job_cache.clear(user_id)
+
+        # Clear search cache
+        if hasattr(app.state, 'search_cache'):
+            app.state.search_cache.clear(user_id)
+
+        return {
+            "message": "Cache cleared successfully",
+            "user_id": user_id,
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Error clearing cache for user {user_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Add endpoint to get active resume generations
+@app.get("/api/resume/active", tags=["Resume"])
+async def get_active_resume_generations(
+        db_manager: DBCacheManager = Depends(get_db_manager),
+        user_id: str = Depends(get_user_id)
+):
+    """Get all active resume generations for a user."""
+    try:
+        # This would require modifying the cache to support listing all entries for a user
+        # For now, return a simple response
+        return {
+            "message": "Active resume generations tracking",
+            "user_id": user_id,
+            "note": "Individual resume status should be checked using /api/resume/{resume_id}/status"
+        }
+    except Exception as e:
+        logger.error(f"Error getting active resume generations for user {user_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 # Get specific job endpoint
 @app.get("/api/jobs/{job_id}", tags=["Jobs"])
 async def get_job(
@@ -356,7 +413,6 @@ async def update_job_status(
 @app.post("/api/resume/generate", tags=["Resume"])
 async def generate_resume(
         request: GenerateResumeRequest,
-        background_tasks: BackgroundTasks,
         db_manager: DBCacheManager = Depends(get_db_manager),
         user_id: str = Depends(get_user_id),
         api_key: str = Depends(get_user_key)
@@ -367,29 +423,12 @@ async def generate_resume(
         resume_generator = ResumeGenerator(db_manager, user_id, api_key)
 
         # Start the resume generation process with the provided resume data
+        # This is now non-blocking and uses cache for status tracking
         resume_info = await resume_generator.generate_resume(
             job_id=request.job_id,
             template=request.template or "standard",
             customize=request.customize,
-            resume_data=request.resume_data  # Pass the resume data to the generator
-        )
-
-        # Get necessary information for background task
-        job = await db_manager.db.get_job(request.job_id, user_id)
-        if not job:
-            raise HTTPException(status_code=404, detail=f"Job not found with ID: {request.job_id} for user: {user_id}")
-
-        resume_id = resume_info["resume_id"]
-
-        # No need to create directories or file paths since we're not using local files
-        # Just start the background task with minimum required parameters
-        background_tasks.add_task(
-            resume_generator.generate_resume_background,
-            job=job,
-            resume_id=resume_id,
-            template=request.template or "standard",
-            customize=request.customize,
-            resume_data=request.resume_data  # Pass the resume data to the background task
+            resume_data=request.resume_data
         )
 
         return resume_info
@@ -398,13 +437,10 @@ async def generate_resume(
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         logger.error(f"Error generating resume for job {request.job_id} for user {user_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-# Updated download endpoint to clarify that PDFs are generated client-side
-@app.get("/api/resume/{resume_id}/download", tags=["Resume"])
+        raise HTTPException(status_code=500, detail=str(e))@app.get("/api/resume/{resume_id}/download", tags=["Resume"])
 async def download_resume(
         resume_id: str,
-        format: str = Query("yaml", regex="^(yaml)$"),  # Only YAML is supported now
+        format: str = Query("yaml", regex="^(yaml)$"),
         db_manager: DBCacheManager = Depends(get_db_manager),
         user_id: str = Depends(get_user_id)
 ):
@@ -413,8 +449,8 @@ async def download_resume(
         # Initialize resume generator
         resume_generator = ResumeGenerator(db_manager, user_id, "")
 
-        # Get resume content
-        yaml_content = await resume_generator.get_resume_file_path(resume_id, format)
+        # Get resume content (checks cache first, then database)
+        yaml_content = await resume_generator.get_resume_content(resume_id)
 
         # Return the YAML content directly
         return {
@@ -435,12 +471,12 @@ async def check_resume_status(
         db_manager: DBCacheManager = Depends(get_db_manager),
         user_id: str = Depends(get_user_id)
 ):
-    """Check the status of a resume generation process."""
+    """Check the status of a resume generation process using cache."""
     try:
         # Initialize resume generator
         resume_generator = ResumeGenerator(db_manager, user_id, "")
 
-        # Check resume status
+        # Check resume status (uses cache first, much faster)
         return await resume_generator.check_resume_status(resume_id)
 
     except ValueError as e:

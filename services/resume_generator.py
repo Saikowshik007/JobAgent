@@ -1,35 +1,34 @@
-from io import StringIO
-from typing import Optional, Dict, Any
-import os
-import logging
+import asyncio
+import concurrent
 import uuid
 from datetime import datetime
+from typing import Optional, Dict, Any
 
 import yaml
 from yaml import YAMLError
 
-from services.resume_improver import ResumeImprover
-from utils import  resume_format_checker
 import config
-from dataModels.data_models import Resume, JobStatus
+from data.cache import ResumeGenerationCache, ResumeGenerationStatus
+from dataModels.data_models import JobStatus, Resume
+from services import ResumeImprover
 
-
-logger = logging.getLogger(__name__)
-
+logger = config.getLogger("Resume Generator")
 class ResumeGenerator:
     """
-    Class to handle resume generation for jobs.
-    Acts as a bridge between the API controller and the ResumeImprover class.
+    Improved Resume Generator with cache-based status tracking.
     """
 
-    def __init__(self, db_manager, user_id: str, api_key:str):
+    def __init__(self, db_manager, user_id: str, api_key: str):
         """Initialize the ResumeGenerator with database manager and user ID."""
         self.db_manager = db_manager
         self.user_id = user_id
         self.api_key = api_key
-        self.default_resume_path = config.get("files.default_resume")
+        self.generation_cache = ResumeGenerationCache()
+        # Thread pool for blocking operations
+        self.thread_pool = concurrent.futures.ThreadPoolExecutor(max_workers=4)
 
-    async def generate_resume(self, job_id: str, template: str = "standard", customize: bool = True, resume_data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    async def generate_resume(self, job_id: str, template: str = "standard",
+                              customize: bool = True, resume_data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Generate a tailored resume for a specific job."""
         # Get the job from database
         job = await self.db_manager.db.get_job(job_id, self.user_id)
@@ -39,29 +38,10 @@ class ResumeGenerator:
         # Generate a unique ID for the resume
         resume_id = str(uuid.uuid4())
 
-        # Create initial resume record in database
-        resume = Resume(
-            id=resume_id,
-            job_id=job.id,
-            file_path="",  # We don't need file paths anymore
-            yaml_content="",  # Will be populated by background task
-            date_created=datetime.now(),
-            uploaded_to_simplify=False
+        # Set initial status in cache
+        await self.generation_cache.set_status(
+            resume_id, self.user_id, ResumeGenerationStatus.PENDING
         )
-
-        # Store whether we have user-provided resume data
-        if resume_data:
-            logger.info(f"User-provided resume data received for job {job_id}")
-            if not hasattr(resume, 'metadata') or resume.metadata is None:
-                resume.metadata = {}
-            resume.metadata['has_user_resume_data'] = True
-        else:
-            logger.warning(f"No user-provided resume data for job {job_id}")
-            if not hasattr(resume, 'metadata') or resume.metadata is None:
-                resume.metadata = {}
-            resume.metadata['has_user_resume_data'] = False
-
-        await self.db_manager.db.save_resume(resume, self.user_id)
 
         # Update job status to indicate resume generation is in progress
         await self.db_manager.db.update_job_status(job.id, self.user_id, JobStatus.RESUME_GENERATED)
@@ -70,6 +50,11 @@ class ResumeGenerator:
         job.resume_id = resume_id
         await self.db_manager.db.save_job(job, self.user_id)
 
+        # Start background generation (non-blocking)
+        asyncio.create_task(self._generate_resume_background(
+            job, resume_id, template, customize, resume_data
+        ))
+
         return {
             "status": "generating",
             "message": f"Resume generation started for job {job.metadata.get('job_title')} at {job.metadata.get('company')}",
@@ -77,35 +62,70 @@ class ResumeGenerator:
             "job_id": job.id,
             "user_id": self.user_id,
             "template": template,
-            "estimated_completion_seconds": 60  # Approximate time for generation
+            "estimated_completion_seconds": 60
         }
 
-    async def generate_resume_background(
-            self,
-            job,
-            resume_id: str,
-            resume_path: str = None,  # Not used
-            pdf_path: str = None,     # Not used
-            template: str = "standard",
-            customize: bool = True,
-            resume_data: Optional[Dict[str, Any]] = None
-    ):
-        """Background task to generate resume."""
+    async def _generate_resume_background(self, job, resume_id: str, template: str,
+                                          customize: bool, resume_data: Optional[Dict[str, Any]]):
+        """Background task to generate resume using thread pool."""
         try:
             logger.info(f"Starting resume generation for job {job.id} for user {self.user_id}")
 
-            # Initialize ResumeImprover using in-memory data approach
+            # Update status to in progress
+            await self.generation_cache.set_status(
+                resume_id, self.user_id, ResumeGenerationStatus.IN_PROGRESS
+            )
+
+            # Run the blocking resume generation in thread pool
+            loop = asyncio.get_event_loop()
+            yaml_content = await loop.run_in_executor(
+                self.thread_pool,
+                self._generate_resume_sync,
+                job, resume_data
+            )
+
+            # Create the resume object
+            resume = Resume(
+                id=resume_id,
+                job_id=job.id,
+                file_path="",  # Not used anymore
+                yaml_content=yaml_content,
+                date_created=datetime.now(),
+                uploaded_to_simplify=False
+            )
+
+            # Save completed resume to database
+            await self.db_manager.db.save_resume(resume, self.user_id)
+
+            # Update cache with completed status
+            await self.generation_cache.set_status(
+                resume_id, self.user_id, ResumeGenerationStatus.COMPLETED,
+                data={"yaml_content": yaml_content}
+            )
+
+            logger.info(f"Resume generation completed for job {job.id} for user {self.user_id}")
+
+        except Exception as e:
+            logger.error(f"Error generating resume for job {job.id} for user {self.user_id}: {e}")
+
+            # Update cache with failed status
+            await self.generation_cache.set_status(
+                resume_id, self.user_id, ResumeGenerationStatus.FAILED,
+                error=str(e)
+            )
+
+    def _generate_resume_sync(self, job, resume_data: Optional[Dict[str, Any]]) -> str:
+        """Synchronous resume generation that runs in thread pool."""
+        try:
+            # Initialize ResumeImprover
             resume_improver = None
 
-            # Create a virtual ResumeImprover that uses the provided resume_data
             if resume_data:
                 logger.info(f"Using user-provided resume data for job {job.id}")
-
-                # Initialize ResumeImprover with default resume path (we'll override its internal state later)
                 resume_improver = ResumeImprover(
                     url=job.job_url,
                     api_key=self.api_key,
-                    resume_location=self.default_resume_path  # This will be overridden
+                    resume_location=None
                 )
                 resume_improver.resume = resume_data
                 resume_improver.basic_info = self.get_dict_field(field="basic", data_dict=resume_data)
@@ -119,27 +139,24 @@ class ResumeGenerator:
                 logger.info(f"Using default resume template for job {job.id}")
                 resume_improver = ResumeImprover(
                     url=job.job_url,
-                    resume_location=self.default_resume_path,
+                    resume_location=None,  # Will need to handle default resume
                     api_key=self.api_key
                 )
 
-            # Check if we have parsed job details in metadata
+            # Initialize job parsing
             parsed_job_details = None
             if hasattr(job, 'metadata') and job.metadata and 'parsed_job_details' in job.metadata:
                 parsed_job_details = job.metadata['parsed_job_details']
                 logger.info(f"Using parsed job details from metadata for job {job.id}")
 
-            # Initialize job parsing based on available data
             if parsed_job_details:
-                # Set the parsed job directly instead of re-parsing
                 resume_improver.parsed_job = parsed_job_details
             elif hasattr(job, 'description') and job.description:
                 resume_improver.parse_raw_job_post(job.description)
             else:
-                # If no description either, use URL to fetch job details
                 resume_improver.download_and_parse_job_post()
 
-            # Extract skills and update content without generating files
+            # Generate resume content
             logger.info("Extracting matched skills...")
             skills = resume_improver.extract_matched_skills(verbose=False)
 
@@ -150,7 +167,7 @@ class ResumeGenerator:
             projects = resume_improver.rewrite_unedited_projects(verbose=False)
 
             # Create resume content dictionary
-            yaml_content = {
+            yaml_content_dict = {
                 'editing': False,
                 'basic': resume_improver.basic_info,
                 'objective': resume_improver.objective,
@@ -168,104 +185,105 @@ class ResumeGenerator:
                 }
             }
 
-            # Convert to YAML string for database storage
-            yaml_string = self.dict_to_yaml_string(yaml_content)
-
-            # Update the resume record with content
-            resume = await self.db_manager.db.get_resume(resume_id, self.user_id)
-            if resume:
-                resume.yaml_content = yaml_string
-                await self.db_manager.db.save_resume(resume, self.user_id)
-
-            logger.info(f"Resume generation completed for job {job.id} for user {self.user_id}")
+            # Convert to YAML string
+            return self.dict_to_yaml_string(yaml_content_dict)
 
         except Exception as e:
-            logger.error(f"Error generating resume for job {job.id} for user {self.user_id}: {e}")
+            logger.error(f"Synchronous resume generation failed: {e}")
+            raise
 
     async def check_resume_status(self, resume_id: str) -> Dict[str, Any]:
-        """Check the status of a resume generation process."""
-        # Get the resume from database
+        """Check the status of a resume generation process using cache."""
+        # First check cache
+        cache_entry = await self.generation_cache.get_status(resume_id, self.user_id)
+
+        if cache_entry:
+            status = cache_entry["status"].value
+
+            response = {
+                "status": status,
+                "resume_id": resume_id,
+                "user_id": self.user_id,
+                "updated_at": cache_entry["updated_at"].isoformat(),
+            }
+
+            if cache_entry.get("error"):
+                response["error"] = cache_entry["error"]
+
+            if status == ResumeGenerationStatus.COMPLETED.value:
+                # If completed, also get job info from database
+                try:
+                    resume = await self.db_manager.db.get_resume(resume_id, self.user_id)
+                    if resume and resume.job_id:
+                        job = await self.db_manager.db.get_job(resume.job_id, self.user_id)
+                        if job:
+                            response["job"] = job.to_dict()
+                            response["job_id"] = resume.job_id
+                except Exception as e:
+                    logger.warning(f"Could not fetch job info for completed resume: {e}")
+
+            return response
+
+        # If not in cache, check if it exists in database (for old resumes)
         resume = await self.db_manager.db.get_resume(resume_id, self.user_id)
         if not resume:
             raise ValueError(f"Resume not found with ID: {resume_id} for user: {self.user_id}")
 
-        # Determine status
-        status = "unknown"
-
-        if resume.yaml_content:
-            status = "completed"
-        elif resume.date_created:
-            # If created but no content yet, it's still generating
-            status = "generating"
-
-        # Get associated job
+        # If exists in database, it's completed
         job = None
         if resume.job_id:
             job = await self.db_manager.db.get_job(resume.job_id, self.user_id)
 
         return {
-            "status": status,
+            "status": "completed",
             "resume_id": resume_id,
             "job_id": resume.job_id,
             "user_id": self.user_id,
             "date_created": resume.date_created.isoformat() if resume.date_created else None,
-            "has_pdf": False,  # We don't generate PDFs server-side anymore
             "job": job.to_dict() if job else None
         }
 
-    async def get_resume_file_path(self, resume_id: str, format: str = "pdf") -> str:
-        """Get the resume content (not a file path anymore)."""
-        # Get the resume from database
+    async def get_resume_content(self, resume_id: str) -> str:
+        """Get the resume content."""
+        # First check cache for recently generated resumes
+        cache_entry = await self.generation_cache.get_status(resume_id, self.user_id)
+
+        if cache_entry and cache_entry["status"] == ResumeGenerationStatus.COMPLETED:
+            yaml_content = cache_entry.get("data", {}).get("yaml_content")
+            if yaml_content:
+                return yaml_content
+
+        # If not in cache or cache doesn't have content, check database
         resume = await self.db_manager.db.get_resume(resume_id, self.user_id)
         if not resume:
             raise ValueError(f"Resume not found with ID: {resume_id} for user: {self.user_id}")
 
-        # Check if resume generation is complete
         if not resume.yaml_content:
             raise ValueError("Resume generation is not complete")
 
-        # For PDF format, we respond that it's not supported on the server
-        if format.lower() == "pdf":
-            raise ValueError("PDF generation is not supported on the server. Please generate PDF in the UI.")
-
-        # Return the YAML content itself
         return resume.yaml_content
 
-
-    def get_dict_field(self,field: str, data_dict: dict) -> Optional[dict]:
-        """
-        Retrieves a field from a dictionary.
-
-        Args:
-            field (str): The field to retrieve.
-            data_dict (dict): The dictionary to retrieve the field from.
-
-        Returns:
-            Optional[dict]: The value of the field, or None if the field is missing.
-        """
+    def get_dict_field(self, field: str, data_dict: dict) -> Optional[dict]:
+        """Retrieves a field from a dictionary."""
         try:
             return data_dict[field]
         except KeyError as e:
-            message = f"`{field}` is missing in raw resume."
-            config.getLogger("file_handler").warning(message)
+            logger.warning(f"`{field}` is missing in raw resume.")
         return None
 
-    def dict_to_yaml_string(self,data: dict) -> str:
-        """
-        Converts a dictionary to a YAML-formatted string.
-
-        Args:
-            data (dict): Data to be converted to YAML string.
-
-        Returns:
-            str: YAML-formatted string.
-        """
+    def dict_to_yaml_string(self, data: dict) -> str:
+        """Converts a dictionary to a YAML-formatted string."""
         yaml.allow_unicode = True
         try:
-            yaml.allow_unicode = True
+            from io import StringIO
             stream = StringIO()
             yaml.dump(data, stream=stream)
             return stream.getvalue()
         except YAMLError as e:
             logger.error("Failed to convert dict to YAML string.")
             raise e
+
+    def __del__(self):
+        """Cleanup thread pool on deletion."""
+        if hasattr(self, 'thread_pool'):
+            self.thread_pool.shutdown(wait=False)
