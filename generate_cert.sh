@@ -21,7 +21,7 @@ ST=State
 L=City
 O=Organization
 OU=IT Department
-CN=localhost
+CN=jobtrakAi.com
 
 [v3_req]
 basicConstraints = CA:FALSE
@@ -29,9 +29,10 @@ keyUsage = nonRepudiation, digitalSignature, keyEncipherment
 subjectAltName = @alt_names
 
 [alt_names]
-DNS.1 = localhost
-DNS.2 = *.localhost
-DNS.3 = 127.0.0.1
+DNS.1 = jobtrakAi.com
+DNS.2 = www.jobtrakAi.com
+DNS.3 = localhost
+DNS.4 = *.jobtrakAi.com
 IP.1 = 127.0.0.1
 IP.2 = ::1
 EOF
