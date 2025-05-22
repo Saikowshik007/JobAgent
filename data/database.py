@@ -500,25 +500,11 @@ class Database:
                 job_dict["metadata"] = json.loads(job_dict["metadata"])
         else:
             job_dict["metadata"] = {}
-
-        # Convert timestamps
-        for field in ["date_found", "applied_date", "rejected_date"]:
-            if job_dict.get(field):
-                if isinstance(job_dict[field], str):
-                    logger.error(job_dict[field])
-                    job_dict[field] = datetime.fromisoformat(job_dict[field])
-
         return Job.from_dict(job_dict)
 
     def _row_to_resume(self, row) -> Resume:
         """Convert database row to Resume object."""
         resume_dict = dict(row)
-
-        # Convert timestamps
-        if resume_dict.get("date_created"):
-            if isinstance(resume_dict["date_created"], str):
-                logger.error(resume_dict["date_created"])
-                resume_dict["date_created"] = datetime.fromisoformat(resume_dict["date_created"])
 
         return Resume.from_dict(resume_dict)
 
