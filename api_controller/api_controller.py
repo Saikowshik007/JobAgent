@@ -119,20 +119,23 @@ def get_db_manager():
 
     return app.state.db_manager
 
-async def get_user_id(x_user_id: Optional[str] = Header(None, alias="X_user_id")):
+async def get_user_id(x_user_id: Optional[str] = Header(None)):
     """Get user_id from header or use default if not provided."""
     if not x_user_id:
         logger.warning("No user_id provided in header, using default")
         return DEFAULT_USER_ID
+    logger.info(f"Received user_id: {x_user_id}")
     return x_user_id
 
-async def get_user_key(x_api_key: Optional[str] = Header(None, alias="X-Api-Key")):
+async def get_user_key(x_api_key: Optional[str] = Header(None)):
+    """Get API key from header."""
     if not x_api_key:
-        logger.warning("No api_key provided in header, using default")
+        logger.warning("No api_key provided in header")
         raise HTTPException(
-            status_code=500,
-            detail="No api key provided"
+            status_code=401,
+            detail="No API key provided. Please include X-Api-Key header."
         )
+    logger.info("Received API key")
     return x_api_key
 
 # System status endpoint
