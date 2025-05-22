@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+from datetime import datetime
 from typing import Dict, List, Optional, Any, Union, Tuple
 import asyncpg
 from contextlib import asynccontextmanager
@@ -229,14 +230,28 @@ class Database:
         try:
             async with self.get_connection() as conn:
                 async with conn.transaction():
-                    # Prepare bulk insert data
+                    # Prepare bulk insert data with proper datetime handling
                     job_data = []
                     for job, user_id in jobs:
                         job_dict = job.to_dict()
+
+                        # Handle datetime conversion
+                        date_found = job.date_found if isinstance(job.date_found, datetime) else datetime.now()
+                        applied_date = job.applied_date if isinstance(job.applied_date, datetime) else None
+                        rejected_date = job.rejected_date if isinstance(job.rejected_date, datetime) else None
+
+                        # Parse string datetimes if needed
+                        if isinstance(job.date_found, str):
+                            date_found = datetime.fromisoformat(job.date_found.replace('Z', '+00:00'))
+                        if isinstance(job.applied_date, str):
+                            applied_date = datetime.fromisoformat(job.applied_date.replace('Z', '+00:00'))
+                        if isinstance(job.rejected_date, str):
+                            rejected_date = datetime.fromisoformat(job.rejected_date.replace('Z', '+00:00'))
+
                         job_data.append((
                             job_dict["id"], user_id, job_dict["job_url"],
-                            job_dict["status"], job_dict["date_found"],
-                            job_dict["applied_date"], job_dict["rejected_date"],
+                            job_dict["status"], date_found,
+                            applied_date, rejected_date,
                             job_dict["resume_id"], json.dumps(job_dict.get("metadata", {}))
                         ))
 
@@ -261,28 +276,52 @@ class Database:
             async with self.get_connection() as conn:
                 job_dict = job.to_dict()
 
+                # Convert datetime strings back to datetime objects for database
+                date_found = job.date_found if isinstance(job.date_found, datetime) else None
+                applied_date = job.applied_date if isinstance(job.applied_date, datetime) else None
+                rejected_date = job.rejected_date if isinstance(job.rejected_date, datetime) else None
+
+                # If they're strings, parse them
+                if isinstance(job.date_found, str):
+                    date_found = datetime.fromisoformat(job.date_found.replace('Z', '+00:00'))
+                elif job.date_found is None:
+                    date_found = datetime.now()
+                else:
+                    date_found = job.date_found
+
+                if isinstance(job.applied_date, str):
+                    applied_date = datetime.fromisoformat(job.applied_date.replace('Z', '+00:00'))
+                else:
+                    applied_date = job.applied_date
+
+                if isinstance(job.rejected_date, str):
+                    rejected_date = datetime.fromisoformat(job.rejected_date.replace('Z', '+00:00'))
+                else:
+                    rejected_date = job.rejected_date
+
                 # Use UPSERT for better performance
                 await conn.execute('''
-                INSERT INTO jobs (id, user_id, job_url, status, date_found, applied_date,
-                                rejected_date, resume_id, metadata, updated_at)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
-                ON CONFLICT (id, user_id) DO UPDATE SET
-                    job_url = EXCLUDED.job_url,
-                    status = EXCLUDED.status,
-                    applied_date = EXCLUDED.applied_date,
-                    rejected_date = EXCLUDED.rejected_date,
-                    resume_id = EXCLUDED.resume_id,
-                    metadata = EXCLUDED.metadata,
-                    updated_at = NOW()
-                ''',
+                    INSERT INTO jobs (id, user_id, job_url, status, date_found, applied_date,
+                                    rejected_date, resume_id, metadata, updated_at)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+                    ON CONFLICT (id, user_id) DO UPDATE SET
+                        job_url = EXCLUDED.job_url,
+                        status = EXCLUDED.status,
+                        applied_date = EXCLUDED.applied_date,
+                        rejected_date = EXCLUDED.rejected_date,
+                        resume_id = EXCLUDED.resume_id,
+                        metadata = EXCLUDED.metadata,
+                        updated_at = NOW()
+                    ''',
                                    job_dict["id"], user_id, job_dict["job_url"], job_dict["status"],
-                                   job_dict["date_found"], job_dict["applied_date"], job_dict["rejected_date"],
+                                   date_found, applied_date, rejected_date,
                                    job_dict["resume_id"], json.dumps(job_dict.get("metadata", {}))
                                    )
                 return True
         except Exception as e:
             logger.error(f"Error saving job: {e}")
             return False
+
 
     async def get_job(self, job_id: str, user_id: str) -> Optional[Job]:
         """Optimized job retrieval."""
@@ -431,6 +470,11 @@ class Database:
             async with self.get_connection() as conn:
                 resume_dict = resume.to_dict()
 
+                # Handle datetime conversion for resume
+                date_created = resume.date_created if isinstance(resume.date_created, datetime) else datetime.now()
+                if isinstance(resume.date_created, str):
+                    date_created = datetime.fromisoformat(resume.date_created.replace('Z', '+00:00'))
+
                 await conn.execute('''
                 INSERT INTO resumes (id, user_id, job_id, file_path, yaml_content,
                                    date_created, uploaded_to_simplify, updated_at)
@@ -444,7 +488,7 @@ class Database:
                 ''',
                                    resume_dict["id"], user_id, resume_dict["job_id"],
                                    resume_dict["file_path"], resume_dict["yaml_content"],
-                                   resume_dict["date_created"], resume_dict["uploaded_to_simplify"]
+                                   date_created, resume_dict["uploaded_to_simplify"]
                                    )
                 return True
         except Exception as e:
@@ -531,7 +575,7 @@ class Database:
     # Helper Methods
 
     def _row_to_job(self, row) -> Job:
-        """Convert database row to Job object."""
+        """Convert database row to Job object with proper datetime handling."""
         job_dict = dict(row)
 
         # Parse metadata
@@ -540,11 +584,22 @@ class Database:
                 job_dict["metadata"] = json.loads(job_dict["metadata"])
         else:
             job_dict["metadata"] = {}
+
+        # Ensure datetime fields are properly formatted for Job.from_dict()
+        for date_field in ['date_found', 'applied_date', 'rejected_date']:
+            if job_dict.get(date_field) and isinstance(job_dict[date_field], datetime):
+                job_dict[date_field] = job_dict[date_field].isoformat()
+
         return Job.from_dict(job_dict)
 
+
     def _row_to_resume(self, row) -> Resume:
-        """Convert database row to Resume object."""
+        """Convert database row to Resume object with proper datetime handling."""
         resume_dict = dict(row)
+
+        # Ensure datetime fields are properly formatted for Resume.from_dict()
+        if resume_dict.get('date_created') and isinstance(resume_dict['date_created'], datetime):
+            resume_dict['date_created'] = resume_dict['date_created'].isoformat()
 
         return Resume.from_dict(resume_dict)
 
