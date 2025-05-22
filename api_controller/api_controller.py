@@ -1,18 +1,14 @@
-import asyncio
-import io
 import hashlib
-from datetime import datetime
 
-from fastapi import FastAPI, HTTPException, Depends, Query, BackgroundTasks, Header, UploadFile, Form, File
+
+from fastapi import FastAPI, HTTPException, Depends, Query, Header, UploadFile, Form, File
 from fastapi.middleware.cors import CORSMiddleware
-from typing import List, Optional
+from typing import  Optional
 import logging
 import os
-import time
 from datetime import datetime
 import uvicorn
 from dotenv import load_dotenv
-from starlette.responses import StreamingResponse, FileResponse
 
 import config
 from dataModels.api_models import JobStatusUpdateRequest, GenerateResumeRequest, \
