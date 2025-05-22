@@ -8,7 +8,7 @@ import yaml
 from yaml import YAMLError
 
 import config
-from data.cache import ResumeGenerationCache, ResumeGenerationStatus
+from data.cache import ResumeCache, ResumeGenerationStatus
 from dataModels.data_models import JobStatus, Resume
 from services import ResumeImprover
 
@@ -23,7 +23,7 @@ class ResumeGenerator:
         self.db_manager = db_manager
         self.user_id = user_id
         self.api_key = api_key
-        self.generation_cache = ResumeGenerationCache()
+        self.generation_cache = ResumeCache()
         # Thread pool for blocking operations
         self.thread_pool = concurrent.futures.ThreadPoolExecutor(max_workers=4)
 
