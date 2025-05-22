@@ -1,13 +1,33 @@
 version: '3.8'
 
 services:
+  # Nginx reverse proxy with SSL termination
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/certs:/etc/nginx/certs:ro
+      - ./nginx/html:/usr/share/nginx/html:ro
+    depends_on:
+      - jobtrak-api
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:80/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
   # FastAPI service for the JobTrak Backend
   jobtrak-api:
     build:
       context: .
       dockerfile: Dockerfile.api
+    expose:
+      - "80"  # Only expose internally, not to host
     ports:
-      - "8000:8000"
       - "5678:5678"  # Debug port for remote debugging
     volumes:
       - .:/app
@@ -18,7 +38,7 @@ services:
       - PYTHONUNBUFFERED=1
       - SELENIUM_REMOTE_URL=http://selenium-chrome:4444/wd/hub
     healthcheck:
-      test: ["CMD", "curl", "--fail", "http://localhost:8000/api/status"]
+      test: ["CMD", "curl", "--fail", "http://localhost:80/api/status"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -30,8 +50,9 @@ services:
   # Selenium Chrome service for web automation
   selenium-chrome:
     image: selenium/standalone-chrome:latest
+    expose:
+      - "4444"  # Only expose internally
     ports:
-      - "4444:4444"
       - "7900:7900"  # VNC server port for debugging
     environment:
       - SE_NODE_MAX_SESSIONS=4

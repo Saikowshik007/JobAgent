@@ -29,6 +29,6 @@ ENV PYTHONUNBUFFERED=1 \
     SELENIUM_REMOTE_URL=http://selenium-chrome:4444/wd/hub
 
 # Expose the port
-EXPOSE 8000 5678
+EXPOSE 80 5678
 
 CMD ["python", "-m", "api_controller.api_controller"]
