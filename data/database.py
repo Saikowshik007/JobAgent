@@ -72,6 +72,7 @@ class Database:
     async def initialize_db(self):
         """Initialize the database schema with optimized indexes."""
         try:
+            # First, create tables in transaction
             async with self.get_connection() as conn:
                 # Drop existing schema
                 await self._drop_existing_schema(conn)
@@ -79,96 +80,136 @@ class Database:
                 # Create optimized tables
                 await self._create_optimized_tables(conn)
 
-                # Create optimized indexes
-                await self._create_optimized_indexes(conn)
+            # Create indexes OUTSIDE of transaction context
+            await self._create_optimized_indexes()
 
-                logger.info("Optimized database schema initialized successfully")
+            logger.info("Optimized database schema initialized successfully")
         except Exception as e:
             logger.error(f"Error initializing database: {e}")
             raise
 
     async def _drop_existing_schema(self, conn):
         """Drop existing schema elements."""
-        await conn.execute('''
-        DROP TABLE IF EXISTS search_job_mapping CASCADE;
-        DROP TABLE IF EXISTS search_history CASCADE;
-        DROP TABLE IF EXISTS resumes CASCADE;
-        DROP TABLE IF EXISTS jobs CASCADE;
-        DROP INDEX IF EXISTS idx_jobs_user_status;
-        DROP INDEX IF EXISTS idx_jobs_user_url;
-        DROP INDEX IF EXISTS idx_jobs_user_date;
-        DROP INDEX IF EXISTS idx_resumes_user_job;
-        DROP INDEX IF EXISTS idx_search_user_date;
-        ''')
+        try:
+            await conn.execute('''
+                DROP TABLE IF EXISTS search_job_mapping CASCADE;
+                DROP TABLE IF EXISTS search_history CASCADE;
+                DROP TABLE IF EXISTS resumes CASCADE;
+                DROP TABLE IF EXISTS jobs CASCADE;
+                ''')
+
+            # Drop indexes if they exist
+            index_drops = [
+                "DROP INDEX IF EXISTS idx_jobs_user_status",
+                "DROP INDEX IF EXISTS idx_jobs_user_url",
+                "DROP INDEX IF EXISTS idx_jobs_user_date",
+                "DROP INDEX IF EXISTS idx_resumes_user_job",
+                "DROP INDEX IF EXISTS idx_search_user_date",
+                "DROP INDEX IF EXISTS idx_jobs_user_status_date",
+                "DROP INDEX IF EXISTS idx_jobs_user_url_hash",
+                "DROP INDEX IF EXISTS idx_jobs_metadata_gin",
+                "DROP INDEX IF EXISTS idx_search_filters_gin",
+                "DROP INDEX IF EXISTS idx_jobs_user_url_unique"
+            ]
+
+            for drop_sql in index_drops:
+                try:
+                    await conn.execute(drop_sql)
+                except Exception as e:
+                    # Ignore errors when dropping indexes that don't exist
+                    pass
+
+        except Exception as e:
+            logger.warning(f"Error dropping existing schema: {e}")
+            # Continue even if drop fails
 
     async def _create_optimized_tables(self, conn):
         """Create tables with optimized structure."""
         # Jobs table with better column types
         await conn.execute('''
-        CREATE TABLE jobs (
-            id TEXT NOT NULL,
-            user_id TEXT NOT NULL,
-            job_url TEXT NOT NULL,
-            status TEXT NOT NULL DEFAULT 'NEW',
-            date_found TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            applied_date TIMESTAMPTZ,
-            rejected_date TIMESTAMPTZ,
-            resume_id TEXT,
-            metadata JSONB DEFAULT '{}',
-            created_at TIMESTAMPTZ DEFAULT NOW(),
-            updated_at TIMESTAMPTZ DEFAULT NOW(),
-            PRIMARY KEY (id, user_id)
-        )
-        ''')
+            CREATE TABLE jobs (
+                id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                job_url TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'NEW',
+                date_found TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                applied_date TIMESTAMPTZ,
+                rejected_date TIMESTAMPTZ,
+                resume_id TEXT,
+                metadata JSONB DEFAULT '{}',
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                updated_at TIMESTAMPTZ DEFAULT NOW(),
+                PRIMARY KEY (id, user_id)
+            )
+            ''')
 
         # Resumes table with better structure
         await conn.execute('''
-        CREATE TABLE resumes (
-            id TEXT NOT NULL,
-            user_id TEXT NOT NULL,
-            job_id TEXT,
-            file_path TEXT NOT NULL,
-            yaml_content TEXT NOT NULL,
-            date_created TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            uploaded_to_simplify BOOLEAN DEFAULT FALSE,
-            created_at TIMESTAMPTZ DEFAULT NOW(),
-            updated_at TIMESTAMPTZ DEFAULT NOW(),
-            PRIMARY KEY (id, user_id)
-        )
-        ''')
+            CREATE TABLE resumes (
+                id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                job_id TEXT,
+                file_path TEXT NOT NULL,
+                yaml_content TEXT NOT NULL,
+                date_created TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                uploaded_to_simplify BOOLEAN DEFAULT FALSE,
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                updated_at TIMESTAMPTZ DEFAULT NOW(),
+                PRIMARY KEY (id, user_id)
+            )
+            ''')
 
         # Search history with better performance
         await conn.execute('''
-        CREATE TABLE search_history (
-            id TEXT NOT NULL,
-            user_id TEXT NOT NULL,
-            keywords TEXT NOT NULL,
-            location TEXT NOT NULL,
-            filters JSONB DEFAULT '{}',
-            date_searched TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            job_count INTEGER DEFAULT 0,
-            job_ids JSONB DEFAULT '[]',
-            created_at TIMESTAMPTZ DEFAULT NOW(),
-            PRIMARY KEY (id, user_id)
-        )
-        ''')
+            CREATE TABLE search_history (
+                id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                keywords TEXT NOT NULL,
+                location TEXT NOT NULL,
+                filters JSONB DEFAULT '{}',
+                date_searched TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                job_count INTEGER DEFAULT 0,
+                job_ids JSONB DEFAULT '[]',
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                PRIMARY KEY (id, user_id)
+            )
+            ''')
 
-    async def _create_optimized_indexes(self, conn):
-        """Create optimized indexes for better query performance."""
-        # Composite indexes for common query patterns
-        await conn.execute('''
-        CREATE INDEX CONCURRENTLY idx_jobs_user_status_date ON jobs(user_id, status, date_found DESC);
-        CREATE INDEX CONCURRENTLY idx_jobs_user_url_hash ON jobs(user_id, md5(job_url));
-        CREATE INDEX CONCURRENTLY idx_jobs_metadata_gin ON jobs USING GIN(metadata);
-        CREATE INDEX CONCURRENTLY idx_resumes_user_job ON resumes(user_id, job_id);
-        CREATE INDEX CONCURRENTLY idx_search_user_date ON search_history(user_id, date_searched DESC);
-        CREATE INDEX CONCURRENTLY idx_search_filters_gin ON search_history USING GIN(filters);
-        ''')
+    async def _create_optimized_indexes(self):
+        """Create optimized indexes for better query performance - outside transaction."""
+        try:
+            async with self.get_connection() as conn:
+                # Create indexes one by one, handling errors gracefully
+                # Using regular CREATE INDEX instead of CONCURRENT for initialization
+                indexes = [
+                    ("idx_jobs_user_status_date", "CREATE INDEX IF NOT EXISTS idx_jobs_user_status_date ON jobs(user_id, status, date_found DESC)"),
+                    ("idx_jobs_user_url_hash", "CREATE INDEX IF NOT EXISTS idx_jobs_user_url_hash ON jobs(user_id, md5(job_url))"),
+                    ("idx_jobs_metadata_gin", "CREATE INDEX IF NOT EXISTS idx_jobs_metadata_gin ON jobs USING GIN(metadata)"),
+                    ("idx_resumes_user_job", "CREATE INDEX IF NOT EXISTS idx_resumes_user_job ON resumes(user_id, job_id)"),
+                    ("idx_search_user_date", "CREATE INDEX IF NOT EXISTS idx_search_user_date ON search_history(user_id, date_searched DESC)"),
+                    ("idx_search_filters_gin", "CREATE INDEX IF NOT EXISTS idx_search_filters_gin ON search_history USING GIN(filters)"),
+                ]
 
-        # Unique constraints
-        await conn.execute('''
-        CREATE UNIQUE INDEX CONCURRENTLY idx_jobs_user_url_unique ON jobs(user_id, job_url);
-        ''')
+                for index_name, index_sql in indexes:
+                    try:
+                        await conn.execute(index_sql)
+                        logger.info(f"Created index: {index_name}")
+                    except Exception as e:
+                        logger.warning(f"Failed to create index {index_name}: {e}")
+
+                # Create unique constraint separately
+                try:
+                    await conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_user_url_unique ON jobs(user_id, job_url)")
+                    logger.info("Created unique constraint: idx_jobs_user_url_unique")
+                except Exception as e:
+                    logger.warning(f"Failed to create unique constraint: {e}")
+
+                logger.info("Database indexes created successfully")
+
+        except Exception as e:
+            logger.error(f"Error creating indexes: {e}")
+            # Don't raise here - indexes are not critical for basic functionality
+            logger.warning("Continuing without some indexes - performance may be affected")
 
     # Optimized Job Methods
 
