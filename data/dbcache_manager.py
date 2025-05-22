@@ -9,27 +9,35 @@ logger = logging.getLogger(__name__)
 
 class DBCacheManager:
     """
-    Integration class that connects the database with the in-memory cache system.
-    This manager handles interactions between the database and the cache system,
-    ensuring data consistency and optimizing performance in a thread-safe manner.
+    Unified cache manager that handles all caching operations including jobs, search results, and resumes.
+    This manager provides a single interface for all database and cache interactions.
     """
 
     # Thread local storage to ensure thread safety
     _thread_local = threading.local()
 
-    def __init__(self, database=None, job_cache=None, search_cache=None):
+    def __init__(self, database=None, job_cache=None, search_cache=None, resume_cache=None):
         """
-        Initialize the cache manager with database and cache instances.
+        Initialize the unified cache manager with database and cache instances.
 
         Args:
             database: Database instance
             job_cache: JobCache instance
             search_cache: SearchCache instance (optional)
+            resume_cache: ResumeCache instance (optional, will be created if not provided)
         """
         self.db = database
         self.job_cache = job_cache
-        self.search_cache = search_cache  # Add search_cache support
+        self.search_cache = search_cache
 
+        # Initialize resume cache if not provided
+        if resume_cache is None:
+            from data.cache import ResumeCache
+            self.resume_cache = ResumeCache()
+        else:
+            self.resume_cache = resume_cache
+
+    # Job Management Methods
     async def get_cached_search_results(self, keywords: str, location: str, filters: Dict[str, Any], user_id: str) -> List[Dict[str, Any]]:
         """
         Get search results from cache or database.
@@ -326,6 +334,7 @@ class DBCacheManager:
                 return {'total': 0}
         return {'total': 0}
 
+    # Resume Management Methods
     async def save_resume(self, resume, user_id: str) -> bool:
         """
         Save a resume to the database.
@@ -364,6 +373,91 @@ class DBCacheManager:
                 return None
         return None
 
+    # Resume Generation Status Management (now integrated)
+    async def get_resume_status(self, resume_id: str, user_id: str) -> Optional[Dict]:
+        """Get resume generation status from cache."""
+        try:
+            return await self.resume_cache.get_status(resume_id, user_id)
+        except Exception as e:
+            logger.error(f"Error getting resume status for user {user_id}: {e}")
+            return None
+
+    async def set_resume_status(self, resume_id: str, user_id: str, status, data=None, error=None):
+        """Set resume generation status in cache."""
+        try:
+            await self.resume_cache.set_status(resume_id, user_id, status, data, error)
+        except Exception as e:
+            logger.error(f"Error setting resume status for user {user_id}: {e}")
+
+    async def remove_resume_status(self, resume_id: str, user_id: str):
+        """Remove resume generation status from cache."""
+        try:
+            await self.resume_cache.remove(resume_id, user_id)
+        except Exception as e:
+            logger.error(f"Error removing resume status for user {user_id}: {e}")
+
+    # Cache Management Methods
+    async def clear_user_cache(self, user_id: str):
+        """Clear all cache data for a user."""
+        try:
+            # Clear job cache
+            if self.job_cache:
+                self.job_cache.clear_user(user_id)
+
+            # Clear search cache
+            if self.search_cache:
+                self.search_cache.clear_user(user_id)
+
+            # Clear resume cache
+            await self.resume_cache.clear_user_cache(user_id)
+
+            logger.info(f"Cleared all cache data for user {user_id}")
+        except Exception as e:
+            logger.error(f"Error clearing cache for user {user_id}: {e}")
+
+    async def cleanup_expired_cache(self):
+        """Clean up expired cache entries."""
+        try:
+            await self.resume_cache.cleanup_expired()
+            logger.info("Cleaned up expired cache entries")
+        except Exception as e:
+            logger.error(f"Error cleaning up expired cache: {e}")
+
+    def get_cache_stats(self) -> Dict[str, Any]:
+        """Get comprehensive cache statistics."""
+        stats = {
+            "timestamp": "now",
+            "resume_cache": self.resume_cache.get_stats() if self.resume_cache else {},
+        }
+
+        if self.job_cache:
+            stats["job_cache"] = self.job_cache.get_stats()
+
+        if self.search_cache:
+            stats["search_cache"] = getattr(self.search_cache, 'get_stats', lambda: {})()
+
+        return stats
+
+    # Database Health Check
+    async def health_check(self) -> Dict[str, Any]:
+        """Perform health check on database and caches."""
+        health_info = {
+            "database": "unavailable",
+            "job_cache": "available" if self.job_cache else "unavailable",
+            "search_cache": "available" if self.search_cache else "unavailable",
+            "resume_cache": "available" if self.resume_cache else "unavailable"
+        }
+
+        if self.db:
+            try:
+                db_health = await self.db.health_check()
+                health_info["database"] = db_health
+            except Exception as e:
+                health_info["database"] = {"status": "error", "error": str(e)}
+
+        return health_info
+
+    # Helper Methods
     def _generate_search_key(self, keywords: str, location: str, filters: Dict[str, Any], user_id: str) -> str:
         """
         Generate a unique identifier for a search based on its parameters.

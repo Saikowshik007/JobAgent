@@ -15,7 +15,6 @@ from dotenv import load_dotenv
 from starlette.responses import StreamingResponse, FileResponse
 
 import config
-from data.cache_manager import cache_manager
 from dataModels.api_models import JobStatusUpdateRequest, GenerateResumeRequest, \
     UploadToSimplifyRequest
 from services.resume_generator import ResumeGenerator
@@ -27,7 +26,7 @@ load_dotenv()
 from data.database import Database
 from dataModels.data_models import JobStatus, Job
 from data.dbcache_manager import DBCacheManager
-from data.cache import JobCache
+from data.cache import JobCache, ResumeCache
 
 # Configure logging
 logging.basicConfig(
@@ -77,20 +76,22 @@ async def initialize(db_url=None, job_cache_size=None, search_cache_size=None):
 
         # Initialize caches
         job_cache = JobCache(max_size=job_cache_size)
+        resume_cache = ResumeCache()
         logger.info(f"Initialized caches with sizes - job: {job_cache_size}, search: {search_cache_size}")
 
-        # Initialize cache manager
-        db_manager = DBCacheManager(
+        # Initialize unified cache manager (no more separate cache managers!)
+        cache_manager = DBCacheManager(
             database=db,
             job_cache=job_cache,
+            resume_cache=resume_cache
         )
-        logger.info("Initialized database cache manager")
+        logger.info("Initialized unified cache manager")
 
         # Store in application state
         app.state.db = db
         app.state.job_cache = job_cache
-        app.state.db_manager = db_manager
-        app.state.cache_manager = cache_manager  # Add global cache manager
+        app.state.resume_cache = resume_cache
+        app.state.cache_manager = cache_manager  # Single unified cache manager
 
         logger.info("Application initialization complete")
         return True
@@ -107,17 +108,17 @@ async def startup_event():
         logger.error("Failed to initialize application during startup")
         raise Exception("Application initialization failed")
 
-# Dependency to get database manager
-def get_db_manager():
-    """Get the database manager instance."""
-    if not hasattr(app.state, "db_manager"):
-        # If db_manager is not in app.state, raise an exception
+# Dependency to get cache manager
+def get_cache_manager():
+    """Get the unified cache manager instance."""
+    if not hasattr(app.state, "cache_manager"):
+        # If cache_manager is not in app.state, raise an exception
         raise HTTPException(
             status_code=500,
-            detail="Database manager not initialized. Please check server configuration."
+            detail="Cache manager not initialized. Please check server configuration."
         )
 
-    return app.state.db_manager
+    return app.state.cache_manager
 
 async def get_user_id(x_user_id: Optional[str] = Header(None)):
     """Get user_id from header or use default if not provided."""
@@ -141,40 +142,27 @@ async def get_user_key(x_api_key: Optional[str] = Header(None)):
 # System status endpoint
 @app.get("/api/status", tags=["System"])
 async def get_system_status(
-        db_manager: DBCacheManager = Depends(get_db_manager),
+        cache_manager: DBCacheManager = Depends(get_cache_manager),
         user_id: str = Depends(get_user_id)
 ):
-    """Get the overall status of the job tracking system - now non-blocking."""
+    """Get the overall status of the job tracking system."""
     try:
-        # This should now be much faster since resume generation doesn't block
-        db = db_manager.db if db_manager else None
-        db_status = "OK"
-        job_stats = {}
+        # Get health check from unified cache manager
+        health_info = await cache_manager.health_check()
 
-        try:
-            if db:
-                # Use the optimized get_job_stats method
-                job_stats = await db_manager.get_job_stats(user_id)
-        except Exception as e:
-            db_status = f"Error: {str(e)}"
-            job_stats = {
-                "total": 0,
-                "NEW": 0,
-                "INTERESTED": 0,
-                "APPLIED": 0,
-                "INTERVIEW": 0,
-                "OFFER": 0,
-                "REJECTED": 0
-            }
+        # Get job statistics
+        job_stats = await cache_manager.get_job_stats(user_id)
+
+        # Get cache statistics
+        cache_stats = cache_manager.get_cache_stats()
 
         return {
             "status": "online",
             "timestamp": datetime.now().isoformat(),
             "user_id": user_id,
-            "components": {
-                "database": db_status
-            },
-            "job_stats": job_stats
+            "health": health_info,
+            "job_stats": job_stats,
+            "cache_stats": cache_stats
         }
     except Exception as e:
         logger.error(f"Error getting system status for user {user_id}: {e}")
@@ -186,13 +174,13 @@ async def analyze_job(
         job_url: str = Form(...),
         status: Optional[str] = Form(None),
         resume_id: Optional[str] = Form(None),
-        db_manager: DBCacheManager = Depends(get_db_manager),
+        cache_manager: DBCacheManager = Depends(get_cache_manager),
         user_id: str = Depends(get_user_id),
         api_key: str = Depends(get_user_key)
 ):
     """Analyze a job posting from a URL."""
     try:
-        job_exist = await db_manager.job_exists(url=job_url, user_id=user_id)
+        job_exist = await cache_manager.job_exists(url=job_url, user_id=user_id)
         if job_exist:
             raise HTTPException(status_code=409, detail="Job already exists!!")
 
@@ -221,8 +209,8 @@ async def analyze_job(
             metadata=job_details
         )
 
-        # Save job using the cache manager
-        await db_manager.save_job(job, user_id)
+        # Save job using the unified cache manager
+        await cache_manager.save_job(job, user_id)
 
         return {
             "message": "Job analyzed successfully",
@@ -243,7 +231,7 @@ async def get_jobs(
         company: Optional[str] = None,
         limit: int = Query(100, ge=1, le=1000),
         offset: int = Query(0, ge=0),
-        db_manager: DBCacheManager = Depends(get_db_manager),
+        cache_manager: DBCacheManager = Depends(get_cache_manager),
         user_id: str = Depends(get_user_id)
 ):
     """Get jobs from the database with optional filtering."""
@@ -256,8 +244,8 @@ async def get_jobs(
             except ValueError:
                 logger.warning(f"Invalid status filter: {status}")
 
-        # Get jobs using cache manager
-        jobs = await db_manager.get_all_jobs(user_id, status=status_filter, limit=limit, offset=offset)
+        # Get jobs using unified cache manager
+        jobs = await cache_manager.get_all_jobs(user_id, status=status_filter, limit=limit, offset=offset)
 
         # Apply additional filters
         if company:
@@ -284,17 +272,13 @@ async def get_jobs(
 
 @app.delete("/api/cache/clear", tags=["System"])
 async def clear_cache(
+        cache_manager: DBCacheManager = Depends(get_cache_manager),
         user_id: str = Depends(get_user_id)
 ):
     """Clear user's cache data."""
     try:
-        # Clear job cache
-        if hasattr(app.state, 'job_cache'):
-            app.state.job_cache.clear_user(user_id)
-
-        # Clear search cache if it exists
-        if hasattr(app.state, 'search_cache'):
-            app.state.search_cache.clear_user(user_id)
+        # Clear all cache data using unified cache manager
+        await cache_manager.clear_user_cache(user_id)
 
         return {
             "message": "Cache cleared successfully",
@@ -305,35 +289,16 @@ async def clear_cache(
         logger.error(f"Error clearing cache for user {user_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-# Add endpoint to get active resume generations
-@app.get("/api/resume/active", tags=["Resume"])
-async def get_active_resume_generations(
-        db_manager: DBCacheManager = Depends(get_db_manager),
-        user_id: str = Depends(get_user_id)
-):
-    """Get all active resume generations for a user."""
-    try:
-        # This would require modifying the cache to support listing all entries for a user
-        # For now, return a simple response
-        return {
-            "message": "Active resume generations tracking",
-            "user_id": user_id,
-            "note": "Individual resume status should be checked using /api/resume/{resume_id}/status"
-        }
-    except Exception as e:
-        logger.error(f"Error getting active resume generations for user {user_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
 # Get specific job endpoint
 @app.get("/api/jobs/{job_id}", tags=["Jobs"])
 async def get_job(
         job_id: str,
-        db_manager: DBCacheManager = Depends(get_db_manager),
+        cache_manager: DBCacheManager = Depends(get_cache_manager),
         user_id: str = Depends(get_user_id)
 ):
     """Get a specific job by ID."""
     try:
-        job_dict = await db_manager.get_job(job_id, user_id)
+        job_dict = await cache_manager.get_job(job_id, user_id)
 
         if not job_dict:
             raise HTTPException(status_code=404, detail=f"Job not found with ID: {job_id} for user: {user_id}")
@@ -351,7 +316,7 @@ async def get_job(
 async def update_job_status(
         job_id: str,
         request: JobStatusUpdateRequest,
-        db_manager: DBCacheManager = Depends(get_db_manager),
+        cache_manager: DBCacheManager = Depends(get_cache_manager),
         user_id: str = Depends(get_user_id)
 ):
     """Update the status of a job."""
@@ -368,7 +333,7 @@ async def update_job_status(
                 detail=f"Invalid status value: {status}. Valid values are: {valid_statuses}"
             )
 
-        success = await db_manager.update_job_status(job_id, user_id, status_enum)
+        success = await cache_manager.update_job_status(job_id, user_id, status_enum)
 
         if not success:
             raise HTTPException(
@@ -377,7 +342,7 @@ async def update_job_status(
             )
 
         # Get the updated job
-        job_dict = await db_manager.get_job(job_id, user_id)
+        job_dict = await cache_manager.get_job(job_id, user_id)
 
         return {
             "message": f"Job status updated to {status}",
@@ -394,14 +359,14 @@ async def update_job_status(
 @app.post("/api/resume/generate", tags=["Resume"])
 async def generate_resume(
         request: GenerateResumeRequest,
-        db_manager: DBCacheManager = Depends(get_db_manager),
+        cache_manager: DBCacheManager = Depends(get_cache_manager),
         user_id: str = Depends(get_user_id),
         api_key: str = Depends(get_user_key)
 ):
     """Generate a tailored resume for a specific job using the provided resume data."""
     try:
-        # Initialize resume generator
-        resume_generator = ResumeGenerator(db_manager, user_id, api_key)
+        # Initialize resume generator with unified cache manager
+        resume_generator = ResumeGenerator(cache_manager, user_id, api_key)
 
         # Start the resume generation process with the provided resume data
         # This is now non-blocking and uses cache for status tracking
@@ -424,13 +389,13 @@ async def generate_resume(
 async def download_resume(
         resume_id: str,
         format: str = Query("yaml", regex="^(yaml)$"),
-        db_manager: DBCacheManager = Depends(get_db_manager),
+        cache_manager: DBCacheManager = Depends(get_cache_manager),
         user_id: str = Depends(get_user_id)
 ):
     """Download a generated resume in YAML format for client-side rendering."""
     try:
-        # Initialize resume generator
-        resume_generator = ResumeGenerator(db_manager, user_id, "")
+        # Initialize resume generator with unified cache manager
+        resume_generator = ResumeGenerator(cache_manager, user_id, "")
 
         # Get resume content (checks cache first, then database)
         yaml_content = await resume_generator.get_resume_content(resume_id)
@@ -451,13 +416,13 @@ async def download_resume(
 @app.get("/api/resume/{resume_id}/status", tags=["Resume"])
 async def check_resume_status(
         resume_id: str,
-        db_manager: DBCacheManager = Depends(get_db_manager),
+        cache_manager: DBCacheManager = Depends(get_cache_manager),
         user_id: str = Depends(get_user_id)
 ):
     """Check the status of a resume generation process using cache."""
     try:
-        # Initialize resume generator
-        resume_generator = ResumeGenerator(db_manager, user_id, "")
+        # Initialize resume generator with unified cache manager
+        resume_generator = ResumeGenerator(cache_manager, user_id, "")
 
         # Check resume status (uses cache first, much faster)
         return await resume_generator.check_resume_status(resume_id)
@@ -472,13 +437,13 @@ async def check_resume_status(
 async def upload_resume(
         file: UploadFile = File(...),
         job_id: str = Form(None),
-        db_manager: DBCacheManager = Depends(get_db_manager),
+        cache_manager: DBCacheManager = Depends(get_cache_manager),
         user_id: str = Depends(get_user_id)
 ):
     """Upload a custom resume."""
     try:
-        # Initialize resume generator
-        resume_generator = ResumeGenerator(db_manager, user_id, "")
+        # Initialize resume generator with unified cache manager
+        resume_generator = ResumeGenerator(cache_manager, user_id, "")
 
         # Read file content
         content = await file.read()
@@ -500,14 +465,14 @@ async def upload_resume(
 @app.post("/api/resume/upload-to-simplify", tags=["Resume"])
 async def upload_to_simplify(
         request: UploadToSimplifyRequest,
-        db_manager: DBCacheManager = Depends(get_db_manager),
+        cache_manager: DBCacheManager = Depends(get_cache_manager),
         user_id: str = Depends(get_user_id)
 ):
     """Upload a resume to Simplify.jobs."""
     # This is a placeholder - you'll implement the actual Simplify integration later
     try:
         # Check if job exists
-        job_dict = await db_manager.get_job(request.job_id, user_id)
+        job_dict = await cache_manager.get_job(request.job_id, user_id)
         if not job_dict:
             raise HTTPException(status_code=404, detail=f"Job not found with ID: {request.job_id} for user: {user_id}")
 
@@ -516,7 +481,7 @@ async def upload_to_simplify(
         if not resume_id:
             raise HTTPException(status_code=400, detail="No resume ID provided or associated with this job")
 
-        resume = await db_manager.get_resume(resume_id, user_id)
+        resume = await cache_manager.get_resume(resume_id, user_id)
         if not resume:
             raise HTTPException(status_code=404, detail=f"Resume not found with ID: {resume_id} for user: {user_id}")
 
@@ -540,13 +505,13 @@ async def upload_to_simplify(
 async def update_resume_yaml(
         resume_id: str,
         yaml_content: str = Form(...),
-        db_manager: DBCacheManager = Depends(get_db_manager),
+        cache_manager: DBCacheManager = Depends(get_cache_manager),
         user_id: str = Depends(get_user_id)
 ):
     """Update the YAML content of a resume."""
     try:
         # Get the existing resume
-        resume = await db_manager.get_resume(resume_id, user_id)
+        resume = await cache_manager.get_resume(resume_id, user_id)
         if not resume:
             raise HTTPException(status_code=404, detail=f"Resume not found with ID: {resume_id} for user: {user_id}")
 
@@ -554,7 +519,7 @@ async def update_resume_yaml(
         resume.yaml_content = yaml_content
 
         # Save the updated resume
-        success = await db_manager.save_resume(resume, user_id)
+        success = await cache_manager.save_resume(resume, user_id)
 
         if not success:
             raise HTTPException(status_code=500, detail="Failed to save updated resume YAML")
@@ -568,6 +533,67 @@ async def update_resume_yaml(
         raise
     except Exception as e:
         logger.error(f"Error updating resume YAML for {resume_id} for user {user_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Add endpoint to get active resume generations
+@app.get("/api/resume/active", tags=["Resume"])
+async def get_active_resume_generations(
+        cache_manager: DBCacheManager = Depends(get_cache_manager),
+        user_id: str = Depends(get_user_id)
+):
+    """Get all active resume generations for a user."""
+    try:
+        # Get cache statistics to show activity
+        cache_stats = cache_manager.get_cache_stats()
+
+        return {
+            "message": "Active resume generations tracking",
+            "user_id": user_id,
+            "cache_stats": cache_stats.get("resume_cache", {}),
+            "note": "Individual resume status should be checked using /api/resume/{resume_id}/status"
+        }
+    except Exception as e:
+        logger.error(f"Error getting active resume generations for user {user_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Cache management endpoint
+@app.post("/api/cache/cleanup", tags=["System"])
+async def cleanup_cache(
+        cache_manager: DBCacheManager = Depends(get_cache_manager),
+        user_id: str = Depends(get_user_id)
+):
+    """Clean up expired cache entries."""
+    try:
+        await cache_manager.cleanup_expired_cache()
+
+        return {
+            "message": "Cache cleanup completed",
+            "timestamp": datetime.now().isoformat(),
+            "user_id": user_id
+        }
+    except Exception as e:
+        logger.error(f"Error cleaning up cache: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Cache statistics endpoint
+@app.get("/api/cache/stats", tags=["System"])
+async def get_cache_stats(
+        cache_manager: DBCacheManager = Depends(get_cache_manager),
+        user_id: str = Depends(get_user_id)
+):
+    """Get detailed cache statistics."""
+    try:
+        stats = cache_manager.get_cache_stats()
+        health = await cache_manager.health_check()
+
+        return {
+            "cache_stats": stats,
+            "health": health,
+            "user_id": user_id,
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Error getting cache stats: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # Shutdown event - clean up resources

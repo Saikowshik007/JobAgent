@@ -8,7 +8,7 @@ import yaml
 from yaml import YAMLError
 
 import config
-from data.cache import ResumeCache, ResumeGenerationStatus
+from data.cache import ResumeGenerationStatus
 from dataModels.data_models import JobStatus, Resume
 from services.resume_improver import ResumeImprover
 
@@ -16,23 +16,22 @@ logger = config.getLogger("Resume Generator")
 
 class ResumeGenerator:
     """
-    Improved Resume Generator with cache-based status tracking.
+    Resume Generator using unified cache manager for all operations.
     """
 
-    def __init__(self, db_manager, user_id: str, api_key: str):
-        """Initialize the ResumeGenerator with database manager and user ID."""
-        self.db_manager = db_manager
+    def __init__(self, cache_manager, user_id: str, api_key: str):
+        """Initialize the ResumeGenerator with unified cache manager and user ID."""
+        self.cache_manager = cache_manager  # Single unified cache manager
         self.user_id = user_id
         self.api_key = api_key
-        self.generation_cache = ResumeCache()
         # Thread pool for blocking operations
         self.thread_pool = concurrent.futures.ThreadPoolExecutor(max_workers=4)
 
     async def generate_resume(self, job_id: str, template: str = "standard",
                               customize: bool = True, resume_data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Generate a tailored resume for a specific job."""
-        # Get the job from database using the cache manager
-        job_dict = await self.db_manager.get_job(job_id, self.user_id)
+        # Get the job from database using the unified cache manager
+        job_dict = await self.cache_manager.get_job(job_id, self.user_id)
         if not job_dict:
             raise ValueError(f"Job not found with ID: {job_id} for user: {self.user_id}")
 
@@ -43,17 +42,17 @@ class ResumeGenerator:
         # Generate a unique ID for the resume
         resume_id = str(uuid.uuid4())
 
-        # Set initial status in cache
-        await self.generation_cache.set_status(
+        # Set initial status in cache using unified cache manager
+        await self.cache_manager.set_resume_status(
             resume_id, self.user_id, ResumeGenerationStatus.PENDING
         )
 
         # Update job status to indicate resume generation is in progress
-        await self.db_manager.update_job_status(job.id, self.user_id, JobStatus.RESUME_GENERATED)
+        await self.cache_manager.update_job_status(job.id, self.user_id, JobStatus.RESUME_GENERATED)
 
         # Also update resume_id in job record
         job.resume_id = resume_id
-        await self.db_manager.save_job(job, self.user_id)
+        await self.cache_manager.save_job(job, self.user_id)
 
         # Start background generation (non-blocking)
         asyncio.create_task(self._generate_resume_background(
@@ -76,8 +75,8 @@ class ResumeGenerator:
         try:
             logger.info(f"Starting resume generation for job {job.id} for user {self.user_id}")
 
-            # Update status to in progress
-            await self.generation_cache.set_status(
+            # Update status to in progress using unified cache manager
+            await self.cache_manager.set_resume_status(
                 resume_id, self.user_id, ResumeGenerationStatus.IN_PROGRESS
             )
 
@@ -99,11 +98,11 @@ class ResumeGenerator:
                 uploaded_to_simplify=False
             )
 
-            # Save completed resume to database using cache manager
-            await self.db_manager.save_resume(resume, self.user_id)
+            # Save completed resume to database using unified cache manager
+            await self.cache_manager.save_resume(resume, self.user_id)
 
-            # Update cache with completed status
-            await self.generation_cache.set_status(
+            # Update cache with completed status using unified cache manager
+            await self.cache_manager.set_resume_status(
                 resume_id, self.user_id, ResumeGenerationStatus.COMPLETED,
                 data={"yaml_content": yaml_content}
             )
@@ -113,8 +112,8 @@ class ResumeGenerator:
         except Exception as e:
             logger.error(f"Error generating resume for job {job.id} for user {self.user_id}: {e}")
 
-            # Update cache with failed status
-            await self.generation_cache.set_status(
+            # Update cache with failed status using unified cache manager
+            await self.cache_manager.set_resume_status(
                 resume_id, self.user_id, ResumeGenerationStatus.FAILED,
                 error=str(e)
             )
@@ -198,9 +197,9 @@ class ResumeGenerator:
             raise
 
     async def check_resume_status(self, resume_id: str) -> Dict[str, Any]:
-        """Check the status of a resume generation process using cache."""
-        # First check cache
-        cache_entry = await self.generation_cache.get_status(resume_id, self.user_id)
+        """Check the status of a resume generation process using unified cache manager."""
+        # First check cache using unified cache manager
+        cache_entry = await self.cache_manager.get_resume_status(resume_id, self.user_id)
 
         if cache_entry:
             status = cache_entry["status"].value
@@ -218,9 +217,9 @@ class ResumeGenerator:
             if status == ResumeGenerationStatus.COMPLETED.value:
                 # If completed, also get job info from database
                 try:
-                    resume = await self.db_manager.get_resume(resume_id, self.user_id)
+                    resume = await self.cache_manager.get_resume(resume_id, self.user_id)
                     if resume and resume.job_id:
-                        job_dict = await self.db_manager.get_job(resume.job_id, self.user_id)
+                        job_dict = await self.cache_manager.get_job(resume.job_id, self.user_id)
                         if job_dict:
                             response["job"] = job_dict
                             response["job_id"] = resume.job_id
@@ -230,14 +229,14 @@ class ResumeGenerator:
             return response
 
         # If not in cache, check if it exists in database (for old resumes)
-        resume = await self.db_manager.get_resume(resume_id, self.user_id)
+        resume = await self.cache_manager.get_resume(resume_id, self.user_id)
         if not resume:
             raise ValueError(f"Resume not found with ID: {resume_id} for user: {self.user_id}")
 
         # If exists in database, it's completed
         job_dict = None
         if resume.job_id:
-            job_dict = await self.db_manager.get_job(resume.job_id, self.user_id)
+            job_dict = await self.cache_manager.get_job(resume.job_id, self.user_id)
 
         return {
             "status": "completed",
@@ -249,9 +248,9 @@ class ResumeGenerator:
         }
 
     async def get_resume_content(self, resume_id: str) -> str:
-        """Get the resume content."""
+        """Get the resume content using unified cache manager."""
         # First check cache for recently generated resumes
-        cache_entry = await self.generation_cache.get_status(resume_id, self.user_id)
+        cache_entry = await self.cache_manager.get_resume_status(resume_id, self.user_id)
 
         if cache_entry and cache_entry["status"] == ResumeGenerationStatus.COMPLETED:
             yaml_content = cache_entry.get("data", {}).get("yaml_content")
@@ -259,7 +258,7 @@ class ResumeGenerator:
                 return yaml_content
 
         # If not in cache or cache doesn't have content, check database
-        resume = await self.db_manager.get_resume(resume_id, self.user_id)
+        resume = await self.cache_manager.get_resume(resume_id, self.user_id)
         if not resume:
             raise ValueError(f"Resume not found with ID: {resume_id} for user: {self.user_id}")
 
@@ -269,7 +268,7 @@ class ResumeGenerator:
         return resume.yaml_content
 
     async def upload_resume(self, file_path: str, file_content: bytes, job_id: str = None) -> Dict[str, Any]:
-        """Upload a custom resume."""
+        """Upload a custom resume using unified cache manager."""
         try:
             # Generate a unique ID for the resume
             resume_id = str(uuid.uuid4())
@@ -287,8 +286,8 @@ class ResumeGenerator:
                 uploaded_to_simplify=False
             )
 
-            # Save resume to database using cache manager
-            success = await self.db_manager.save_resume(resume, self.user_id)
+            # Save resume to database using unified cache manager
+            success = await self.cache_manager.save_resume(resume, self.user_id)
 
             if not success:
                 raise ValueError("Failed to save uploaded resume")
