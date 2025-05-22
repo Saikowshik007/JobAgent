@@ -437,7 +437,9 @@ async def generate_resume(
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         logger.error(f"Error generating resume for job {request.job_id} for user {user_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))@app.get("/api/resume/{resume_id}/download", tags=["Resume"])
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/resume/{resume_id}/download", tags=["Resume"])
 async def download_resume(
         resume_id: str,
         format: str = Query("yaml", regex="^(yaml)$"),
