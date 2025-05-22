@@ -1,12 +1,12 @@
 #!/bin/bash
 
-# Advanced script to generate self-signed SSL certificates with SAN for development
+# Script to generate self-signed SSL certificates for IP-based access
 # For production, use Let's Encrypt or a proper CA-signed certificate
 
 # Create nginx/certs directory if it doesn't exist
 mkdir -p nginx/certs
 
-# Create OpenSSL configuration file with SAN
+# Create OpenSSL configuration file with generic CN and IP SAN
 cat > nginx/certs/server.conf <<EOF
 [req]
 default_bits = 2048
@@ -21,7 +21,7 @@ ST=State
 L=City
 O=Organization
 OU=IT Department
-CN=jobtrackai.com
+CN=localhost
 
 [v3_req]
 basicConstraints = CA:FALSE
@@ -29,12 +29,10 @@ keyUsage = nonRepudiation, digitalSignature, keyEncipherment
 subjectAltName = @alt_names
 
 [alt_names]
-DNS.1 = jobtrackai.com
-DNS.2 = www.jobtrackai.com
-DNS.3 = localhost
-DNS.4 = *.jobtrackai.com
+DNS.1 = localhost
 IP.1 = 127.0.0.1
 IP.2 = ::1
+IP.3 = 0.0.0.0
 EOF
 
 # Generate private key
@@ -69,3 +67,7 @@ echo "   For production, use proper CA-signed certificates or Let's Encrypt."
 echo ""
 echo "🚀 You can now start your services with:"
 echo "   docker-compose -f docker-compose-nginx.yml up -d"
+echo ""
+echo "🌐 Access your service via:"
+echo "   https://YOUR_PUBLIC_IP"
+echo "   (Browser will show security warning for self-signed cert)"
