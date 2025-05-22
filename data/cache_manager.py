@@ -1,4 +1,4 @@
-# cache_manager.py - Add this as a new file
+# cache_manager.py - Fixed to align with other components
 import asyncio
 from typing import Dict, Optional
 
@@ -37,6 +37,16 @@ class GlobalCacheManager:
     async def clear_user_cache(self, user_id: str):
         """Clear all cache for a user."""
         await self.resume_cache.clear_user_cache(user_id)
+
+    async def cleanup_expired(self):
+        """Clean up expired cache entries."""
+        await self.resume_cache.cleanup_expired()
+
+    def get_stats(self) -> Dict:
+        """Get cache statistics."""
+        return {
+            "resume_cache": self.resume_cache.get_stats()
+        }
 
 # Global instance
 cache_manager = GlobalCacheManager()

@@ -56,12 +56,12 @@ app.add_middleware(
 DEFAULT_USER_ID = "default_user"
 
 # Initialize function to set up application state
-def initialize(db_path=None, job_cache_size=None, search_cache_size=None):
+async def initialize(db_url=None, job_cache_size=None, search_cache_size=None):
     """Initialize the FastAPI application with required components."""
     try:
         # Get configuration from environment variables if not provided
-        if db_path is None:
-            db_path = config.get("database.path")
+        if db_url is None:
+            db_url = config.get("database.url") or os.environ.get('DATABASE_URL')
 
         if job_cache_size is None:
             job_cache_size = int(config.get("cache.job_cache_size", 1000))
@@ -70,8 +70,10 @@ def initialize(db_path=None, job_cache_size=None, search_cache_size=None):
             search_cache_size = int(config.get("cache.search_cache_size", 1000))
 
         # Initialize database
-        db = Database(db_path)
-        logger.info(f"Initialized database at {db_path}")
+        db = Database(db_url)
+        await db.initialize_pool()
+        await db.initialize_db()
+        logger.info(f"Initialized database with URL {db_url}")
 
         # Initialize caches
         job_cache = JobCache(max_size=job_cache_size)
@@ -96,23 +98,24 @@ def initialize(db_path=None, job_cache_size=None, search_cache_size=None):
         logger.error(f"Error initializing application: {e}")
         return False
 
-# Initialize the application when this module is loaded
-initialize()
+# Startup event
+@app.on_event("startup")
+async def startup_event():
+    """Initialize the application on startup."""
+    success = await initialize()
+    if not success:
+        logger.error("Failed to initialize application during startup")
+        raise Exception("Application initialization failed")
 
 # Dependency to get database manager
 def get_db_manager():
     """Get the database manager instance."""
     if not hasattr(app.state, "db_manager"):
-        # If db_manager is not in app.state, initialize the application
-        logger.warning("Database manager not found in app state. Initializing the application...")
-        initialize()
-
-        if not hasattr(app.state, "db_manager"):
-            # If still not available, raise an exception
-            raise HTTPException(
-                status_code=500,
-                detail="Failed to initialize database manager. Please check server configuration."
-            )
+        # If db_manager is not in app.state, raise an exception
+        raise HTTPException(
+            status_code=500,
+            detail="Database manager not initialized. Please check server configuration."
+        )
 
     return app.state.db_manager
 
@@ -146,42 +149,22 @@ async def get_system_status(
         # This should now be much faster since resume generation doesn't block
         db = db_manager.db if db_manager else None
         db_status = "OK"
-        job_count = 0
         job_stats = {}
 
         try:
             if db:
-                # Use asyncio.gather to run queries concurrently
-                all_jobs, new_jobs, interested_jobs, applied_jobs, interview_jobs, offer_jobs, rejected_jobs = await asyncio.gather(
-                    db.get_all_jobs(user_id),
-                    db.get_all_jobs(user_id, status=JobStatus.NEW),
-                    db.get_all_jobs(user_id, status=JobStatus.INTERESTED),
-                    db.get_all_jobs(user_id, status=JobStatus.APPLIED),
-                    db.get_all_jobs(user_id, status=JobStatus.INTERVIEW),
-                    db.get_all_jobs(user_id, status=JobStatus.OFFER),
-                    db.get_all_jobs(user_id, status=JobStatus.REJECTED)
-                )
-
-                job_count = len(all_jobs)
-                job_stats = {
-                    "total": job_count,
-                    "new": len(new_jobs),
-                    "interested": len(interested_jobs),
-                    "applied": len(applied_jobs),
-                    "interviews": len(interview_jobs),
-                    "offers": len(offer_jobs),
-                    "rejected": len(rejected_jobs)
-                }
+                # Use the optimized get_job_stats method
+                job_stats = await db_manager.get_job_stats(user_id)
         except Exception as e:
             db_status = f"Error: {str(e)}"
             job_stats = {
                 "total": 0,
-                "new": 0,
-                "interested": 0,
-                "applied": 0,
-                "interviews": 0,
-                "offers": 0,
-                "rejected": 0
+                "NEW": 0,
+                "INTERESTED": 0,
+                "APPLIED": 0,
+                "INTERVIEW": 0,
+                "OFFER": 0,
+                "REJECTED": 0
             }
 
         return {
@@ -209,9 +192,10 @@ async def analyze_job(
 ):
     """Analyze a job posting from a URL."""
     try:
-        job_exist = await db_manager.job_exists(url=job_url,user_id=user_id)
+        job_exist = await db_manager.job_exists(url=job_url, user_id=user_id)
         if job_exist:
             raise HTTPException(status_code=409, detail="Job already exists!!")
+
         # Initialize ResumeImprover with the job URL
         resume_improver = ResumeImprover(url=job_url, api_key=api_key)
         resume_improver.download_and_parse_job_post()
@@ -232,14 +216,13 @@ async def analyze_job(
         job = Job(
             id=job_id,
             job_url=job_url,
-            status=JobStatus.NEW,
+            status=job_status,
             date_found=datetime.now(),
-            metadata= job_details
+            metadata=job_details
         )
 
-        # Associate the job with the user
-        job.metadata["user_id"] = user_id
-        await db_manager.db.save_job(job, user_id)
+        # Save job using the cache manager
+        await db_manager.save_job(job, user_id)
 
         return {
             "message": "Job analyzed successfully",
@@ -253,7 +236,6 @@ async def analyze_job(
         logger.error(f"Error analyzing job for user {user_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-
 # Get jobs endpoint
 @app.get("/api/jobs", tags=["Jobs"])
 async def get_jobs(
@@ -266,20 +248,23 @@ async def get_jobs(
 ):
     """Get jobs from the database with optional filtering."""
     try:
-        db = db_manager.db
+        # Convert string status to JobStatus enum if provided
+        status_filter = None
+        if status:
+            try:
+                status_filter = JobStatus(status)
+            except ValueError:
+                logger.warning(f"Invalid status filter: {status}")
 
-        # Get all jobs for this user
-        jobs = await db.get_all_jobs(user_id, status=status if status else None)
+        # Get jobs using cache manager
+        jobs = await db_manager.get_all_jobs(user_id, status=status_filter, limit=limit, offset=offset)
 
         # Apply additional filters
         if company:
-            jobs = [job for job in jobs if company.lower() in job.company.lower()]
+            jobs = [job for job in jobs if job.metadata and company.lower() in job.metadata.get('company', '').lower()]
 
         # Get total count
         total_count = len(jobs)
-
-        # Apply pagination
-        jobs = jobs[offset:offset+limit]
 
         # Convert to dict for JSON response
         jobs_dict = [job.to_dict() for job in jobs]
@@ -305,11 +290,11 @@ async def clear_cache(
     try:
         # Clear job cache
         if hasattr(app.state, 'job_cache'):
-            app.state.job_cache.clear(user_id)
+            app.state.job_cache.clear_user(user_id)
 
-        # Clear search cache
+        # Clear search cache if it exists
         if hasattr(app.state, 'search_cache'):
-            app.state.search_cache.clear(user_id)
+            app.state.search_cache.clear_user(user_id)
 
         return {
             "message": "Cache cleared successfully",
@@ -319,7 +304,6 @@ async def clear_cache(
     except Exception as e:
         logger.error(f"Error clearing cache for user {user_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
 
 # Add endpoint to get active resume generations
 @app.get("/api/resume/active", tags=["Resume"])
@@ -349,13 +333,12 @@ async def get_job(
 ):
     """Get a specific job by ID."""
     try:
-        db = db_manager.db
-        job = await db.get_job(job_id, user_id)
+        job_dict = await db_manager.get_job(job_id, user_id)
 
-        if not job:
+        if not job_dict:
             raise HTTPException(status_code=404, detail=f"Job not found with ID: {job_id} for user: {user_id}")
 
-        return job.to_dict()
+        return job_dict
 
     except HTTPException:
         raise
@@ -373,8 +356,6 @@ async def update_job_status(
 ):
     """Update the status of a job."""
     try:
-        db = db_manager.db
-
         status = request.status.value
 
         # Update the job status
@@ -387,7 +368,7 @@ async def update_job_status(
                 detail=f"Invalid status value: {status}. Valid values are: {valid_statuses}"
             )
 
-        success = await db.update_job_status(job_id, user_id, status_enum)
+        success = await db_manager.update_job_status(job_id, user_id, status_enum)
 
         if not success:
             raise HTTPException(
@@ -396,12 +377,12 @@ async def update_job_status(
             )
 
         # Get the updated job
-        job = await db.get_job(job_id, user_id)
+        job_dict = await db_manager.get_job(job_id, user_id)
 
         return {
             "message": f"Job status updated to {status}",
             "user_id": user_id,
-            "job": job.to_dict() if job else None
+            "job": job_dict
         }
 
     except HTTPException:
@@ -497,7 +478,7 @@ async def upload_resume(
     """Upload a custom resume."""
     try:
         # Initialize resume generator
-        resume_generator = ResumeGenerator(db_manager, user_id,"")
+        resume_generator = ResumeGenerator(db_manager, user_id, "")
 
         # Read file content
         content = await file.read()
@@ -525,19 +506,17 @@ async def upload_to_simplify(
     """Upload a resume to Simplify.jobs."""
     # This is a placeholder - you'll implement the actual Simplify integration later
     try:
-        db = db_manager.db
-
         # Check if job exists
-        job = await db.get_job(request.job_id, user_id)
-        if not job:
+        job_dict = await db_manager.get_job(request.job_id, user_id)
+        if not job_dict:
             raise HTTPException(status_code=404, detail=f"Job not found with ID: {request.job_id} for user: {user_id}")
 
         # Check if resume exists
-        resume_id = request.resume_id or job.resume_id
+        resume_id = request.resume_id or job_dict.get('resume_id')
         if not resume_id:
             raise HTTPException(status_code=400, detail="No resume ID provided or associated with this job")
 
-        resume = await db.get_resume(resume_id, user_id)
+        resume = await db_manager.get_resume(resume_id, user_id)
         if not resume:
             raise HTTPException(status_code=404, detail=f"Resume not found with ID: {resume_id} for user: {user_id}")
 
@@ -547,7 +526,7 @@ async def upload_to_simplify(
             "job_id": request.job_id,
             "resume_id": resume_id,
             "user_id": user_id,
-            "job": job.to_dict(),
+            "job": job_dict,
             "resume": resume.to_dict()
         }
 
@@ -556,7 +535,6 @@ async def upload_to_simplify(
     except Exception as e:
         logger.error(f"Error uploading resume to Simplify for job {request.job_id} for user {user_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
 
 @app.post("/api/resume/{resume_id}/update-yaml", tags=["Resume"])
 async def update_resume_yaml(
@@ -568,7 +546,7 @@ async def update_resume_yaml(
     """Update the YAML content of a resume."""
     try:
         # Get the existing resume
-        resume = await db_manager.db.get_resume(resume_id, user_id)
+        resume = await db_manager.get_resume(resume_id, user_id)
         if not resume:
             raise HTTPException(status_code=404, detail=f"Resume not found with ID: {resume_id} for user: {user_id}")
 
@@ -576,7 +554,7 @@ async def update_resume_yaml(
         resume.yaml_content = yaml_content
 
         # Save the updated resume
-        success = await db_manager.db.save_resume(resume, user_id)
+        success = await db_manager.save_resume(resume, user_id)
 
         if not success:
             raise HTTPException(status_code=500, detail="Failed to save updated resume YAML")
@@ -594,20 +572,17 @@ async def update_resume_yaml(
 
 # Shutdown event - clean up resources
 @app.on_event("shutdown")
-def shutdown_event():
+async def shutdown_event():
     """Clean up resources when the application shuts down."""
     try:
+        # Close database pool
+        if hasattr(app.state, 'db'):
+            await app.state.db.close_pool()
         logger.info("Successfully cleaned up resources on shutdown")
     except Exception as e:
         logger.error(f"Error cleaning up resources: {e}")
 
-initialize()
 if __name__ == "__main__":
-    # Initialize application
-    if not initialize():
-        logger.error("Failed to initialize application. Exiting.")
-        exit(1)
-
     # Run the FastAPI app with Uvicorn
     host = os.environ.get('API_HOST', '0.0.0.0')
     port = int(os.environ.get('API_PORT', 80))

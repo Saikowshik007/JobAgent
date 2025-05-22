@@ -24,10 +24,11 @@ class DBCacheManager:
         Args:
             database: Database instance
             job_cache: JobCache instance
-            search_cache: SearchCache instance
+            search_cache: SearchCache instance (optional)
         """
         self.db = database
         self.job_cache = job_cache
+        self.search_cache = search_cache  # Add search_cache support
 
     async def get_cached_search_results(self, keywords: str, location: str, filters: Dict[str, Any], user_id: str) -> List[Dict[str, Any]]:
         """
@@ -249,6 +250,119 @@ class DBCacheManager:
             success = False
 
         return success
+
+    async def update_job_status(self, job_id: str, user_id: str, status) -> bool:
+        """
+        Update job status in both cache and database.
+
+        Args:
+            job_id: ID of the job to update
+            user_id: ID of the user who owns the job
+            status: New job status
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        success = True
+
+        # Update in database
+        if self.db:
+            try:
+                # Use the batch update method with single item
+                success = await self.db.update_job_status_batch([(job_id, user_id, str(status))])
+            except Exception as e:
+                logger.error(f"Error updating job status in database for user {user_id}: {e}")
+                success = False
+
+        # Update in cache - get job, update status, and re-add to cache
+        if self.job_cache and success:
+            try:
+                job = self.job_cache.get_job(job_id, user_id)
+                if job:
+                    job.status = status
+                    self.job_cache.add_job(job, user_id)
+            except Exception as e:
+                logger.error(f"Error updating job status in cache for user {user_id}: {e}")
+                # Don't mark as failure if cache update fails but DB succeeded
+
+        return success
+
+    async def get_all_jobs(self, user_id: str, status=None, limit: int = None, offset: int = 0) -> List:
+        """
+        Get all jobs for a user, optionally filtered by status.
+
+        Args:
+            user_id: ID of the user
+            status: Optional status filter
+            limit: Maximum number of jobs to return
+            offset: Number of jobs to skip
+
+        Returns:
+            List of Job objects
+        """
+        if self.db:
+            try:
+                return await self.db.get_all_jobs(user_id, status, limit, offset)
+            except Exception as e:
+                logger.error(f"Error getting all jobs for user {user_id}: {e}")
+                return []
+        return []
+
+    async def get_job_stats(self, user_id: str) -> Dict[str, int]:
+        """
+        Get job statistics for a user.
+
+        Args:
+            user_id: ID of the user
+
+        Returns:
+            Dictionary with job statistics
+        """
+        if self.db:
+            try:
+                return await self.db.get_job_stats(user_id)
+            except Exception as e:
+                logger.error(f"Error getting job stats for user {user_id}: {e}")
+                return {'total': 0}
+        return {'total': 0}
+
+    async def save_resume(self, resume, user_id: str) -> bool:
+        """
+        Save a resume to the database.
+
+        Args:
+            resume: Resume object to save
+            user_id: ID of the user who owns the resume
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        if self.db:
+            try:
+                return await self.db.save_resume(resume, user_id)
+            except Exception as e:
+                logger.error(f"Error saving resume to database for user {user_id}: {e}")
+                return False
+        return False
+
+    async def get_resume(self, resume_id: str, user_id: str):
+        """
+        Get a resume by ID.
+
+        Args:
+            resume_id: ID of the resume to retrieve
+            user_id: ID of the user who owns the resume
+
+        Returns:
+            Resume object if found, None otherwise
+        """
+        if self.db:
+            try:
+                return await self.db.get_resume(resume_id, user_id)
+            except Exception as e:
+                logger.error(f"Error getting resume from database for user {user_id}: {e}")
+                return None
+        return None
 
     def _generate_search_key(self, keywords: str, location: str, filters: Dict[str, Any], user_id: str) -> str:
         """
