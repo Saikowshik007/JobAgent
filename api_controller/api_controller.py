@@ -67,7 +67,7 @@ async def initialize(db_url=None, job_cache_size=None, search_cache_size=None):
         # Initialize database
         db = Database(db_url)
         await db.initialize_pool()
-        await db.initialize_db()
+        # await db.initialize_db()
         logger.info(f"Initialized database with URL {db_url}")
 
         # Initialize caches
