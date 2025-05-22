@@ -7,7 +7,7 @@
 mkdir -p nginx/certs
 
 # Generate private key
-openssl genpkey -algorithm RSA -out nginx/certs/server.key -pkcs8 -pkeyopt rsa_keygen_bits:2048
+openssl genrsa -out nginx/certs/server.key 2048
 
 # Generate certificate signing request
 openssl req -new -key nginx/certs/server.key -out nginx/certs/server.csr -subj "/C=US/ST=State/L=City/O=Organization/OU=IT/CN=localhost"
