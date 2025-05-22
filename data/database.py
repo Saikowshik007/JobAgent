@@ -505,6 +505,7 @@ class Database:
         for field in ["date_found", "applied_date", "rejected_date"]:
             if job_dict.get(field):
                 if isinstance(job_dict[field], str):
+                    logger.error(job_dict[field])
                     job_dict[field] = datetime.fromisoformat(job_dict[field])
 
         return Job.from_dict(job_dict)
@@ -516,6 +517,7 @@ class Database:
         # Convert timestamps
         if resume_dict.get("date_created"):
             if isinstance(resume_dict["date_created"], str):
+                logger.error(resume_dict["date_created"])
                 resume_dict["date_created"] = datetime.fromisoformat(resume_dict["date_created"])
 
         return Resume.from_dict(resume_dict)
