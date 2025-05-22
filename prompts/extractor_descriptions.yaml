@@ -36,6 +36,10 @@ RESUME_IMPROVER_OUTPUT:
 JOB_DESCRIPTION:
   company: >
     Name of the company that has the job opening
+  location: >
+    Location of the job posting. It can be city, country or can be both. Also look for Remote. Location should be null if not known.
+  job_type: >
+    Type of the job, which can be On site or Hybrid or Remote. Should return null if not known.
   job_title: >
     Job title
   team: Name of the team within the company. Team name should be null if it's not known.
