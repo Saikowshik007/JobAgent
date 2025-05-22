@@ -28,7 +28,6 @@ class DBCacheManager:
         """
         self.db = database
         self.job_cache = job_cache
-        self.search_cache = search_cache
 
     async def get_cached_search_results(self, keywords: str, location: str, filters: Dict[str, Any], user_id: str) -> List[Dict[str, Any]]:
         """

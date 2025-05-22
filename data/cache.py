@@ -2,544 +2,415 @@ import asyncio
 import hashlib
 import logging
 import json
+import time
 from enum import Enum
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Set, Tuple
 from datetime import datetime, timedelta
+from collections import OrderedDict
+import threading
+from dataclasses import dataclass
 
 from dataModels.data_models import Job, Resume
 
-# Configure logging
 logger = logging.getLogger(__name__)
+
+@dataclass
+class CacheEntry:
+    """ cache entry with metadata."""
+    data: Any
+    created_at: float
+    last_accessed: float
+    access_count: int
+    size_bytes: int
 
 class JobCache:
     """
-    In-memory cache for job data to improve performance and avoid duplicates.
-    Uses both in-memory dictionaries and LRU cache decorators for efficiency.
+    High-performance job cache with memory management and efficient lookup.
     """
 
-    def __init__(self, max_size=1000, ttl_seconds=3600):
+    def __init__(self, max_size=1000, ttl_seconds=3600, max_memory_mb=100):
         """
-        Initialize the job cache.
-        
+        Initialize job cache.
+
         Args:
-            max_size: Maximum size of the cache
-            ttl_seconds: Time-to-live in seconds for cache entries
+            max_size: Maximum number of entries
+            ttl_seconds: Time-to-live for entries
+            max_memory_mb: Maximum memory usage in MB
         """
         self.max_size = max_size
         self.ttl_seconds = ttl_seconds
+        self.max_memory_bytes = max_memory_mb * 1024 * 1024
 
-        # URL + user_id to job ID mapping (for deduplication)
-        self.url_to_id = {}
+        # Thread-safe data structures
+        self._lock = threading.RLock()
 
-        # Title + company + location + user_id to job ID mapping (for fuzzy deduplication)
-        self.job_signature_to_id = {}
+        # Main cache storage - LRU ordered
+        self._cache: OrderedDict[str, CacheEntry] = OrderedDict()
 
-        # Cache for job objects (user_id + job_id to job object)
-        self.job_cache = {}
+        # Efficient lookup indexes
+        self._url_index: Dict[str, str] = {}  # url_key -> cache_key
+        self._signature_index: Dict[str, str] = {}  # signature -> cache_key
+        self._user_index: Dict[str, Set[str]] = {}  # user_id -> set of cache_keys
 
-        # Cache for recently viewed job IDs
-        self.recently_viewed = set()
+        # Memory and statistics tracking
+        self._total_memory = 0
+        self._hit_count = 0
+        self._miss_count = 0
+        self._eviction_count = 0
 
-        # Cache expiration timestamps
-        self.expiration_times = {}
+        # Background cleanup
+        self._last_cleanup = time.time()
+        self._cleanup_interval = 300  # 5 minutes
 
     def add_job(self, job: Job, user_id: str) -> None:
-        """
-        Add a job to the cache.
+        """Add job to cache with memory management."""
+        with self._lock:
+            cache_key = f"{user_id}:{job.id}"
 
-        Args:
-            job: Job object to add
-            user_id: ID of the user who owns the job
-        """
-        # Check if we need to clean up the cache
-        if len(self.job_cache) >= self.max_size:
-            self._clean_cache()
+            # Calculate memory size
+            job_size = self._calculate_size(job)
 
-        # Create a composite key with user_id and job_id
-        cache_key = f"{user_id}:{job.id}"
+            # Remove old entry if exists
+            if cache_key in self._cache:
+                self._remove_entry(cache_key)
 
-        # Add job to cache
-        self.job_cache[cache_key] = job
+            # Check memory limits and cleanup if needed
+            if self._total_memory + job_size > self.max_memory_bytes:
+                self._cleanup_memory(job_size)
 
-        # Add URL mapping
-        if job.job_url:
-            url_key = f"{user_id}:{job.job_url}"
-            self.url_to_id[url_key] = job.id
+            # Create cache entry
+            now = time.time()
+            entry = CacheEntry(
+                data=job,
+                created_at=now,
+                last_accessed=now,
+                access_count=0,
+                size_bytes=job_size
+            )
 
-        # Add signature mapping (for fuzzy matching)
-        signature = self._generate_job_signature(job, user_id)
-        self.job_signature_to_id[signature] = job.id
+            # Add to main cache
+            self._cache[cache_key] = entry
+            self._total_memory += job_size
 
-        # Set expiration time
-        self.expiration_times[cache_key] = datetime.now() + timedelta(seconds=self.ttl_seconds)
+            # Update indexes
+            if job.job_url:
+                url_key = f"{user_id}:{job.job_url}"
+                self._url_index[url_key] = cache_key
 
-        logger.debug(f"Added job {job.id} for user {user_id} to cache")
+            signature = self._generate_job_signature(job, user_id)
+            self._signature_index[signature] = cache_key
+
+            if user_id not in self._user_index:
+                self._user_index[user_id] = set()
+            self._user_index[user_id].add(cache_key)
+
+            # Periodic cleanup
+            if time.time() - self._last_cleanup > self._cleanup_interval:
+                self._cleanup_expired()
 
     def get_job(self, job_id: str, user_id: str) -> Optional[Job]:
-        """
-        Get a job from the cache by ID.
+        """Get job from cache with efficient lookup."""
+        with self._lock:
+            cache_key = f"{user_id}:{job_id}"
 
-        Args:
-            job_id: ID of the job to retrieve
-            user_id: ID of the user who owns the job
-
-        Returns:
-            Job object if in cache, None otherwise
-        """
-        cache_key = f"{user_id}:{job_id}"
-
-        if cache_key in self.job_cache:
-            # Check if expired
-            if datetime.now() > self.expiration_times.get(cache_key, datetime.min):
-                self._remove_job(job_id, user_id)
+            if cache_key not in self._cache:
+                self._miss_count += 1
                 return None
 
-            # Update recently viewed
-            self.recently_viewed.add(cache_key)
+            entry = self._cache[cache_key]
 
-            # Refresh expiration time
-            self.expiration_times[cache_key] = datetime.now() + timedelta(seconds=self.ttl_seconds)
+            # Check expiration
+            if self._is_expired(entry):
+                self._remove_entry(cache_key)
+                self._miss_count += 1
+                return None
 
-            return self.job_cache[cache_key]
+            # Update access statistics
+            entry.last_accessed = time.time()
+            entry.access_count += 1
+            self._hit_count += 1
 
-        return None
+            # Move to end (LRU)
+            self._cache.move_to_end(cache_key)
+
+            return entry.data
 
     def get_job_by_url(self, url: str, user_id: str) -> Optional[Job]:
-        """
-        Get a job from the cache by URL.
+        """Get job by URL using efficient index."""
+        with self._lock:
+            url_key = f"{user_id}:{url}"
+            cache_key = self._url_index.get(url_key)
 
-        Args:
-            url: URL of the job to retrieve
-            user_id: ID of the user who owns the job
-
-        Returns:
-            Job object if in cache, None otherwise
-        """
-        url_key = f"{user_id}:{url}"
-        job_id = self.url_to_id.get(url_key)
-        return self.get_job(job_id, user_id) if job_id else None
-
-    def find_similar_job(self, job: Job, user_id: str) -> Optional[Job]:
-        """
-        Find a similar job in the cache based on title, company, and location.
-
-        Args:
-            job: Job to find similar to
-            user_id: ID of the user who owns the job
-
-        Returns:
-            Similar Job object if found, None otherwise
-        """
-        signature = self._generate_job_signature(job, user_id)
-        job_id = self.job_signature_to_id.get(signature)
-        return self.get_job(job_id, user_id) if job_id else None
-
-    def remove_job(self, job_id: str, user_id: str) -> None:
-        """
-        Remove a job from the cache.
-
-        Args:
-            job_id: ID of the job to remove
-            user_id: ID of the user who owns the job
-        """
-        self._remove_job(job_id, user_id)
-
-    def clear(self, user_id: Optional[str] = None) -> None:
-        """
-        Clear the entire cache or just for a specific user.
-
-        Args:
-            user_id: Optional user ID to clear cache for. If None, clears entire cache.
-        """
-        if user_id is None:
-            # Clear entire cache
-            self.url_to_id.clear()
-            self.job_signature_to_id.clear()
-            self.job_cache.clear()
-            self.recently_viewed.clear()
-            self.expiration_times.clear()
-            logger.debug("Cache cleared")
-        else:
-            # Clear only for specific user
-            # Find all keys belonging to this user
-            cache_keys_to_remove = [k for k in self.job_cache if k.startswith(f"{user_id}:")]
-            url_keys_to_remove = [k for k in self.url_to_id if k.startswith(f"{user_id}:")]
-            signature_keys_to_remove = [k for k in self.job_signature_to_id
-                                        if k.startswith(f"{user_id}:")]
-
-            # Remove from job cache
-            for key in cache_keys_to_remove:
-                if key in self.job_cache:
-                    del self.job_cache[key]
-                if key in self.expiration_times:
-                    del self.expiration_times[key]
-                if key in self.recently_viewed:
-                    self.recently_viewed.remove(key)
-
-            # Remove from URL mapping
-            for key in url_keys_to_remove:
-                if key in self.url_to_id:
-                    del self.url_to_id[key]
-
-            # Remove from signature mapping
-            for key in signature_keys_to_remove:
-                if key in self.job_signature_to_id:
-                    del self.job_signature_to_id[key]
-
-            logger.debug(f"Cache cleared for user {user_id}")
-
-    def _remove_job(self, job_id: str, user_id: str) -> None:
-        """
-        Internal method to remove a job from all cache dictionaries.
-
-        Args:
-            job_id: ID of the job to remove
-            user_id: ID of the user who owns the job
-        """
-        cache_key = f"{user_id}:{job_id}"
-
-        if cache_key in self.job_cache:
-            job = self.job_cache.pop(cache_key)
-
-            # Remove from URL mapping
-            if job.job_url:  # Changed from linkedin_url to job_url
-                url_key = f"{user_id}:{job.job_url}"
-                if url_key in self.url_to_id:
-                    del self.url_to_id[url_key]
-
-            # Remove from signature mapping
-            signature = self._generate_job_signature(job, user_id)
-            if signature in self.job_signature_to_id:
-                del self.job_signature_to_id[signature]
-
-            # Remove from recently viewed
-            if cache_key in self.recently_viewed:
-                self.recently_viewed.remove(cache_key)
-
-            # Remove from expiration times
-            if cache_key in self.expiration_times:
-                del self.expiration_times[cache_key]
-
-            logger.debug(f"Removed job {job_id} for user {user_id} from cache")
-
-    def _clean_cache(self) -> None:
-        """
-        Clean up the cache by removing expired entries and least recently used entries.
-        """
-        now = datetime.now()
-
-        # First, remove expired entries
-        expired_keys = [cache_key for cache_key, expiry in self.expiration_times.items()
-                        if now > expiry]
-
-        for cache_key in expired_keys:
-            # Extract user_id and job_id from the cache_key
-            if ":" in cache_key:
-                user_id, job_id = cache_key.split(":", 1)
-                self._remove_job(job_id, user_id)
-
-        # If we still need to clean up, remove least recently used
-        if len(self.job_cache) > self.max_size * 0.9:  # Clean up to 90% capacity
-            # Sort by LRU (not in recently_viewed) and then by oldest expiration
-            all_keys = sorted(self.job_cache.keys(),
-                              key=lambda key: (key not in self.recently_viewed,
-                                               self.expiration_times.get(key, datetime.min)))
-
-            # Remove the oldest entries
-            to_remove = all_keys[:int(self.max_size * 0.2)]  # Remove 20% of entries
-            for cache_key in to_remove:
-                # Extract user_id and job_id from the cache_key
-                if ":" in cache_key:
-                    user_id, job_id = cache_key.split(":", 1)
-                    self._remove_job(job_id, user_id)
-
-    def _generate_job_signature(self, job: Job, user_id: str) -> str:
-        """
-        Generate a signature for a job based on title, company, and location.
-        Used for fuzzy deduplication.
-
-        Args:
-            job: Job to generate signature for
-            user_id: ID of the user who owns the job
-
-        Returns:
-            String signature
-        """
-        # Extract fields from metadata
-        metadata = job.metadata or {}
-        title = metadata.get('title', '')
-        company = metadata.get('company', '')
-        location = metadata.get('location', '')
-
-        # Normalize strings by lowercasing and removing extra whitespace
-        title = ' '.join(title.lower().split())
-        company = ' '.join(company.lower().split())
-        location = ' '.join(location.lower().split())
-
-        # Create signature with user_id included
-        signature = f"{user_id}|{title}|{company}|{location}"
-
-        # Create a hash for shorter keys in the dictionary
-        return hashlib.md5(signature.encode('utf-8')).hexdigest()
-
-
-class SearchCache:
-    """
-    Cache for search results to avoid duplicate searches and improve performance.
-    """
-
-    def __init__(self, max_size=100, ttl_seconds=1800):
-        """
-        Initialize the search cache.
-
-        Args:
-            max_size: Maximum size of the cache
-            ttl_seconds: Time-to-live in seconds for cache entries
-        """
-        self.max_size = max_size
-        self.ttl_seconds = ttl_seconds
-
-        # Search parameters to results mapping
-        self.search_cache = {}
-
-        # Cache expiration timestamps
-        self.expiration_times = {}
-
-        # LRU tracking
-        self.access_times = {}
-
-    def add_search_results(
-            self,
-            keywords: str,
-            location: str,
-            filters: Dict[str, Any],
-            job_ids: List[str],
-            user_id: str
-    ) -> None:
-        """
-        Add search results to the cache.
-
-        Args:
-            keywords: Search keywords
-            location: Search location
-            filters: Search filters
-            job_ids: List of job IDs in the search results
-            user_id: ID of the user who performed the search
-        """
-        # Check if we need to clean up the cache
-        if len(self.search_cache) >= self.max_size:
-            self._clean_cache()
-
-        # Generate cache key
-        key = self._generate_search_key(keywords, location, filters, user_id)
-
-        # Add to cache
-        self.search_cache[key] = job_ids.copy()
-
-        # Set expiration time
-        self.expiration_times[key] = datetime.now() + timedelta(seconds=self.ttl_seconds)
-
-        # Set access time
-        self.access_times[key] = datetime.now()
-
-        logger.debug(f"Added search results for '{keywords}' in '{location}' for user {user_id} to cache")
-
-    def get_search_results(
-            self,
-            keywords: str,
-            location: str,
-            filters: Dict[str, Any],
-            user_id: str
-    ) -> Optional[List[str]]:
-        """
-        Get search results from the cache.
-
-        Args:
-            keywords: Search keywords
-            location: Search location
-            filters: Search filters
-            user_id: ID of the user who performed the search
-
-        Returns:
-            List of job IDs if in cache, None otherwise
-        """
-        # Generate cache key
-        key = self._generate_search_key(keywords, location, filters, user_id)
-
-        if key in self.search_cache:
-            # Check if expired
-            if datetime.now() > self.expiration_times.get(key, datetime.min):
-                self._remove_search(key)
+            if not cache_key:
+                self._miss_count += 1
                 return None
 
-            # Update access time
-            self.access_times[key] = datetime.now()
+            # Extract job_id from cache_key
+            job_id = cache_key.split(':', 1)[1]
+            return self.get_job(job_id, user_id)
 
-            logger.debug(f"Cache hit for search '{keywords}' in '{location}' for user {user_id}")
-            return self.search_cache[key].copy()
+    def find_similar_job(self, job: Job, user_id: str) -> Optional[Job]:
+        """Find similar job using signature index."""
+        with self._lock:
+            signature = self._generate_job_signature(job, user_id)
+            cache_key = self._signature_index.get(signature)
 
-        logger.debug(f"Cache miss for search '{keywords}' in '{location}' for user {user_id}")
-        return None
+            if not cache_key:
+                return None
 
-    def clear(self, user_id: Optional[str] = None) -> None:
-        """
-        Clear the entire cache or just for a specific user.
+            job_id = cache_key.split(':', 1)[1]
+            return self.get_job(job_id, user_id)
 
-        Args:
-            user_id: Optional user ID to clear cache for. If None, clears entire cache.
-        """
-        if user_id is None:
-            # Clear entire cache
-            self.search_cache.clear()
-            self.expiration_times.clear()
-            self.access_times.clear()
-            logger.debug("Search cache cleared")
-        else:
-            # Find all keys related to this user
-            # We need to actually check the content of the key to determine if it belongs to the user
-            # since the user_id is hashed within the key
+    def get_user_jobs(self, user_id: str, limit: int = None) -> List[Job]:
+        """Get all jobs for a user."""
+        with self._lock:
+            user_keys = self._user_index.get(user_id, set())
+            jobs = []
 
-            # Get all search keys
-            all_keys = list(self.search_cache.keys())
+            for cache_key in user_keys:
+                if cache_key in self._cache:
+                    entry = self._cache[cache_key]
+                    if not self._is_expired(entry):
+                        jobs.append(entry.data)
+                        if limit and len(jobs) >= limit:
+                            break
 
-            # Extract the raw keys first (using an intermediate hash match function)
-            user_keys = []
-            for key in all_keys:
-                # Remove the key from all caches
-                try:
-                    # For each key, check if it contains the user's ID in its original form
-                    # This is imprecise but we can't easily extract the user ID from the hash
-                    # Maybe we should store a separate mapping of user_id to search keys
-                    if self.search_cache[key] and key.startswith(user_id[:8]):
-                        user_keys.append(key)
-                except Exception:
-                    pass
+            return jobs
 
-            # Remove the keys
-            for key in user_keys:
-                self._remove_search(key)
+    def remove_job(self, job_id: str, user_id: str) -> None:
+        """Remove job from cache."""
+        with self._lock:
+            cache_key = f"{user_id}:{job_id}"
+            self._remove_entry(cache_key)
 
-            logger.debug(f"Search cache cleared for user {user_id}")
+    def clear_user(self, user_id: str) -> None:
+        """Clear all jobs for a user."""
+        with self._lock:
+            user_keys = self._user_index.get(user_id, set()).copy()
+            for cache_key in user_keys:
+                self._remove_entry(cache_key)
 
-    def _remove_search(self, key: str) -> None:
-        """
-        Remove a search from the cache.
+            if user_id in self._user_index:
+                del self._user_index[user_id]
 
-        Args:
-            key: Cache key to remove
-        """
-        if key in self.search_cache:
-            del self.search_cache[key]
+    def clear_all(self) -> None:
+        """Clear entire cache."""
+        with self._lock:
+            self._cache.clear()
+            self._url_index.clear()
+            self._signature_index.clear()
+            self._user_index.clear()
+            self._total_memory = 0
 
-            if key in self.expiration_times:
-                del self.expiration_times[key]
+    def get_stats(self) -> Dict[str, Any]:
+        """Get cache statistics."""
+        with self._lock:
+            total_requests = self._hit_count + self._miss_count
+            hit_rate = self._hit_count / total_requests if total_requests > 0 else 0
 
-            if key in self.access_times:
-                del self.access_times[key]
+            return {
+                "entries": len(self._cache),
+                "memory_mb": round(self._total_memory / (1024 * 1024), 2),
+                "hit_rate": round(hit_rate * 100, 2),
+                "hits": self._hit_count,
+                "misses": self._miss_count,
+                "evictions": self._eviction_count,
+                "users": len(self._user_index)
+            }
 
-            logger.debug(f"Removed search key {key} from cache")
+    def _remove_entry(self, cache_key: str) -> None:
+        """Remove entry and update all indexes."""
+        if cache_key not in self._cache:
+            return
 
-    def _clean_cache(self) -> None:
-        """
-        Clean up the cache by removing expired entries and least recently used entries.
-        """
-        now = datetime.now()
+        entry = self._cache[cache_key]
+        job = entry.data
+        user_id = cache_key.split(':', 1)[0]
 
-        # First, remove expired entries
-        expired_keys = [key for key, expiry in self.expiration_times.items()
-                        if now > expiry]
+        # Remove from main cache
+        del self._cache[cache_key]
+        self._total_memory -= entry.size_bytes
+
+        # Remove from URL index
+        if job.job_url:
+            url_key = f"{user_id}:{job.job_url}"
+            if url_key in self._url_index:
+                del self._url_index[url_key]
+
+        # Remove from signature index
+        signature = self._generate_job_signature(job, user_id)
+        if signature in self._signature_index:
+            del self._signature_index[signature]
+
+        # Remove from user index
+        if user_id in self._user_index:
+            self._user_index[user_id].discard(cache_key)
+            if not self._user_index[user_id]:
+                del self._user_index[user_id]
+
+    def _cleanup_memory(self, needed_bytes: int) -> None:
+        """Free memory by evicting LRU entries."""
+        target_memory = self.max_memory_bytes - needed_bytes
+
+        # Remove expired entries first
+        self._cleanup_expired()
+
+        # If still need space, remove LRU entries
+        while self._total_memory > target_memory and self._cache:
+            # Get least recently used (first in OrderedDict)
+            lru_key = next(iter(self._cache))
+            self._remove_entry(lru_key)
+            self._eviction_count += 1
+
+    def _cleanup_expired(self) -> None:
+        """Remove expired entries."""
+        now = time.time()
+        expired_keys = []
+
+        for cache_key, entry in self._cache.items():
+            if self._is_expired(entry):
+                expired_keys.append(cache_key)
 
         for key in expired_keys:
-            self._remove_search(key)
+            self._remove_entry(key)
 
-        # If we still need to clean up, remove least recently used
-        if len(self.search_cache) > self.max_size * 0.9:  # Clean up to 90% capacity
-            # Sort by oldest access time
-            all_keys = sorted(self.search_cache.keys(),
-                              key=lambda k: self.access_times.get(k, datetime.min))
+        self._last_cleanup = now
 
-            # Remove the oldest entries
-            to_remove = all_keys[:int(self.max_size * 0.2)]  # Remove 20% of entries
-            for key in to_remove:
-                self._remove_search(key)
+    def _is_expired(self, entry: CacheEntry) -> bool:
+        """Check if entry is expired."""
+        return time.time() - entry.created_at > self.ttl_seconds
 
-    def _generate_search_key(
-            self,
-            keywords: str,
-            location: str,
-            filters: Dict[str, Any],
-            user_id: str
-    ) -> str:
-        """
-        Generate a cache key for search parameters.
+    def _calculate_size(self, job: Job) -> int:
+        """Estimate memory size of job object."""
+        # Simple estimation - in production, use memory_profiler or similar
+        base_size = 200  # Base object overhead
 
-        Args:
-            keywords: Search keywords
-            location: Search location
-            filters: Search filters
-            user_id: ID of the user who performed the search
+        # Add size for strings
+        if job.job_url:
+            base_size += len(job.job_url.encode('utf-8'))
 
-        Returns:
-            String cache key
-        """
-        # Normalize strings
-        keywords_norm = ' '.join(keywords.lower().split())
-        location_norm = ' '.join(location.lower().split())
+        # Add metadata size
+        if job.metadata:
+            base_size += len(json.dumps(job.metadata).encode('utf-8'))
 
-        # Sort filter dict for consistent order
-        filters_str = json.dumps(filters, sort_keys=True)
+        return base_size
 
-        # Create key string with user_id
-        key_str = f"{user_id}|{keywords_norm}|{location_norm}|{filters_str}"
+    def _generate_job_signature(self, job: Job, user_id: str) -> str:
+        """Generate job signature for similarity matching."""
+        metadata = job.metadata or {}
+        title = metadata.get('title', '').lower().strip()
+        company = metadata.get('company', '').lower().strip()
+        location = metadata.get('location', '').lower().strip()
 
-        # Hash it for shorter dictionary keys
-        return hashlib.md5(key_str.encode('utf-8')).hexdigest()
-
+        signature = f"{user_id}|{title}|{company}|{location}"
+        return hashlib.md5(signature.encode('utf-8')).hexdigest()
 
 class ResumeGenerationStatus(Enum):
-    """Status of resume generation process."""
+    """Resume generation status."""
     PENDING = "pending"
     IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
     FAILED = "failed"
 
-class ResumeGenerationCache:
-    """Cache for tracking resume generation status and data."""
 
-    def __init__(self):
-        self._cache = {}
+class ResumeCache:
+    """High-performance resume generation cache with async support."""
+
+    def __init__(self, ttl_seconds=7200):  # 2 hours default
+        """Initialize resume cache."""
+        self.ttl_seconds = ttl_seconds
+        self._cache: Dict[str, Dict] = {}
         self._lock = asyncio.Lock()
 
     async def set_status(self, resume_id: str, user_id: str, status: ResumeGenerationStatus,
-                         data: Optional[Dict] = None, error: Optional[str] = None):
-        """Set resume generation status and optional data."""
+                         data: Optional[Dict] = None, error: Optional[str] = None) -> None:
+        """Set resume generation status."""
         async with self._lock:
             cache_key = f"{user_id}:{resume_id}"
             self._cache[cache_key] = {
                 "status": status,
                 "data": data,
                 "error": error,
-                "updated_at": datetime.now(),
+                "updated_at": time.time(),
                 "user_id": user_id,
                 "resume_id": resume_id
             }
 
     async def get_status(self, resume_id: str, user_id: str) -> Optional[Dict]:
-        """Get resume generation status and data."""
+        """Get resume generation status."""
         async with self._lock:
             cache_key = f"{user_id}:{resume_id}"
-            return self._cache.get(cache_key)
+            entry = self._cache.get(cache_key)
 
-    async def remove(self, resume_id: str, user_id: str):
+            if not entry:
+                return None
+
+            # Check expiration
+            if time.time() - entry["updated_at"] > self.ttl_seconds:
+                del self._cache[cache_key]
+                return None
+
+            return entry.copy()
+
+    async def remove(self, resume_id: str, user_id: str) -> None:
         """Remove resume from cache."""
         async with self._lock:
             cache_key = f"{user_id}:{resume_id}"
             if cache_key in self._cache:
                 del self._cache[cache_key]
 
-    async def clear_user_cache(self, user_id: str):
+    async def clear_user_cache(self, user_id: str) -> None:
         """Clear all cache entries for a user."""
         async with self._lock:
             keys_to_remove = [k for k in self._cache.keys() if k.startswith(f"{user_id}:")]
             for key in keys_to_remove:
                 del self._cache[key]
+
+    async def cleanup_expired(self) -> None:
+        """Remove expired entries."""
+        async with self._lock:
+            now = time.time()
+            expired_keys = [
+                k for k, v in self._cache.items()
+                if now - v["updated_at"] > self.ttl_seconds
+            ]
+
+            for key in expired_keys:
+                del self._cache[key]
+
+    def get_stats(self) -> Dict[str, Any]:
+        """Get cache statistics."""
+        return {
+            "entries": len(self._cache),
+            "memory_estimate_kb": len(str(self._cache)) // 1024
+        }
+
+
+class CacheMetrics:
+    """Centralized cache metrics and monitoring."""
+
+    def __init__(self):
+        self.job_cache_stats = {}
+        self.search_cache_stats = {}
+        self.resume_cache_stats = {}
+        self._lock = threading.Lock()
+
+    def update_stats(self, cache_type: str, stats: Dict[str, Any]) -> None:
+        """Update cache statistics."""
+        with self._lock:
+            if cache_type == "job":
+                self.job_cache_stats = stats
+            elif cache_type == "search":
+                self.search_cache_stats = stats
+            elif cache_type == "resume":
+                self.resume_cache_stats = stats
+
+    def get_overall_stats(self) -> Dict[str, Any]:
+        """Get overall cache statistics."""
+        with self._lock:
+            return {
+                "job_cache": self.job_cache_stats,
+                "search_cache": self.search_cache_stats,
+                "resume_cache": self.resume_cache_stats,
+                "timestamp": datetime.now().isoformat()
+            }

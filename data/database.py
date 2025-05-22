@@ -1,51 +1,65 @@
 import json
 import logging
 import os
-from typing import Dict, List, Optional, Any, Union
+from typing import Dict, List, Optional, Any, Union, Tuple
 from datetime import datetime
-import uuid
 import asyncpg
 from contextlib import asynccontextmanager
+import asyncio
 
-from dataModels.data_models import Job, Resume, SearchHistory, JobStatus
+from dataModels.data_models import Job, Resume, JobStatus
 
 # Configure logging
 logger = logging.getLogger(__name__)
 
 class Database:
-    """PostgreSQL database layer for storing job application data."""
+    """PostgreSQL database layer with connection pooling and batch operations."""
 
-    def __init__(self, db_url=None):
+    def __init__(self, db_url=None, min_pool_size=2, max_pool_size=20):
         """
-        Initialize the database connection.
+        Initialize the database connection with optimized pool settings.
 
         Args:
             db_url: PostgreSQL connection string
+            min_pool_size: Minimum connections in pool
+            max_pool_size: Maximum connections in pool
         """
         self.db_url = db_url or os.environ.get('DATABASE_URL')
         if not self.db_url:
             raise ValueError("No database URL provided")
 
-        # Connection pool will be initialized during application startup
+        self.min_pool_size = min_pool_size
+        self.max_pool_size = max_pool_size
         self.pool = None
+        self._pool_lock = asyncio.Lock()
+
+        # Prepared statement cache
+        self._prepared_statements = {}
 
     async def initialize_pool(self):
-        """Initialize connection pool."""
-        if self.pool is None:
-            self.pool = await asyncpg.create_pool(
-                dsn=self.db_url,
-                min_size=1,
-                max_size=10,
-                command_timeout=60
-            )
-            logger.info("PostgreSQL connection pool initialized")
+        """Initialize connection pool with optimized settings."""
+        async with self._pool_lock:
+            if self.pool is None:
+                self.pool = await asyncpg.create_pool(
+                    dsn=self.db_url,
+                    min_size=self.min_pool_size,
+                    max_size=self.max_pool_size,
+                    command_timeout=30,
+                    server_settings={
+                        'jit': 'off',  # Disable JIT for better performance on small queries
+                        'application_name': 'jobtrak_api'
+                    }
+                )
+                logger.info(f"PostgreSQL connection pool initialized (min={self.min_pool_size}, max={self.max_pool_size})")
 
     async def close_pool(self):
         """Close connection pool."""
-        if self.pool:
-            await self.pool.close()
-            self.pool = None
-            logger.info("PostgreSQL connection pool closed")
+        async with self._pool_lock:
+            if self.pool:
+                await self.pool.close()
+                self.pool = None
+                self._prepared_statements.clear()
+                logger.info("PostgreSQL connection pool closed")
 
     @asynccontextmanager
     async def get_connection(self):
@@ -57,704 +71,483 @@ class Database:
             yield conn
 
     async def initialize_db(self):
-        """Initialize the database schema if it doesn't exist."""
+        """Initialize the database schema with optimized indexes."""
         try:
             async with self.get_connection() as conn:
-                # Drop foreign key constraints first
-                await conn.execute('''
-                ALTER TABLE IF EXISTS jobs DROP CONSTRAINT IF EXISTS fk_jobs_resume_id;
-                ALTER TABLE IF EXISTS resumes DROP CONSTRAINT IF EXISTS fk_resumes_job_id;
-                ALTER TABLE IF EXISTS search_job_mapping DROP CONSTRAINT IF EXISTS fk_search_job_mapping_search_id;
-                ALTER TABLE IF EXISTS search_job_mapping DROP CONSTRAINT IF EXISTS fk_search_job_mapping_job_id;
-                ''')
+                # Drop existing schema
+                await self._drop_existing_schema(conn)
 
-                # Drop existing tables in the correct order (dependencies first)
-                await conn.execute('''
-                DROP TABLE IF EXISTS search_job_mapping;
-                DROP TABLE IF EXISTS search_history;
-                DROP TABLE IF EXISTS resumes;
-                DROP TABLE IF EXISTS jobs;
-                ''')
+                # Create optimized tables
+                await self._create_optimized_tables(conn)
 
-                # Drop indices if they exist
-                await conn.execute('''
-                DROP INDEX IF EXISTS idx_jobs_user_id;
-                DROP INDEX IF EXISTS idx_resumes_user_id;
-                DROP INDEX IF EXISTS idx_search_history_user_id;
-                DROP INDEX IF EXISTS idx_search_job_mapping_user_id;
-                DROP INDEX IF EXISTS jobs_id_user_id_unique;
-                DROP INDEX IF EXISTS resumes_id_user_id_unique;
-                DROP INDEX IF EXISTS search_history_id_user_id_unique;
-                DROP INDEX IF EXISTS idx_jobs_status;
-                DROP INDEX IF EXISTS idx_jobs_company;
-                DROP INDEX IF EXISTS idx_jobs_date_found;
-                ''')
+                # Create optimized indexes
+                await self._create_optimized_indexes(conn)
 
-                # Create jobs table
-                await conn.execute('''
-                CREATE TABLE jobs (
-                    id TEXT PRIMARY KEY,
-                    user_id TEXT NOT NULL,
-                    job_url TEXT NOT NULL,
-                    status TEXT NOT NULL,
-                    date_found TEXT,
-                    applied_date TEXT,
-                    rejected_date TEXT,
-                    resume_id TEXT,
-                    metadata JSONB
-                )
-                ''')
-
-                # Add a unique constraint on (id, user_id) in jobs
-                await conn.execute('''
-                CREATE UNIQUE INDEX jobs_id_user_id_unique ON jobs(id, user_id)
-                ''')
-
-                # Create resumes table
-                await conn.execute('''
-                CREATE TABLE resumes (
-                    id TEXT PRIMARY KEY,
-                    user_id TEXT NOT NULL,
-                    job_id TEXT,
-                    file_path TEXT NOT NULL,
-                    yaml_content TEXT NOT NULL,
-                    date_created TEXT,
-                    uploaded_to_simplify BOOLEAN DEFAULT FALSE
-                )
-                ''')
-
-                # Add a unique constraint on (id, user_id) in resumes
-                await conn.execute('''
-                CREATE UNIQUE INDEX resumes_id_user_id_unique ON resumes(id, user_id)
-                ''')
-
-                # Create search_history table
-                await conn.execute('''
-                CREATE TABLE search_history (
-                    id TEXT PRIMARY KEY,
-                    user_id TEXT NOT NULL,
-                    keywords TEXT NOT NULL,
-                    location TEXT NOT NULL,
-                    filters JSONB,
-                    date_searched TEXT,
-                    job_count INTEGER DEFAULT 0,
-                    job_ids JSONB
-                )
-                ''')
-
-                # Add a unique constraint on (id, user_id) in search_history
-                await conn.execute('''
-                CREATE UNIQUE INDEX search_history_id_user_id_unique ON search_history(id, user_id)
-                ''')
-
-                # Create search_job_mapping table
-                await conn.execute('''
-                CREATE TABLE search_job_mapping (
-                    search_id TEXT,
-                    job_id TEXT,
-                    user_id TEXT NOT NULL,
-                    PRIMARY KEY (search_id, job_id)
-                )
-                ''')
-
-                # Create indexes for user_id on all tables
-                await conn.execute('''
-                CREATE INDEX idx_jobs_user_id ON jobs(user_id);
-                CREATE INDEX idx_resumes_user_id ON resumes(user_id);
-                CREATE INDEX idx_search_history_user_id ON search_history(user_id);
-                CREATE INDEX idx_search_job_mapping_user_id ON search_job_mapping(user_id);
-                ''')
-
-                # Create index for common queries
-                await conn.execute('''
-                CREATE INDEX idx_jobs_status ON jobs(status);
-                CREATE INDEX idx_jobs_company ON jobs(company);
-                CREATE INDEX idx_jobs_date_found ON jobs(date_found);
-                ''')
-
-                # Now add the foreign key constraints
-                await conn.execute('''
-                ALTER TABLE jobs
-                ADD CONSTRAINT fk_jobs_resume_id
-                FOREIGN KEY (resume_id) REFERENCES resumes (id);
-                ''')
-
-                await conn.execute('''
-                ALTER TABLE resumes
-                ADD CONSTRAINT fk_resumes_job_id
-                FOREIGN KEY (job_id) REFERENCES jobs (id);
-                ''')
-
-                await conn.execute('''
-                ALTER TABLE search_job_mapping
-                ADD CONSTRAINT fk_search_job_mapping_search_id
-                FOREIGN KEY (search_id) REFERENCES search_history (id);
-                ''')
-
-                await conn.execute('''
-                ALTER TABLE search_job_mapping
-                ADD CONSTRAINT fk_search_job_mapping_job_id
-                FOREIGN KEY (job_id) REFERENCES jobs (id);
-                ''')
-
-                logger.info("Database schema initialized successfully")
+                logger.info("Optimized database schema initialized successfully")
         except Exception as e:
             logger.error(f"Error initializing database: {e}")
             raise
 
-    # Job methods
+    async def _drop_existing_schema(self, conn):
+        """Drop existing schema elements."""
+        await conn.execute('''
+        DROP TABLE IF EXISTS search_job_mapping CASCADE;
+        DROP TABLE IF EXISTS search_history CASCADE;
+        DROP TABLE IF EXISTS resumes CASCADE;
+        DROP TABLE IF EXISTS jobs CASCADE;
+        DROP INDEX IF EXISTS idx_jobs_user_status;
+        DROP INDEX IF EXISTS idx_jobs_user_url;
+        DROP INDEX IF EXISTS idx_jobs_user_date;
+        DROP INDEX IF EXISTS idx_resumes_user_job;
+        DROP INDEX IF EXISTS idx_search_user_date;
+        ''')
 
-    async def save_job(self, job: Job, user_id: str) -> bool:
+    async def _create_optimized_tables(self, conn):
+        """Create tables with optimized structure."""
+        # Jobs table with better column types
+        await conn.execute('''
+        CREATE TABLE jobs (
+            id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            job_url TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'NEW',
+            date_found TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            applied_date TIMESTAMPTZ,
+            rejected_date TIMESTAMPTZ,
+            resume_id TEXT,
+            metadata JSONB DEFAULT '{}',
+            created_at TIMESTAMPTZ DEFAULT NOW(),
+            updated_at TIMESTAMPTZ DEFAULT NOW(),
+            PRIMARY KEY (id, user_id)
+        )
+        ''')
+
+        # Resumes table with better structure
+        await conn.execute('''
+        CREATE TABLE resumes (
+            id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            job_id TEXT,
+            file_path TEXT NOT NULL,
+            yaml_content TEXT NOT NULL,
+            date_created TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            uploaded_to_simplify BOOLEAN DEFAULT FALSE,
+            created_at TIMESTAMPTZ DEFAULT NOW(),
+            updated_at TIMESTAMPTZ DEFAULT NOW(),
+            PRIMARY KEY (id, user_id)
+        )
+        ''')
+
+        # Search history with better performance
+        await conn.execute('''
+        CREATE TABLE search_history (
+            id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            keywords TEXT NOT NULL,
+            location TEXT NOT NULL,
+            filters JSONB DEFAULT '{}',
+            date_searched TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            job_count INTEGER DEFAULT 0,
+            job_ids JSONB DEFAULT '[]',
+            created_at TIMESTAMPTZ DEFAULT NOW(),
+            PRIMARY KEY (id, user_id)
+        )
+        ''')
+
+    async def _create_optimized_indexes(self, conn):
+        """Create optimized indexes for better query performance."""
+        # Composite indexes for common query patterns
+        await conn.execute('''
+        CREATE INDEX CONCURRENTLY idx_jobs_user_status_date ON jobs(user_id, status, date_found DESC);
+        CREATE INDEX CONCURRENTLY idx_jobs_user_url_hash ON jobs(user_id, md5(job_url));
+        CREATE INDEX CONCURRENTLY idx_jobs_metadata_gin ON jobs USING GIN(metadata);
+        CREATE INDEX CONCURRENTLY idx_resumes_user_job ON resumes(user_id, job_id);
+        CREATE INDEX CONCURRENTLY idx_search_user_date ON search_history(user_id, date_searched DESC);
+        CREATE INDEX CONCURRENTLY idx_search_filters_gin ON search_history USING GIN(filters);
+        ''')
+
+        # Unique constraints
+        await conn.execute('''
+        CREATE UNIQUE INDEX CONCURRENTLY idx_jobs_user_url_unique ON jobs(user_id, job_url);
+        ''')
+
+    # Optimized Job Methods
+
+    async def save_job_batch(self, jobs: List[Tuple[Job, str]]) -> bool:
         """
-        Save a job to the database.
+        Save multiple jobs in a single transaction for better performance.
 
         Args:
-            job: Job object to save
-            user_id: ID of the user owning this job
+            jobs: List of (Job, user_id) tuples
 
         Returns:
-            bool: True if successful, False otherwise
+            bool: True if successful
         """
+        if not jobs:
+            return True
+
         try:
             async with self.get_connection() as conn:
-                # Convert job object to dict for storage
+                async with conn.transaction():
+                    # Prepare bulk insert data
+                    job_data = []
+                    for job, user_id in jobs:
+                        job_dict = job.to_dict()
+                        job_data.append((
+                            job_dict["id"], user_id, job_dict["job_url"],
+                            job_dict["status"], job_dict["date_found"],
+                            job_dict["applied_date"], job_dict["rejected_date"],
+                            job_dict["resume_id"], json.dumps(job_dict.get("metadata", {}))
+                        ))
+
+                    # Use COPY for bulk insert (much faster than individual INSERTs)
+                    await conn.copy_records_to_table(
+                        'jobs',
+                        records=job_data,
+                        columns=['id', 'user_id', 'job_url', 'status', 'date_found',
+                                 'applied_date', 'rejected_date', 'resume_id', 'metadata'],
+                        timeout=30
+                    )
+
+                    logger.info(f"Bulk inserted {len(jobs)} jobs")
+                    return True
+        except Exception as e:
+            logger.error(f"Error in bulk job save: {e}")
+            return False
+
+    async def save_job(self, job: Job, user_id: str) -> bool:
+        """Optimized single job save with upsert."""
+        try:
+            async with self.get_connection() as conn:
                 job_dict = job.to_dict()
 
-                # Check if job already exists for this user
-                existing = await conn.fetchval("SELECT id FROM jobs WHERE id = $1 AND user_id = $2", job_dict["id"], user_id)
-
-                if existing:
-                    # Update existing job
-                    await conn.execute('''
-                    UPDATE jobs
-                    SET job_url = $1, status = $2, date_found = $3, applied_date = $4,
-                        rejected_date = $5, resume_id = $6, metadata = $7
-                    WHERE id = $8 AND user_id = $9
-                    ''',
-                                       job_dict["job_url"], job_dict["status"],
-                                       job_dict["date_found"], job_dict["applied_date"], job_dict["rejected_date"],
-                                       job_dict["resume_id"], json.dumps(job_dict.get("metadata", {})), job_dict["id"], user_id
-                                       )
-                    logger.info(f"Updated job: {job_dict['id']} for user: {user_id}")
-                else:
-                    # Insert new job
-                    await conn.execute('''
-                    INSERT INTO jobs (id, user_id, job_url, status, date_found, applied_date,
-                                    rejected_date, resume_id, metadata)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-                    ''',
-                                       job_dict["id"], user_id, job_dict["job_url"], job_dict["status"],
-                                       job_dict["date_found"], job_dict["applied_date"], job_dict["rejected_date"],
-                                       job_dict["resume_id"], json.dumps(job_dict.get("metadata", {}))
-                                       )
-                    logger.info(f"Inserted new job: {job_dict['id']} for user: {user_id}")
-
+                # Use UPSERT for better performance
+                await conn.execute('''
+                INSERT INTO jobs (id, user_id, job_url, status, date_found, applied_date,
+                                rejected_date, resume_id, metadata, updated_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+                ON CONFLICT (id, user_id) DO UPDATE SET
+                    job_url = EXCLUDED.job_url,
+                    status = EXCLUDED.status,
+                    applied_date = EXCLUDED.applied_date,
+                    rejected_date = EXCLUDED.rejected_date,
+                    resume_id = EXCLUDED.resume_id,
+                    metadata = EXCLUDED.metadata,
+                    updated_at = NOW()
+                ''',
+                                   job_dict["id"], user_id, job_dict["job_url"], job_dict["status"],
+                                   job_dict["date_found"], job_dict["applied_date"], job_dict["rejected_date"],
+                                   job_dict["resume_id"], json.dumps(job_dict.get("metadata", {}))
+                                   )
                 return True
         except Exception as e:
             logger.error(f"Error saving job: {e}")
             return False
 
     async def get_job(self, job_id: str, user_id: str) -> Optional[Job]:
-        """
-        Get a job by ID.
-
-        Args:
-            job_id: ID of the job to retrieve
-            user_id: ID of the user who owns the job
-
-        Returns:
-            Job object if found, None otherwise
-        """
+        """Optimized job retrieval."""
         try:
             async with self.get_connection() as conn:
-                row = await conn.fetchrow("SELECT * FROM jobs WHERE id = $1 AND user_id = $2", job_id, user_id)
+                row = await conn.fetchrow(
+                    "SELECT * FROM jobs WHERE id = $1 AND user_id = $2",
+                    job_id, user_id
+                )
 
                 if row:
-                    # Convert row to dict
-                    job_dict = dict(row)
-
-                    # Parse metadata JSON
-                    if job_dict.get("metadata"):
-                        job_dict["metadata"] = json.loads(job_dict["metadata"])
-                    else:
-                        job_dict["metadata"] = {}
-
-                    # Extract only the fields needed for the new Job class
-                    filtered_dict = {
-                        "id": job_dict["id"],
-                        "job_url": job_dict["job_url"],
-                        "status": job_dict["status"],
-                        "date_found": job_dict["date_found"],
-                        "applied_date": job_dict["applied_date"],
-                        "rejected_date": job_dict["rejected_date"],
-                        "resume_id": job_dict.get("resume_id"),
-                        "metadata": job_dict["metadata"]
-                    }
-
-                    return Job.from_dict(filtered_dict)
-                else:
-                    return None
+                    return self._row_to_job(row)
+                return None
         except Exception as e:
             logger.error(f"Error getting job {job_id} for user {user_id}: {e}")
             return None
 
-    async def get_all_jobs(self, user_id: str, status: Optional[Union[JobStatus, str]] = None) -> List[Job]:
-        """
-        Get all jobs for a user, optionally filtered by status.
+    async def get_jobs_batch(self, job_ids: List[str], user_id: str) -> List[Job]:
+        """Get multiple jobs in a single query."""
+        if not job_ids:
+            return []
 
-        Args:
-            user_id: ID of the user who owns the jobs
-            status: Filter jobs by this status
+        try:
+            async with self.get_connection() as conn:
+                rows = await conn.fetch(
+                    "SELECT * FROM jobs WHERE id = ANY($1) AND user_id = $2",
+                    job_ids, user_id
+                )
 
-        Returns:
-            List of Job objects
-        """
+                return [self._row_to_job(row) for row in rows]
+        except Exception as e:
+            logger.error(f"Error getting batch jobs for user {user_id}: {e}")
+            return []
+
+    async def get_all_jobs(self, user_id: str, status: Optional[Union[JobStatus, str]] = None,
+                           limit: int = None, offset: int = 0) -> List[Job]:
+        """Optimized job listing with pagination."""
         try:
             async with self.get_connection() as conn:
                 if status:
-                    # Convert enum to string if needed
                     status_str = str(status) if isinstance(status, JobStatus) else status
-                    rows = await conn.fetch("SELECT * FROM jobs WHERE user_id = $1 AND status = $2", user_id, status_str)
+                    query = '''
+                    SELECT * FROM jobs 
+                    WHERE user_id = $1 AND status = $2 
+                    ORDER BY date_found DESC
+                    '''
+                    params = [user_id, status_str]
                 else:
-                    rows = await conn.fetch("SELECT * FROM jobs WHERE user_id = $1", user_id)
+                    query = '''
+                    SELECT * FROM jobs 
+                    WHERE user_id = $1 
+                    ORDER BY date_found DESC
+                    '''
+                    params = [user_id]
 
-                jobs = []
-                for row in rows:
-                    # Convert row to dict
-                    job_dict = dict(row)
+                if limit:
+                    query += f" LIMIT ${len(params) + 1} OFFSET ${len(params) + 2}"
+                    params.extend([limit, offset])
 
-                    # Parse metadata JSON
-                    if job_dict.get("metadata"):
-                        job_dict["metadata"] = json.loads(job_dict["metadata"])
-                    else:
-                        job_dict["metadata"] = {}
-
-                    # Extract only the fields needed for the new Job class
-                    filtered_dict = {
-                        "id": job_dict["id"],
-                        "job_url": job_dict["job_url"],
-                        "status": job_dict["status"],
-                        "date_found": job_dict["date_found"],
-                        "applied_date": job_dict["applied_date"],
-                        "rejected_date": job_dict["rejected_date"],
-                        "resume_id": job_dict.get("resume_id"),
-                        "metadata": job_dict["metadata"]
-                    }
-
-                    jobs.append(Job.from_dict(filtered_dict))
-
-                return jobs
+                rows = await conn.fetch(query, *params)
+                return [self._row_to_job(row) for row in rows]
         except Exception as e:
             logger.error(f"Error getting jobs for user {user_id}: {e}")
             return []
 
-    async def job_exists(self, url: str, user_id: str) -> Optional[str]:
-        """
-        Check if a job with the given URL already exists in the database for this user.
-
-        Args:
-            url: URL of the job posting
-            user_id: ID of the user who owns the job
-
-        Returns:
-            Job ID if it exists, None otherwise
-        """
+    async def get_job_stats(self, user_id: str) -> Dict[str, int]:
+        """Get job statistics in a single optimized query."""
         try:
             async with self.get_connection() as conn:
-                # Updated to use job_url instead of linkedin_url
-                job_id = await conn.fetchval("SELECT id FROM jobs WHERE job_url = $1 AND user_id = $2", url, user_id)
+                # Single query to get all stats
+                rows = await conn.fetch('''
+                SELECT status, COUNT(*) as count
+                FROM jobs 
+                WHERE user_id = $1 
+                GROUP BY status
+                ''', user_id)
+
+                stats = {status.value: 0 for status in JobStatus}
+                total = 0
+
+                for row in rows:
+                    stats[row['status']] = row['count']
+                    total += row['count']
+
+                stats['total'] = total
+                return stats
+        except Exception as e:
+            logger.error(f"Error getting job stats for user {user_id}: {e}")
+            return {'total': 0}
+
+    async def job_exists(self, url: str, user_id: str) -> Optional[str]:
+        """Optimized job existence check using index."""
+        try:
+            async with self.get_connection() as conn:
+                job_id = await conn.fetchval(
+                    "SELECT id FROM jobs WHERE user_id = $1 AND job_url = $2",
+                    user_id, url
+                )
                 return job_id
         except Exception as e:
             logger.error(f"Error checking if job exists for user {user_id}: {e}")
             return None
 
-    async def update_job_status(self, job_id: str, user_id: str, status: Union[JobStatus, str]) -> bool:
+    async def update_job_status_batch(self, updates: List[Tuple[str, str, str]]) -> bool:
         """
-        Update the status of a job.
+        Update multiple job statuses in a single transaction.
 
         Args:
-            job_id: ID of the job to update
-            user_id: ID of the user who owns the job
-            status: New status for the job
-
-        Returns:
-            bool: True if successful, False otherwise
+            updates: List of (job_id, user_id, status) tuples
         """
+        if not updates:
+            return True
+
         try:
             async with self.get_connection() as conn:
-                # Convert enum to string if needed
-                status_str = str(status) if isinstance(status, JobStatus) else status
+                async with conn.transaction():
+                    for job_id, user_id, status in updates:
+                        await conn.execute('''
+                        UPDATE jobs SET status = $3, updated_at = NOW()
+                        WHERE id = $1 AND user_id = $2
+                        ''', job_id, user_id, status)
 
-                # Update status
-                await conn.execute('''
-                UPDATE jobs
-                SET status = $1
-                WHERE id = $2 AND user_id = $3
-                ''', status_str, job_id, user_id)
+                        # Update date fields based on status
+                        if status == str(JobStatus.APPLIED):
+                            await conn.execute('''
+                            UPDATE jobs SET applied_date = NOW()
+                            WHERE id = $1 AND user_id = $2
+                            ''', job_id, user_id)
+                        elif status == str(JobStatus.REJECTED):
+                            await conn.execute('''
+                            UPDATE jobs SET rejected_date = NOW()
+                            WHERE id = $1 AND user_id = $2
+                            ''', job_id, user_id)
 
-                # Update appropriate date field based on the status
-                if status_str == str(JobStatus.APPLIED):
-                    await conn.execute('''
-                    UPDATE jobs
-                    SET applied_date = $1
-                    WHERE id = $2 AND user_id = $3
-                    ''', datetime.now().isoformat(), job_id, user_id)
-                elif status_str == str(JobStatus.REJECTED):
-                    await conn.execute('''
-                    UPDATE jobs
-                    SET rejected_date = $1
-                    WHERE id = $2 AND user_id = $3
-                    ''', datetime.now().isoformat(), job_id, user_id)
-
-                logger.info(f"Updated job {job_id} status to {status_str} for user {user_id}")
-                return True
+                    logger.info(f"Updated {len(updates)} job statuses")
+                    return True
         except Exception as e:
-            logger.error(f"Error updating job status: {e}")
+            logger.error(f"Error in batch status update: {e}")
             return False
 
-    # Resume methods
+    # Optimized Resume Methods
 
     async def save_resume(self, resume: Resume, user_id: str) -> bool:
-        """
-        Save a resume to the database.
-
-        Args:
-            resume: Resume object to save
-            user_id: ID of the user who owns the resume
-
-        Returns:
-            bool: True if successful, False otherwise
-        """
+        """Optimized resume save with upsert."""
         try:
             async with self.get_connection() as conn:
-                # Convert resume object to dict for storage
                 resume_dict = resume.to_dict()
 
-                # Check if resume already exists for this user
-                existing = await conn.fetchval("SELECT id FROM resumes WHERE id = $1 AND user_id = $2", resume_dict["id"], user_id)
-
-                if existing:
-                    # Update existing resume
-                    await conn.execute('''
-                    UPDATE resumes
-                    SET job_id = $1, file_path = $2, yaml_content = $3,
-                        date_created = $4, uploaded_to_simplify = $5
-                    WHERE id = $6 AND user_id = $7
-                    ''',
-                                       resume_dict["job_id"], resume_dict["file_path"],
-                                       resume_dict["yaml_content"], resume_dict["date_created"],
-                                       resume_dict["uploaded_to_simplify"], resume_dict["id"], user_id
-                                       )
-                    logger.info(f"Updated resume: {resume_dict['id']} for user: {user_id}")
-                else:
-                    # Insert new resume
-                    await conn.execute('''
-                    INSERT INTO resumes (id, user_id, job_id, file_path, yaml_content,
-                                        date_created, uploaded_to_simplify)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7)
-                    ''',
-                                       resume_dict["id"], user_id, resume_dict["job_id"], resume_dict["file_path"],
-                                       resume_dict["yaml_content"], resume_dict["date_created"],
-                                       resume_dict["uploaded_to_simplify"]
-                                       )
-                    logger.info(f"Inserted new resume: {resume_dict['id']} for user: {user_id}")
-
+                await conn.execute('''
+                INSERT INTO resumes (id, user_id, job_id, file_path, yaml_content,
+                                   date_created, uploaded_to_simplify, updated_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+                ON CONFLICT (id, user_id) DO UPDATE SET
+                    job_id = EXCLUDED.job_id,
+                    file_path = EXCLUDED.file_path,
+                    yaml_content = EXCLUDED.yaml_content,
+                    uploaded_to_simplify = EXCLUDED.uploaded_to_simplify,
+                    updated_at = NOW()
+                ''',
+                                   resume_dict["id"], user_id, resume_dict["job_id"],
+                                   resume_dict["file_path"], resume_dict["yaml_content"],
+                                   resume_dict["date_created"], resume_dict["uploaded_to_simplify"]
+                                   )
                 return True
         except Exception as e:
             logger.error(f"Error saving resume: {e}")
             return False
 
     async def get_resume(self, resume_id: str, user_id: str) -> Optional[Resume]:
-        """
-        Get a resume by ID.
-
-        Args:
-            resume_id: ID of the resume to retrieve
-            user_id: ID of the user who owns the resume
-
-        Returns:
-            Resume object if found, None otherwise
-        """
+        """Get resume by ID."""
         try:
             async with self.get_connection() as conn:
-                row = await conn.fetchrow("SELECT * FROM resumes WHERE id = $1 AND user_id = $2", resume_id, user_id)
+                row = await conn.fetchrow(
+                    "SELECT * FROM resumes WHERE id = $1 AND user_id = $2",
+                    resume_id, user_id
+                )
 
                 if row:
-                    # Convert row to dict
-                    resume_dict = dict(row)
-                    return Resume.from_dict(resume_dict)
-                else:
-                    return None
+                    return self._row_to_resume(row)
+                return None
         except Exception as e:
             logger.error(f"Error getting resume {resume_id} for user {user_id}: {e}")
             return None
 
-    async def get_resume_for_job(self, job_id: str, user_id: str) -> Optional[Resume]:
-        """
-        Get a resume associated with a specific job.
+    # Optimized Search Methods
 
-        Args:
-            job_id: ID of the job
-            user_id: ID of the user who owns the job and resume
-
-        Returns:
-            Resume object if found, None otherwise
-        """
+    async def save_search_history(self, keywords: str, location: str, filters: Dict[str, Any],
+                                  job_ids: List[str], user_id: str, search_id: str = None) -> bool:
+        """Optimized search history save."""
         try:
             async with self.get_connection() as conn:
-                row = await conn.fetchrow("SELECT * FROM resumes WHERE job_id = $1 AND user_id = $2", job_id, user_id)
-
-                if row:
-                    # Convert row to dict
-                    resume_dict = dict(row)
-                    return Resume.from_dict(resume_dict)
-                else:
-                    return None
-        except Exception as e:
-            logger.error(f"Error getting resume for job {job_id} for user {user_id}: {e}")
-            return None
-
-    async def update_simplify_upload_status(self, resume_id: str, user_id: str, uploaded: bool) -> bool:
-        """
-        Update the Simplify upload status of a resume.
-
-        Args:
-            resume_id: ID of the resume to update
-            user_id: ID of the user who owns the resume
-            uploaded: Whether the resume has been uploaded to Simplify
-
-        Returns:
-            bool: True if successful, False otherwise
-        """
-        try:
-            async with self.get_connection() as conn:
-                await conn.execute('''
-                UPDATE resumes
-                SET uploaded_to_simplify = $1
-                WHERE id = $2 AND user_id = $3
-                ''', uploaded, resume_id, user_id)
-
-                logger.info(f"Updated resume {resume_id} Simplify upload status to {uploaded} for user {user_id}")
-                return True
-        except Exception as e:
-            logger.error(f"Error updating resume Simplify upload status: {e}")
-            return False
-
-    # Search history methods
-
-    async def get_cached_search_results(self, keywords: str, location: str, filters: Dict[str, Any], user_id: str) -> List[Dict[str, Any]]:
-        """
-        Get cached search results for given search parameters from the database.
-
-        Args:
-            keywords: Search keywords
-            location: Search location
-            filters: Search filters
-            user_id: ID of the user who performed the search
-
-        Returns:
-            List of job dictionaries if found in cache, empty list otherwise
-        """
-        try:
-            async with self.get_connection() as conn:
-                # Generate search ID to find the cached search
-                search_id = self._generate_search_key(keywords, location, filters)
-
-                # First check if we have this search in our history for this user
-                search_row = await conn.fetchrow('''
-                SELECT id, job_count, date_searched 
-                FROM search_history 
-                WHERE id = $1 AND user_id = $2
-                ''', search_id, user_id)
-
-                if not search_row:
-                    logger.debug(f"No cached search found for '{keywords}' in '{location}' for user {user_id}")
-                    return []
-
-                # Check if the search is recent (less than 24 hours old)
-                date_searched = datetime.fromisoformat(search_row["date_searched"])
-                cache_age = datetime.now() - date_searched
-
-                # If cache is older than 24 hours, consider it stale
-                if cache_age.total_seconds() > 86400:  # 24 hours in seconds
-                    logger.info(f"Cached search results for '{keywords}' in '{location}' for user {user_id} are stale (older than 24 hours)")
-                    return []
-
-                # Get the job IDs associated with this search
-                job_ids = []
-
-                # First try to get job_ids directly from search_history
-                job_ids_json = await conn.fetchval('''
-                SELECT job_ids FROM search_history WHERE id = $1 AND user_id = $2
-                ''', search_id, user_id)
-
-                if job_ids_json:
-                    try:
-                        job_ids = json.loads(job_ids_json)
-                    except json.JSONDecodeError:
-                        logger.warning(f"Failed to parse job_ids JSON from search_history: {job_ids_json}")
-
-                # If job_ids not found in search_history, try search_job_mapping
-                if not job_ids:
-                    try:
-                        mapping_rows = await conn.fetch('''
-                        SELECT job_id FROM search_job_mapping WHERE search_id = $1 AND user_id = $2
-                        ''', search_id, user_id)
-
-                        if mapping_rows:
-                            job_ids = [row["job_id"] for row in mapping_rows]
-                    except Exception as e:
-                        logger.debug(f"Could not get job_ids from search_job_mapping: {e}")
-
-                # If we couldn't find any job IDs, return empty list
-                if not job_ids:
-                    logger.warning(f"Search ID {search_id} for user {user_id} exists but has no associated job IDs")
-                    return []
-
-                # Now fetch the actual job data for these job IDs
-                results = []
-                for job_id in job_ids:
-                    job = await self.get_job(job_id, user_id)
-                    if job:
-                        results.append(job.to_dict())
-
-                logger.info(f"Retrieved {len(results)} cached jobs for search '{keywords}' in '{location}' for user {user_id}")
-                return results
-        except Exception as e:
-            logger.error(f"Error retrieving cached search results: {e}")
-            return []
-
-    async def save_search_history(self, keywords: str, location: str, filters: Dict[str, Any], job_ids: List[str], user_id: str, search_id: str = None) -> bool:
-        """
-        Save a search history entry to the database.
-
-        Args:
-            keywords: Search keywords
-            location: Search location
-            filters: Filters used in the search
-            job_ids: List of job IDs from the search results
-            user_id: ID of the user who performed the search
-            search_id: Optional custom search ID
-
-        Returns:
-            bool: True if successful, False otherwise
-        """
-        try:
-            async with self.get_connection() as conn:
-                # Generate search ID if not provided
                 if not search_id:
                     search_id = self._generate_search_key(keywords, location, filters)
 
-                # Get current timestamp
-                date_searched = datetime.now().isoformat()
-
-                # Check if this search already exists for this user
-                existing = await conn.fetchval("SELECT id FROM search_history WHERE id = $1 AND user_id = $2", search_id, user_id)
-
-                if existing:
-                    # Update existing search history
-                    await conn.execute('''
-                    UPDATE search_history
-                    SET keywords = $1, location = $2, filters = $3,
-                        date_searched = $4, job_count = $5, job_ids = $6
-                    WHERE id = $7 AND user_id = $8
-                    ''',
-                                       keywords, location, json.dumps(filters),
-                                       date_searched, len(job_ids), json.dumps(job_ids), search_id, user_id
-                                       )
-                    logger.info(f"Updated search history: {search_id} for user {user_id}")
-                else:
-                    # Insert new search history
-                    await conn.execute('''
-                    INSERT INTO search_history (id, user_id, keywords, location, filters,
-                                              date_searched, job_count, job_ids)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-                    ''',
-                                       search_id, user_id, keywords, location, json.dumps(filters),
-                                       date_searched, len(job_ids), json.dumps(job_ids)
-                                       )
-                    logger.info(f"Inserted new search history: {search_id} for user {user_id}")
-
-                # Create mapping between search and jobs in search_job_mapping table
-                try:
-                    # Clear existing mappings
-                    await conn.execute("DELETE FROM search_job_mapping WHERE search_id = $1 AND user_id = $2", search_id, user_id)
-
-                    # Insert new mappings
-                    for job_id in job_ids:
-                        await conn.execute('''
-                        INSERT INTO search_job_mapping (search_id, job_id, user_id)
-                        VALUES ($1, $2, $3)
-                        ''', search_id, job_id, user_id)
-
-                except Exception as e:
-                    logger.debug(f"Could not update search_job_mapping: {e}")
-
+                await conn.execute('''
+                INSERT INTO search_history (id, user_id, keywords, location, filters,
+                                          job_count, job_ids, updated_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+                ON CONFLICT (id, user_id) DO UPDATE SET
+                    keywords = EXCLUDED.keywords,
+                    location = EXCLUDED.location,
+                    filters = EXCLUDED.filters,
+                    job_count = EXCLUDED.job_count,
+                    job_ids = EXCLUDED.job_ids,
+                    date_searched = NOW(),
+                    updated_at = NOW()
+                ''',
+                                   search_id, user_id, keywords, location, json.dumps(filters),
+                                   len(job_ids), json.dumps(job_ids)
+                                   )
                 return True
         except Exception as e:
             logger.error(f"Error saving search history: {e}")
             return False
 
-    async def get_search_history(self, user_id: str, limit: int = 10) -> List[SearchHistory]:
-        """
-        Get recent search history entries for a user.
-
-        Args:
-            user_id: ID of the user
-            limit: Maximum number of entries to retrieve
-
-        Returns:
-            List of SearchHistory objects
-        """
+    async def get_cached_search_results(self, keywords: str, location: str,
+                                        filters: Dict[str, Any], user_id: str) -> List[Dict[str, Any]]:
+        """Optimized cached search retrieval."""
         try:
             async with self.get_connection() as conn:
-                rows = await conn.fetch('''
-                SELECT * FROM search_history
-                WHERE user_id = $1
-                ORDER BY date_searched DESC
-                LIMIT $2
-                ''', user_id, limit)
+                search_id = self._generate_search_key(keywords, location, filters)
 
-                history_entries = []
-                for row in rows:
-                    # Convert row to dict
-                    history_dict = dict(row)
+                # Get search with job data in single query
+                row = await conn.fetchrow('''
+                SELECT sh.job_ids, sh.date_searched
+                FROM search_history sh
+                WHERE sh.id = $1 AND sh.user_id = $2
+                AND sh.date_searched > NOW() - INTERVAL '24 hours'
+                ''', search_id, user_id)
 
-                    # Parse filters JSON
-                    if history_dict.get("filters"):
-                        history_dict["filters"] = json.loads(history_dict["filters"])
-                    else:
-                        history_dict["filters"] = {}
+                if not row or not row['job_ids']:
+                    return []
 
-                    # Parse job_ids JSON if present
-                    if history_dict.get("job_ids"):
-                        history_dict["job_ids"] = json.loads(history_dict["job_ids"])
+                job_ids = json.loads(row['job_ids'])
+                if not job_ids:
+                    return []
 
-                    history_entries.append(SearchHistory.from_dict(history_dict))
+                # Get all jobs in single query
+                jobs = await self.get_jobs_batch(job_ids, user_id)
+                return [job.to_dict() for job in jobs]
 
-                return history_entries
         except Exception as e:
-            logger.error(f"Error getting search history for user {user_id}: {e}")
+            logger.error(f"Error retrieving cached search results: {e}")
             return []
 
-    # Utility methods
+    # Helper Methods
+
+    def _row_to_job(self, row) -> Job:
+        """Convert database row to Job object."""
+        job_dict = dict(row)
+
+        # Parse metadata
+        if job_dict.get("metadata"):
+            if isinstance(job_dict["metadata"], str):
+                job_dict["metadata"] = json.loads(job_dict["metadata"])
+        else:
+            job_dict["metadata"] = {}
+
+        # Convert timestamps
+        for field in ["date_found", "applied_date", "rejected_date"]:
+            if job_dict.get(field):
+                if isinstance(job_dict[field], str):
+                    job_dict[field] = datetime.fromisoformat(job_dict[field])
+
+        return Job.from_dict(job_dict)
+
+    def _row_to_resume(self, row) -> Resume:
+        """Convert database row to Resume object."""
+        resume_dict = dict(row)
+
+        # Convert timestamps
+        if resume_dict.get("date_created"):
+            if isinstance(resume_dict["date_created"], str):
+                resume_dict["date_created"] = datetime.fromisoformat(resume_dict["date_created"])
+
+        return Resume.from_dict(resume_dict)
 
     def _generate_search_key(self, keywords: str, location: str, filters: Dict[str, Any]) -> str:
-        """Generate a hash-based search key for consistent lookup."""
-        # Normalize the strings
+        """Generate search key with better normalization."""
+        import hashlib
+
+        # Normalize strings
         keywords_norm = ' '.join(keywords.lower().split())
         location_norm = ' '.join(location.lower().split())
-
-        # Create a stable string representation of filters
         filters_str = json.dumps(filters, sort_keys=True)
 
-        # Create the key string
+        # Create key
         key_str = f"{keywords_norm}|{location_norm}|{filters_str}"
-
-        # Hash for consistent ID
-        import hashlib
         return hashlib.md5(key_str.encode()).hexdigest()
 
-    def generate_id(self) -> str:
-        """Generate a unique ID for database entities."""
-        return str(uuid.uuid4())
+    async def health_check(self) -> Dict[str, Any]:
+        """Database health check."""
+        try:
+            async with self.get_connection() as conn:
+                result = await conn.fetchval("SELECT 1")
+                pool_stats = {
+                    "size": self.pool.get_size(),
+                    "idle": self.pool.get_idle_size(),
+                    "min_size": self.pool.get_min_size(),
+                    "max_size": self.pool.get_max_size()
+                } if self.pool else {}
+
+                return {
+                    "status": "healthy" if result == 1 else "unhealthy",
+                    "pool": pool_stats
+                }
+        except Exception as e:
+            return {"status": "unhealthy", "error": str(e)}

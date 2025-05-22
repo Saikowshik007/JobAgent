@@ -1,7 +1,9 @@
 # cache_manager.py - Add this as a new file
 import asyncio
 from typing import Dict, Optional
-from services.resume_generator import ResumeGenerationCache
+
+from data.cache import ResumeCache
+
 
 class GlobalCacheManager:
     """Singleton cache manager for the application."""
@@ -17,7 +19,7 @@ class GlobalCacheManager:
 
     def __init__(self):
         if not self._initialized:
-            self.resume_cache = ResumeGenerationCache()
+            self.resume_cache = ResumeCache()
             self._initialized = True
 
     async def get_resume_status(self, resume_id: str, user_id: str) -> Optional[Dict]:

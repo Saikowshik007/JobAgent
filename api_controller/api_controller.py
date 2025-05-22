@@ -27,7 +27,7 @@ load_dotenv()
 from data.database import Database
 from dataModels.data_models import JobStatus, Job
 from data.dbcache_manager import DBCacheManager
-from data.cache import JobCache, SearchCache
+from data.cache import JobCache
 
 # Configure logging
 logging.basicConfig(
@@ -75,21 +75,18 @@ def initialize(db_path=None, job_cache_size=None, search_cache_size=None):
 
         # Initialize caches
         job_cache = JobCache(max_size=job_cache_size)
-        search_cache = SearchCache(max_size=search_cache_size)
         logger.info(f"Initialized caches with sizes - job: {job_cache_size}, search: {search_cache_size}")
 
         # Initialize cache manager
         db_manager = DBCacheManager(
             database=db,
             job_cache=job_cache,
-            search_cache=search_cache
         )
         logger.info("Initialized database cache manager")
 
         # Store in application state
         app.state.db = db
         app.state.job_cache = job_cache
-        app.state.search_cache = search_cache
         app.state.db_manager = db_manager
         app.state.cache_manager = cache_manager  # Add global cache manager
 
