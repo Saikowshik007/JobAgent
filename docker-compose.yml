@@ -6,10 +6,8 @@ services:
     image: nginx:alpine
     container_name: jobtrak-nginx
     ports:
-      - "80:80"     # HTTP (redirects to HTTPS)
-      - "443:443"   # HTTPS with self-signed cert for IP access
-      - "[::]:80:80"
-      - "[::]:443:443"
+      - "80:80"       # IPv4 HTTP
+      - "443:443"     # IPv4 HTTPS
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/certs:/etc/nginx/certs:ro  # Mount your self-signed certs
@@ -33,9 +31,8 @@ services:
     expose:
       - "8000"  # Only expose internally to nginx
     ports:
-      - "5678:5678"  # Debug port for remote debugging
-      - "8000:8000"   # Direct API access for debugging (optional)
-      - "[::]:8000:8000"
+      - "5678:5678"     # Debug port for remote debugging
+      - "8000:8000"     # IPv4 direct API access for debugging
     volumes:
       - .:/app
       - ./database:/app/database
@@ -92,6 +89,11 @@ networks:
   jobtrak-network:
     driver: bridge
     name: jobtrak-network
+    enable_ipv6: true
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+        - subnet: 2001:3984:3989::/64
 
 volumes:
   postgres_data:
