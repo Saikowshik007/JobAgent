@@ -44,6 +44,8 @@ services:
       - PYTHONUNBUFFERED=1
       - SELENIUM_REMOTE_URL=http://selenium-chrome:4444/wd/hub
       - DATABASE_URL=postgresql://neondb_owner:npg_8XtuTyc1SsZW@ep-still-wave-a4phgoe6-pooler.us-east-1.aws.neon.tech/neondb?sslmode=require
+      - SIMPLIFY_JOBS_API_URL=https://api.simplify.jobs/v2
+      - SIMPLIFY_SITE_KEY=6LcStf4UAAAAAIVZo9JUJ3PntTfRBhvXLKBTGww8
       # Add your IP here for logging/monitoring
       - HOST_IP=${HOST_IP:-auto-detect}
     healthcheck:

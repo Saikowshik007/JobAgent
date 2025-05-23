@@ -1,9 +1,10 @@
 import hashlib
+import uuid
 
 import requests
 from fastapi import FastAPI, HTTPException, Depends, Query, Header, UploadFile, Form, File
 from fastapi.middleware.cors import CORSMiddleware
-from typing import  Optional
+from typing import Optional, Dict, Any
 import logging
 import os
 from datetime import datetime
@@ -13,8 +14,7 @@ from starlette.responses import HTMLResponse
 
 import config
 from dataModels.api_models import JobStatusUpdateRequest, GenerateResumeRequest, \
-    UploadToSimplifyRequest, user_simplify_sessions, SimplifyAPIRequest, simplify_sessions, SimplifyJobsIntegration, \
-    SimplifyLoginRequest
+    UploadToSimplifyRequest, SimplifyLoginRequest, SimplifyAPIRequest, SubmitSimplifySessionRequest
 from services.resume_generator import ResumeGenerator
 from services.resume_improver import ResumeImprover  # Import the ResumeImprover class
 
@@ -32,6 +32,8 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+simplify_sessions: Dict[str, Dict[str, Any]] = {}
+user_simplify_sessions: Dict[str, Dict[str, Any]] = {}
 
 # FastAPI app instance
 app = FastAPI(
@@ -649,202 +651,6 @@ async def shutdown_event():
     except Exception as e:
         logger.error(f"Error cleaning up resources: {e}")
 
-
-@app.post("/api/simplify/initiate-login", tags=["Simplify Integration"])
-async def initiate_simplify_login(
-        request: SimplifyLoginRequest,
-        user_id: str = Depends(get_user_id)
-):
-    """Initiate Simplify Jobs login process"""
-    try:
-        simplify_integration = SimplifyJobsIntegration()
-        session_id = simplify_integration.create_session_for_user(user_id, request.username)
-
-        return {
-            "session_id": session_id,
-            "login_url": f"/api/simplify/login-page/{session_id}",
-            "status": "initiated",
-            "message": "Open the login_url in a new tab to complete Simplify Jobs authentication"
-        }
-    except Exception as e:
-        logger.error(f"Error initiating Simplify login for user {user_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/api/simplify/login-page/{session_id}", response_class=HTMLResponse, tags=["Simplify Integration"])
-async def get_simplify_login_page(session_id: str):
-    """Serve the Simplify Jobs login page"""
-    if session_id not in simplify_sessions:
-        raise HTTPException(status_code=404, detail="Login session not found")
-
-    session_info = simplify_sessions[session_id]
-    username = session_info["username"]
-
-    simplify_integration = SimplifyJobsIntegration()
-    html_content = simplify_integration.get_login_page_html(session_id, username)
-
-    return html_content
-
-@app.post("/api/simplify/submit-session", tags=["Simplify Integration"])
-async def submit_simplify_session(request: dict):
-    """Receive manually submitted Simplify Jobs session cookies"""
-    try:
-        session_id = request.get("session_id")
-        cookie_string = request.get("cookie_string", "")
-        user_agent = request.get("user_agent", "")
-
-        if session_id not in simplify_sessions:
-            raise HTTPException(status_code=404, detail="Login session not found")
-
-        # Parse cookies
-        cookies = {{}}
-        if cookie_string:
-            # Handle different cookie formats
-            if ";" in cookie_string:
-                for cookie in cookie_string.split(";"):
-                    if "=" in cookie:
-                        name, value = cookie.strip().split("=", 1)
-                        cookies[name] = value
-            else:
-                if "=" in cookie_string:
-                    name, value = cookie_string.strip().split("=", 1)
-                    cookies[name] = value
-
-        # Store session data
-        user_id = simplify_sessions[session_id]["user_id"]
-        user_simplify_sessions[user_id] = {{
-            "cookies": cookies,
-            "user_agent": user_agent,
-            "session_id": session_id,
-            "created_at": datetime.now()
-        }}
-
-        # Update session status
-        simplify_sessions[session_id]["cookies_received"] = True
-        simplify_sessions[session_id]["status"] = "cookies_received"
-
-        return {{"success": True, "message": "Simplify Jobs session captured successfully"}}
-
-    except Exception as e:
-        logger.error(f"Error submitting Simplify session: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/api/simplify/session-status/{session_id}", tags=["Simplify Integration"])
-async def get_simplify_session_status(session_id: str):
-    """Get current status of Simplify login session"""
-    if session_id not in simplify_sessions:
-        raise HTTPException(status_code=404, detail="Session not found")
-
-    return simplify_sessions[session_id]
-
-@app.get("/api/simplify/verify-session/{session_id}", tags=["Simplify Integration"])
-async def verify_simplify_session(session_id: str):
-    """Verify that the captured Simplify session works"""
-    try:
-        if session_id not in simplify_sessions:
-            raise HTTPException(status_code=404, detail="Session not found")
-
-        session_info = simplify_sessions[session_id]
-        user_id = session_info["user_id"]
-
-        if user_id not in user_simplify_sessions:
-            return {{"valid": False, "error": "No session data found for user"}}
-
-        session_data = user_simplify_sessions[user_id]
-
-        # Test the session with a simple API call
-        session = requests.Session()
-
-        # Set cookies
-        for name, value in session_data["cookies"].items():
-            session.cookies.set(name, value)
-
-        # Set headers
-        headers = {{
-            "User-Agent": session_data.get("user_agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"),
-            "Accept": "application/json",
-            "Referer": "https://simplify.jobs/"
-        }}
-
-        # Test with profile endpoint
-        response = session.get("https://api.simplify.jobs/v2/profile", headers=headers)
-
-        if response.status_code == 200:
-            # Update session status
-            simplify_sessions[session_id]["status"] = "verified"
-            return {{
-                "valid": True,
-                "user_id": user_id,
-                "message": "Simplify Jobs session verified successfully"
-            }}
-        else:
-            return {{
-                "valid": False,
-                "error": f"Session verification failed with status {response.status_code}"
-            }}
-
-    except Exception as e:
-        logger.error(f"Error verifying Simplify session: {e}")
-        return {{"valid": False, "error": f"Session verification failed: {str(e)}"}}
-
-@app.post("/api/simplify/api-request", tags=["Simplify Integration"])
-async def make_simplify_api_request(
-        request: SimplifyAPIRequest,
-        user_id: str = Depends(get_user_id)
-):
-    """Make authenticated API requests to Simplify Jobs using stored session"""
-    try:
-        if user_id not in user_simplify_sessions:
-            raise HTTPException(status_code=404, detail="No Simplify Jobs session found for user")
-
-        session_data = user_simplify_sessions[user_id]
-
-        # Create session with stored cookies
-        session = requests.Session()
-        for name, value in session_data["cookies"].items():
-            session.cookies.set(name, value)
-
-        headers = {{
-            "User-Agent": session_data.get("user_agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"),
-            "Accept": "application/json",
-            "Referer": "https://simplify.jobs/"
-        }}
-
-        url = f"https://api.simplify.jobs/v2{request.endpoint}"
-
-        if request.method.upper() == "GET":
-            response = session.get(url, headers=headers)
-        elif request.method.upper() == "POST":
-            headers["Content-Type"] = "application/json"
-            response = session.post(url, headers=headers, json=request.data)
-        else:
-            raise HTTPException(status_code=400, detail="Unsupported method")
-
-        return {{
-            "status_code": response.status_code,
-            "data": response.json() if response.headers.get("content-type", "").startswith("application/json") else response.text,
-            "headers": dict(response.headers)
-        }}
-
-    except Exception as e:
-        logger.error(f"Error making Simplify API request: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/api/simplify/user-session/{user_id}", tags=["Simplify Integration"])
-async def get_user_simplify_session(user_id: str = Depends(get_user_id)):
-    """Get Simplify session info for a user"""
-    if user_id in user_simplify_sessions:
-        session_data = user_simplify_sessions[user_id]
-        return {{
-            "has_session": True,
-            "session_info": {{
-                "created_at": session_data["created_at"],
-                "session_id": session_data["session_id"],
-                "cookies_count": len(session_data["cookies"])
-            }}
-        }}
-    else:
-        return {{"has_session": False}}
-
 if __name__ == "__main__":
     # Run the FastAPI app with Uvicorn
     host = os.environ.get('API_HOST', '0.0.0.0')
@@ -853,3 +659,546 @@ if __name__ == "__main__":
 
     logger.info(f"Starting API server on {host}:{port} (debug={debug})")
     uvicorn.run(app, host=host, port=port, log_level="debug" if debug else "info")
+
+
+class SimplifyJobsIntegration:
+    def __init__(self):
+        self.site_key = "6LcStf4UAAAAAIVZo9JUJ3PntTfRBhvXLKBTGww8"
+        self.base_url = "https://api.simplify.jobs/v2"
+
+    def create_session_for_user(self, user_id: str, username: str) -> str:
+        """Create a new Simplify login session for a user"""
+        session_id = str(uuid.uuid4())
+
+        simplify_sessions[session_id] = {
+            "user_id": user_id,
+            "username": username,
+            "status": "pending",
+            "created_at": datetime.now(),
+            "cookies_received": False
+        }
+
+        return session_id
+
+    def get_login_page_html(self, session_id: str, username: str) -> str:
+        """Generate the login page HTML for manual authentication"""
+        return f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Connect to Simplify Jobs</title>
+            <style>
+                body {{
+                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+                    max-width: 900px;
+                    margin: 0 auto;
+                    padding: 20px;
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    min-height: 100vh;
+                    color: #333;
+                }}
+                .container {{
+                    background: white;
+                    padding: 40px;
+                    border-radius: 16px;
+                    box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+                }}
+                .header {{
+                    text-align: center;
+                    margin-bottom: 30px;
+                }}
+                .header h1 {{
+                    color: #4f46e5;
+                    margin-bottom: 10px;
+                    font-size: 2rem;
+                }}
+                .status {{
+                    padding: 16px;
+                    border-radius: 8px;
+                    margin: 20px 0;
+                    font-weight: 500;
+                }}
+                .pending {{ background: #fef3c7; border-left: 4px solid #f59e0b; }}
+                .success {{ background: #d1fae5; border-left: 4px solid #10b981; }}
+                .error {{ background: #fee2e2; border-left: 4px solid #ef4444; }}
+                button {{
+                    background: #4f46e5;
+                    color: white;
+                    border: none;
+                    padding: 14px 28px;
+                    border-radius: 8px;
+                    cursor: pointer;
+                    font-size: 16px;
+                    font-weight: 600;
+                    margin: 10px 5px;
+                    transition: all 0.2s;
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 8px;
+                }}
+                button:hover {{ background: #4338ca; transform: translateY(-1px); }}
+                button:disabled {{ 
+                    background: #9ca3af; 
+                    cursor: not-allowed; 
+                    transform: none;
+                }}
+                .step {{
+                    margin: 25px 0;
+                    padding: 20px;
+                    background: #f8fafc;
+                    border-radius: 8px;
+                    border: 1px solid #e2e8f0;
+                }}
+                .step h3 {{
+                    margin-top: 0;
+                    color: #1e293b;
+                    display: flex;
+                    align-items: center;
+                    gap: 8px;
+                }}
+                .step-number {{
+                    background: #4f46e5;
+                    color: white;
+                    width: 24px;
+                    height: 24px;
+                    border-radius: 50%;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    font-size: 14px;
+                    font-weight: bold;
+                }}
+                .info-box {{
+                    background: #eff6ff;
+                    border: 1px solid #bfdbfe;
+                    border-radius: 6px;
+                    padding: 12px;
+                    margin: 15px 0;
+                    font-size: 14px;
+                }}
+                .success-box {{
+                    background: #f0fdf4;
+                    border: 1px solid #bbf7d0;
+                    color: #166534;
+                    text-align: center;
+                    padding: 20px;
+                    border-radius: 8px;
+                    margin: 20px 0;
+                }}
+                .username-display {{
+                    background: #f1f5f9;
+                    padding: 8px 12px;
+                    border-radius: 4px;
+                    font-family: monospace;
+                    display: inline-block;
+                }}
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="header">
+                    <h1>🔗 Connect to Simplify Jobs</h1>
+                    <p>Link your Simplify Jobs account to enable automatic job applications</p>
+                    <div class="info-box">
+                        <strong>Account:</strong> <span class="username-display">{username}</span><br>
+                        <strong>Session:</strong> <span class="username-display">{session_id[:8]}...</span>
+                    </div>
+                </div>
+                
+                <div id="status" class="status pending">
+                    <strong>Status:</strong> <span id="status-text">Ready to connect</span>
+                </div>
+                
+                <div class="step">
+                    <h3><span class="step-number">1</span>Login to Simplify Jobs</h3>
+                    <p>Click below to open Simplify Jobs and complete your login manually (including CAPTCHA).</p>
+                    <button id="loginBtn" onclick="openLoginTab()">
+                        🚀 Open Simplify Jobs Login
+                    </button>
+                </div>
+                
+                <div class="step">
+                    <h3><span class="step-number">2</span>Capture Session</h3>
+                    <p>After successful login, return here and click to capture your session cookies.</p>
+                    <button id="captureBtn" onclick="captureSession()" disabled>
+                        🍪 Capture Session Data
+                    </button>
+                </div>
+                
+                <div class="step">
+                    <h3><span class="step-number">3</span>Verify Connection</h3>
+                    <p>Test the connection to make sure everything works properly.</p>
+                    <button id="verifyBtn" onclick="verifySession()" disabled>
+                        ✅ Verify & Complete Setup
+                    </button>
+                </div>
+                
+                <div id="results"></div>
+            </div>
+
+            <script>
+                const sessionId = '{session_id}';
+                let loginTabReference = null;
+
+                function updateStatus(text, type = 'pending') {{
+                    const statusDiv = document.getElementById('status');
+                    const statusText = document.getElementById('status-text');
+                    statusDiv.className = `status ${{type}}`;
+                    statusText.textContent = text;
+                }}
+
+                function openLoginTab() {{
+                    updateStatus('Opening Simplify Jobs login page...', 'pending');
+                    loginTabReference = window.open('https://simplify.jobs/login', '_blank');
+                    
+                    document.getElementById('captureBtn').disabled = false;
+                    document.getElementById('loginBtn').textContent = '🔄 Reopen Login Page';
+                    
+                    updateStatus('Login page opened. Complete login and return here.', 'pending');
+                }}
+
+                async function captureSession() {{
+                    updateStatus('Capturing session data...', 'pending');
+                    
+                    try {{
+                        // Get all cookies for simplify.jobs domain
+                        const cookies = await new Promise((resolve) => {{
+                            chrome.cookies?.getAll({{domain: '.simplify.jobs'}}, resolve) || 
+                            // Fallback for non-extension context
+                            resolve([]);
+                        }});
+                        
+                        // If we can't get cookies via extension, try document.cookie
+                        let cookieData = {{}};
+                        if (!cookies || cookies.length === 0) {{
+                            // Parse document.cookie if available
+                            if (document.cookie) {{
+                                document.cookie.split(';').forEach(cookie => {{
+                                    const [name, value] = cookie.trim().split('=');
+                                    if (name && value) {{
+                                        cookieData[name] = value;
+                                    }}
+                                }});
+                            }}
+                        }} else {{
+                            cookies.forEach(cookie => {{
+                                cookieData[cookie.name] = cookie.value;
+                            }});
+                        }}
+
+                        // Submit session data to backend
+                        const response = await fetch(`/api/simplify/submit-session`, {{
+                            method: 'POST',
+                            headers: {{
+                                'Content-Type': 'application/json',
+                            }},
+                            body: JSON.stringify({{
+                                session_id: sessionId,
+                                cookies: cookieData,
+                                user_agent: navigator.userAgent
+                            }})
+                        }});
+
+                        const result = await response.json();
+                        
+                        if (response.ok) {{
+                            updateStatus('Session captured successfully!', 'success');
+                            document.getElementById('verifyBtn').disabled = false;
+                            document.getElementById('captureBtn').textContent = '✅ Session Captured';
+                        }} else {{
+                            throw new Error(result.detail || 'Failed to capture session');
+                        }}
+                    }} catch (error) {{
+                        updateStatus(`Error capturing session: ${{error.message}}`, 'error');
+                        console.error('Session capture error:', error);
+                    }}
+                }}
+
+                async function verifySession() {{
+                    updateStatus('Verifying connection...', 'pending');
+                    
+                    try {{
+                        const response = await fetch(`/api/simplify/verify-session/${{sessionId}}`, {{
+                            method: 'POST'
+                        }});
+
+                        const result = await response.json();
+                        
+                        if (response.ok && result.success) {{
+                            updateStatus('Connection verified! You can close this window.', 'success');
+                            
+                            // Show success message
+                            document.getElementById('results').innerHTML = `
+                                <div class="success-box">
+                                    <h3>🎉 Successfully Connected!</h3>
+                                    <p>Your Simplify Jobs account is now linked and ready for automated applications.</p>
+                                    <p><strong>You can now close this window and return to your dashboard.</strong></p>
+                                </div>
+                            `;
+                            
+                            // Notify parent window
+                            if (window.opener) {{
+                                window.opener.postMessage({{
+                                    type: 'SIMPLIFY_LOGIN_SUCCESS',
+                                    sessionId: sessionId
+                                }}, '*');
+                            }}
+                            
+                            // Auto-close after delay
+                            setTimeout(() => window.close(), 3000);
+                        }} else {{
+                            throw new Error(result.detail || 'Verification failed');
+                        }}
+                    }} catch (error) {{
+                        updateStatus(`Verification failed: ${{error.message}}`, 'error');
+                    }}
+                }}
+
+                // Check session status periodically
+                setInterval(async () => {{
+                    try {{
+                        const response = await fetch(`/api/simplify/session-status/${{sessionId}}`);
+                        const result = await response.json();
+                        
+                        if (result.status === 'completed') {{
+                            updateStatus('Connection completed successfully!', 'success');
+                            document.getElementById('verifyBtn').disabled = false;
+                        }}
+                    }} catch (error) {{
+                        console.error('Status check error:', error);
+                    }}
+                }}, 5000);
+            </script>
+        </body>
+        </html>
+        """
+
+    def submit_session_data(self, session_id: str, cookies: Dict[str, str], user_agent: str = None) -> bool:
+        """Store the captured session data"""
+        if session_id not in simplify_sessions:
+            return False
+
+        session_data = simplify_sessions[session_id]
+        session_data.update({
+            "cookies": cookies,
+            "user_agent": user_agent,
+            "status": "cookies_received",
+            "updated_at": datetime.now()
+        })
+
+        return True
+
+    def verify_session(self, session_id: str) -> Dict[str, Any]:
+        """Verify the session works by making a test API call"""
+        if session_id not in simplify_sessions:
+            return {"success": False, "error": "Session not found"}
+
+        session_data = simplify_sessions[session_id]
+
+        try:
+            # Test the session by making a simple API call
+            cookies = session_data.get("cookies", {})
+            headers = {
+                "User-Agent": session_data.get("user_agent", "Mozilla/5.0"),
+                "Accept": "application/json",
+            }
+
+            # Convert cookies to requests format
+            cookie_str = "; ".join([f"{k}={v}" for k, v in cookies.items()])
+            if cookie_str:
+                headers["Cookie"] = cookie_str
+
+            response = requests.get(
+                f"{self.base_url}/profile",
+                headers=headers,
+                timeout=10
+            )
+
+            if response.status_code == 200:
+                # Session is valid, store it for the user
+                user_id = session_data["user_id"]
+                user_simplify_sessions[user_id] = {
+                    "cookies": cookies,
+                    "user_agent": session_data.get("user_agent"),
+                    "created_at": datetime.now(),
+                    "last_verified": datetime.now(),
+                    "profile_data": response.json()
+                }
+
+                # Mark session as completed
+                session_data["status"] = "completed"
+
+                return {"success": True, "profile": response.json()}
+            else:
+                return {"success": False, "error": f"API call failed: {response.status_code}"}
+
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def make_api_request(self, user_id: str, endpoint: str, method: str = "GET", data: Dict = None) -> Dict[str, Any]:
+        """Make an API request using the user's stored session"""
+        if user_id not in user_simplify_sessions:
+            return {"error": "No active Simplify session found"}
+
+        session = user_simplify_sessions[user_id]
+
+        try:
+            headers = {
+                "User-Agent": session.get("user_agent", "Mozilla/5.0"),
+                "Accept": "application/json",
+                "Content-Type": "application/json"
+            }
+
+            # Add cookies
+            cookies = session.get("cookies", {})
+            cookie_str = "; ".join([f"{k}={v}" for k, v in cookies.items()])
+            if cookie_str:
+                headers["Cookie"] = cookie_str
+
+            url = f"{self.base_url}{endpoint}"
+
+            if method.upper() == "GET":
+                response = requests.get(url, headers=headers, timeout=30)
+            elif method.upper() == "POST":
+                response = requests.post(url, headers=headers, json=data, timeout=30)
+            elif method.upper() == "PUT":
+                response = requests.put(url, headers=headers, json=data, timeout=30)
+            else:
+                return {"error": f"Unsupported method: {method}"}
+
+            return {
+                "status_code": response.status_code,
+                "data": response.json() if response.content else None,
+                "headers": dict(response.headers)
+            }
+
+        except Exception as e:
+            return {"error": str(e)}
+
+# Initialize the integration
+simplify_integration = SimplifyJobsIntegration()
+
+@app.post("/api/simplify/initiate-login")
+async def initiate_simplify_login(request: SimplifyLoginRequest, user_id: str = Depends(get_user_id)):
+    """Initiate the Simplify Jobs login process"""
+    try:
+        session_id = simplify_integration.create_session_for_user(user_id, request.username)
+
+        return {
+            "session_id": session_id,
+            "login_url": f"/api/simplify/login-page/{session_id}",
+            "message": "Login session created. Complete authentication in the opened window."
+        }
+    except Exception as e:
+        logger.error(f"Error initiating Simplify login: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/simplify/login-page/{session_id}", response_class=HTMLResponse)
+async def get_simplify_login_page(session_id: str):
+    """Serve the login page for manual authentication"""
+    if session_id not in simplify_sessions:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    session_data = simplify_sessions[session_id]
+    username = session_data.get("username", "Unknown")
+
+    html_content = simplify_integration.get_login_page_html(session_id, username)
+    return HTMLResponse(content=html_content)
+
+@app.post("/api/simplify/submit-session")
+async def submit_simplify_session(request: SubmitSimplifySessionRequest):
+    """Submit captured session data"""
+    try:
+        success = simplify_integration.submit_session_data(
+            request.session_id,
+            request.cookies,
+            request.user_agent
+        )
+
+        if success:
+            return {"message": "Session data captured successfully"}
+        else:
+            raise HTTPException(status_code=404, detail="Session not found")
+    except Exception as e:
+        logger.error(f"Error submitting session: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/simplify/verify-session/{session_id}")
+async def verify_simplify_session(session_id: str):
+    """Verify the captured session works"""
+    try:
+        result = simplify_integration.verify_session(session_id)
+
+        if result["success"]:
+            return {
+                "success": True,
+                "message": "Session verified successfully",
+                "profile": result.get("profile")
+            }
+        else:
+            raise HTTPException(status_code=400, detail=result["error"])
+    except Exception as e:
+        logger.error(f"Error verifying session: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/simplify/session-status/{session_id}")
+async def get_session_status(session_id: str):
+    """Get the current status of a login session"""
+    if session_id not in simplify_sessions:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    session_data = simplify_sessions[session_id]
+    return {
+        "session_id": session_id,
+        "status": session_data.get("status", "pending"),
+        "created_at": session_data.get("created_at"),
+        "username": session_data.get("username")
+    }
+
+@app.get("/api/simplify/user-session/{user_id}")
+async def get_user_simplify_session(user_id: str):
+    """Check if user has an active Simplify session"""
+    has_session = user_id in user_simplify_sessions
+
+    session_info = None
+    if has_session:
+        session = user_simplify_sessions[user_id]
+        session_info = {
+            "created_at": session.get("created_at"),
+            "last_verified": session.get("last_verified"),
+            "profile": session.get("profile_data", {})
+        }
+
+    return {
+        "user_id": user_id,
+        "has_session": has_session,
+        "session_info": session_info
+    }
+
+@app.post("/api/simplify/api-request")
+async def make_simplify_api_request(request: SimplifyAPIRequest, user_id: str = Depends(get_user_id)):
+    """Make an API request to Simplify Jobs using the user's session"""
+    try:
+        result = simplify_integration.make_api_request(
+            user_id,
+            request.endpoint,
+            request.method,
+            request.data
+        )
+
+        if "error" in result:
+            raise HTTPException(status_code=400, detail=result["error"])
+
+        return result
+    except Exception as e:
+        logger.error(f"Error making Simplify API request: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/simplify/disconnect/{user_id}")
+async def disconnect_simplify(user_id: str):
+    """Disconnect user's Simplify session"""
+    if user_id in user_simplify_sessions:
+        del user_simplify_sessions[user_id]
+        return {"message": "Simplify session disconnected"}
+    else:
+        raise HTTPException(status_code=404, detail="No active session found")
