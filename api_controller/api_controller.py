@@ -797,7 +797,7 @@ async def check_simplify_session(user_id: str = Depends(get_user_id)):
 
 if __name__ == "__main__":
     # Run the FastAPI app with Uvicorn
-    host = os.environ.get('API_HOST', '::')
+    host = os.environ.get('API_HOST', '0.0.0.0')
     port = int(os.environ.get('API_PORT', 8000))
     debug = os.environ.get('API_DEBUG', '').lower() in ('true', '1', 'yes')
 
