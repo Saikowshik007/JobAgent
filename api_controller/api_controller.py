@@ -651,16 +651,6 @@ async def shutdown_event():
     except Exception as e:
         logger.error(f"Error cleaning up resources: {e}")
 
-if __name__ == "__main__":
-    # Run the FastAPI app with Uvicorn
-    host = os.environ.get('API_HOST', '0.0.0.0')
-    port = int(os.environ.get('API_PORT', 8000))
-    debug = os.environ.get('API_DEBUG', '').lower() in ('true', '1', 'yes')
-
-    logger.info(f"Starting API server on {host}:{port} (debug={debug})")
-    uvicorn.run(app, host=host, port=port, log_level="debug" if debug else "info")
-
-
 class SimplifyJobsIntegration:
     def __init__(self):
         self.site_key = "6LcStf4UAAAAAIVZo9JUJ3PntTfRBhvXLKBTGww8"
@@ -1202,3 +1192,13 @@ async def disconnect_simplify(user_id: str):
         return {"message": "Simplify session disconnected"}
     else:
         raise HTTPException(status_code=404, detail="No active session found")
+
+
+if __name__ == "__main__":
+    # Run the FastAPI app with Uvicorn
+    host = os.environ.get('API_HOST', '0.0.0.0')
+    port = int(os.environ.get('API_PORT', 8000))
+    debug = os.environ.get('API_DEBUG', '').lower() in ('true', '1', 'yes')
+
+    logger.info(f"Starting API server on {host}:{port} (debug={debug})")
+    uvicorn.run(app, host=host, port=port, log_level="debug" if debug else "info")
