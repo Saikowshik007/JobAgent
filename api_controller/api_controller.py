@@ -41,7 +41,11 @@ app = FastAPI(
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, replace with specific origins
+    allow_origins=[ # Your Vercel domain
+        "https://job-agent-ui.vercel.app",     # If this is your domain
+        "http://localhost:3000",               # Local development
+        "https://localhost:3000",              # Local HTTPS development
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
