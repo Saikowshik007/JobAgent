@@ -50,9 +50,11 @@ app.add_middleware(
         "http://localhost:3000",               # Local HTTP development
         "https://127.0.0.1:3000",             # Local IP HTTPS
         "http://127.0.0.1:3000",              # Local IP HTTP
-        # Add your public IP here (replace with your actual IP)
-        # "https://YOUR_PUBLIC_IP",
-        # "http://YOUR_PUBLIC_IP",
+        # Add your actual public IP here
+        f"https://{os.environ.get('PUBLIC_IP', 'YOUR_PUBLIC_IP')}",
+        f"http://{os.environ.get('PUBLIC_IP', 'YOUR_PUBLIC_IP')}",
+        # Wildcard for any origin (use with caution in production)
+        "*"  # Only if you want to allow all origins
     ],
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
