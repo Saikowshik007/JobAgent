@@ -1,13 +1,27 @@
 #!/bin/bash
 
-# Script to generate self-signed SSL certificates for IP-based access
-# For production, use Let's Encrypt or a proper CA-signed certificate
+# Script to generate self-signed SSL certificates for IP-based HTTPS access
+# Run this script in your project root directory
 
-# Create nginx/certs directory if it doesn't exist
+# Get your public IP automatically (you can also set this manually)
+echo "🔍 Detecting your public IP address..."
+PUBLIC_IP=$(curl -s https://ipinfo.io/ip)
+echo "📍 Detected public IP: $PUBLIC_IP"
+
+# You can override the IP here if needed
+# PUBLIC_IP="YOUR_STATIC_IP_HERE"
+
+# Create certs directory
 mkdir -p nginx/certs
 
-# Create OpenSSL configuration file with generic CN and IP SAN
-cat > nginx/certs/server.conf <<EOF
+echo "🔐 Generating SSL certificates for IP: $PUBLIC_IP"
+
+# Generate private key
+openssl genrsa -out nginx/certs/server.key 2048
+
+# Generate certificate signing request
+openssl req -new -key nginx/certs/server.key -out nginx/certs/server.csr -config <(
+cat <<EOF
 [req]
 default_bits = 2048
 prompt = no
@@ -19,9 +33,9 @@ req_extensions = v3_req
 C=US
 ST=State
 L=City
-O=Organization
+O=YourOrganization
 OU=IT Department
-CN=localhost
+CN=$PUBLIC_IP
 
 [v3_req]
 basicConstraints = CA:FALSE
@@ -29,45 +43,46 @@ keyUsage = nonRepudiation, digitalSignature, keyEncipherment
 subjectAltName = @alt_names
 
 [alt_names]
-DNS.1 = localhost
-IP.1 = 127.0.0.1
-IP.2 = ::1
+IP.1 = $PUBLIC_IP
+IP.2 = 127.0.0.1
 IP.3 = 0.0.0.0
+DNS.1 = localhost
 EOF
+)
 
-# Generate private key
-echo "Generating private key..."
-openssl genrsa -out nginx/certs/server.key 2048
+# Generate self-signed certificate (valid for 365 days)
+openssl x509 -req -in nginx/certs/server.csr -signkey nginx/certs/server.key -out nginx/certs/server.crt -days 365 -extensions v3_req -extfile <(
+cat <<EOF
+[v3_req]
+basicConstraints = CA:FALSE
+keyUsage = nonRepudiation, digitalSignature, keyEncipherment
+subjectAltName = @alt_names
 
-# Generate certificate signing request with SAN
-echo "Generating certificate signing request..."
-openssl req -new -key nginx/certs/server.key -out nginx/certs/server.csr -config nginx/certs/server.conf
+[alt_names]
+IP.1 = $PUBLIC_IP
+IP.2 = 127.0.0.1
+IP.3 = 0.0.0.0
+DNS.1 = localhost
+EOF
+)
 
-# Generate self-signed certificate (valid for 365 days) with SAN
-echo "Generating self-signed certificate..."
-openssl x509 -req -days 365 -in nginx/certs/server.csr -signkey nginx/certs/server.key -out nginx/certs/server.crt -extensions v3_req -extfile nginx/certs/server.conf
-
-# Set appropriate permissions
+# Set proper permissions
 chmod 600 nginx/certs/server.key
 chmod 644 nginx/certs/server.crt
 
-# Clean up temporary files
-rm nginx/certs/server.csr nginx/certs/server.conf
+# Clean up CSR file
+rm nginx/certs/server.csr
 
 echo "✅ SSL certificates generated successfully!"
-echo "📁 Private key: nginx/certs/server.key"
-echo "📁 Certificate: nginx/certs/server.crt"
+echo "📁 Certificates location: nginx/certs/"
+echo "🔐 Private key: nginx/certs/server.key"
+echo "📜 Certificate: nginx/certs/server.crt"
+echo "🌐 Certificate valid for IP: $PUBLIC_IP"
 echo ""
-echo "📋 Certificate details:"
-openssl x509 -in nginx/certs/server.crt -text -noout | grep -A 1 "Subject:"
-openssl x509 -in nginx/certs/server.crt -text -noout | grep -A 5 "Subject Alternative Name"
+echo "🚀 Your API will be accessible at: https://$PUBLIC_IP"
 echo ""
-echo "⚠️  WARNING: These are self-signed certificates for development only!"
-echo "   For production, use proper CA-signed certificates or Let's Encrypt."
+echo "⚠️  Important: You'll need to accept the self-signed certificate in your browser"
+echo "   Visit https://$PUBLIC_IP and click 'Advanced' -> 'Proceed to site'"
 echo ""
-echo "🚀 You can now start your services with:"
-echo "   docker-compose -f docker-compose-nginx.yml up -d"
-echo ""
-echo "🌐 Access your service via:"
-echo "   https://YOUR_PUBLIC_IP"
-echo "   (Browser will show security warning for self-signed cert)"
+echo "📝 Update your React app environment variable:"
+echo "   REACT_APP_API_BASE_URL=https://$PUBLIC_IP"

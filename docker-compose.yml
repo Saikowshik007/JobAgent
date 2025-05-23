@@ -1,46 +1,53 @@
 version: '3.8'
 
 services:
-  # Nginx reverse proxy with SSL termination
+  # Nginx reverse proxy with SSL termination (separate container)
   nginx:
     image: nginx:alpine
+    container_name: jobtrak-nginx
     ports:
-      - "8000:8000"
-      - "443:443"
+      - "80:80"     # HTTP (redirects to HTTPS)
+      - "443:443"   # HTTPS with self-signed cert for IP access
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./nginx/certs:/etc/nginx/certs:ro
-      - ./nginx/html:/usr/share/nginx/html:ro
-      - /etc/letsencrypt:/etc/letsencrypt:ro
+      - ./nginx/certs:/etc/nginx/certs:ro  # Mount your self-signed certs
     depends_on:
       - jobtrak-api
     restart: unless-stopped
+    networks:
+      - jobtrak-network
     healthcheck:
       test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:80/health"]
       interval: 30s
       timeout: 10s
       retries: 3
 
-  # FastAPI service for the JobTrak Backend
+  # FastAPI service for the JobTrak Backend (separate container)
   jobtrak-api:
     build:
       context: .
       dockerfile: Dockerfile.api
+    container_name: jobtrak-api
     expose:
-      - "80"  # Only expose internally, not to host
+      - "8000"  # Only expose internally to nginx
     ports:
       - "5678:5678"  # Debug port for remote debugging
+      - "8000:8000"   # Direct API access for debugging (optional)
     volumes:
       - .:/app
       - ./database:/app/database
     restart: unless-stopped
+    networks:
+      - jobtrak-network
     environment:
       - PYTHONPATH=/app
       - PYTHONUNBUFFERED=1
       - SELENIUM_REMOTE_URL=http://selenium-chrome:4444/wd/hub
       - DATABASE_URL=postgresql://neondb_owner:npg_8XtuTyc1SsZW@ep-still-wave-a4phgoe6-pooler.us-east-1.aws.neon.tech/neondb?sslmode=require
+      # Add your IP here for logging/monitoring
+      - HOST_IP=${HOST_IP:-auto-detect}
     healthcheck:
-      test: ["CMD", "curl", "--fail", "http://localhost:80/api/status"]
+      test: ["CMD", "curl", "--fail", "http://localhost:8000/api/status"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -49,13 +56,16 @@ services:
     # Command to run with debugger enabled
     command: ["python", "-m", "debugpy", "--listen", "0.0.0.0:5678", "-m", "api_controller.api_controller"]
 
-  # Selenium Chrome service for web automation
+  # Selenium Chrome service for web automation (separate container)
   selenium-chrome:
     image: selenium/standalone-chrome:latest
+    container_name: jobtrak-selenium
     expose:
       - "4444"  # Only expose internally
     ports:
       - "7900:7900"  # VNC server port for debugging
+    networks:
+      - jobtrak-network
     environment:
       - SE_NODE_MAX_SESSIONS=4
       - SE_NODE_SESSION_TIMEOUT=60
@@ -70,6 +80,12 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+
+# Create a custom network for inter-container communication
+networks:
+  jobtrak-network:
+    driver: bridge
+    name: jobtrak-network
 
 volumes:
   postgres_data:

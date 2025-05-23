@@ -41,14 +41,40 @@ app = FastAPI(
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[ # Your Vercel domain
-        "https://job-agent-ui.vercel.app",     # If this is your domain
-        "http://localhost:3000",               # Local development
+    allow_origins=[
+        "https://*.vercel.app",                # All Vercel subdomains
+        "https://job-agent-ui.vercel.app",     # Your specific Vercel domain
         "https://localhost:3000",              # Local HTTPS development
+        "http://localhost:3000",               # Local HTTP development
+        "https://127.0.0.1:3000",             # Local IP HTTPS
+        "http://127.0.0.1:3000",              # Local IP HTTP
+        # Add your public IP here (replace with your actual IP)
+        # "https://YOUR_PUBLIC_IP",
+        # "http://YOUR_PUBLIC_IP",
     ],
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+    allow_headers=[
+        "Accept",
+        "Accept-Language",
+        "Content-Language",
+        "Content-Type",
+        "Authorization",
+        "X-Api-Key",
+        "x-api-key",
+        "X-User-Id",
+        "x-user-id",
+        "x_user_id",
+        "Cache-Control",
+        "DNT",
+        "If-Modified-Since",
+        "Keep-Alive",
+        "Origin",
+        "User-Agent",
+        "X-Requested-With",
+        "Range"
+    ],
+    expose_headers=["Content-Range", "X-Content-Range"],
 )
 
 # Default user ID if none provided
@@ -102,7 +128,20 @@ async def initialize(db_url=None, job_cache_size=None, search_cache_size=None):
 # Startup event
 @app.on_event("startup")
 async def startup_event():
-    """Initialize the application on startup."""
+    """Log startup information including public IP."""
+    try:
+        import requests
+        public_ip = requests.get('https://ipinfo.io/ip', timeout=5).text.strip()
+        logger.info(f"🌐 Server starting - Public IP: {public_ip}")
+        logger.info(f"🔗 API accessible at: https://{public_ip}/api/")
+
+        # Store in app state for potential use
+        app.state.public_ip = public_ip
+
+    except Exception as e:
+        logger.warning(f"Could not detect public IP: {e}")
+
+    # Continue with existing initialization
     success = await initialize()
     if not success:
         logger.error("Failed to initialize application during startup")
@@ -608,11 +647,11 @@ async def shutdown_event():
     except Exception as e:
         logger.error(f"Error cleaning up resources: {e}")
 
-if __name__ == "__main__":
-    # Run the FastAPI app with Uvicorn
-    host = os.environ.get('API_HOST', '0.0.0.0')
-    port = int(os.environ.get('API_PORT', 8000))
-    debug = os.environ.get('API_DEBUG', '').lower() in ('true', '1', 'yes')
-
-    logger.info(f"Starting API server on {host}:{port} (debug={debug})")
-    uvicorn.run(app, host=host, port=port, log_level="debug" if debug else "info")
+# if __name__ == "__main__":
+#     # Run the FastAPI app with Uvicorn
+#     host = os.environ.get('API_HOST', '0.0.0.0')
+#     port = int(os.environ.get('API_PORT', 8000))
+#     debug = os.environ.get('API_DEBUG', '').lower() in ('true', '1', 'yes')
+#
+#     logger.info(f"Starting API server on {host}:{port} (debug={debug})")
+#     uvicorn.run(app, host=host, port=port, log_level="debug" if debug else "info")
