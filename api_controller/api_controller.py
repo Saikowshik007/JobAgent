@@ -647,6 +647,202 @@ async def shutdown_event():
     except Exception as e:
         logger.error(f"Error cleaning up resources: {e}")
 
+
+@app.post("/api/simplify/initiate-login", tags=["Simplify Integration"])
+async def initiate_simplify_login(
+        request: SimplifyLoginRequest,
+        user_id: str = Depends(get_user_id)
+):
+    """Initiate Simplify Jobs login process"""
+    try:
+        simplify_integration = SimplifyJobsIntegration()
+        session_id = simplify_integration.create_session_for_user(user_id, request.username)
+
+        return {
+            "session_id": session_id,
+            "login_url": f"/api/simplify/login-page/{session_id}",
+            "status": "initiated",
+            "message": "Open the login_url in a new tab to complete Simplify Jobs authentication"
+        }
+    except Exception as e:
+        logger.error(f"Error initiating Simplify login for user {user_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/simplify/login-page/{session_id}", response_class=HTMLResponse, tags=["Simplify Integration"])
+async def get_simplify_login_page(session_id: str):
+    """Serve the Simplify Jobs login page"""
+    if session_id not in simplify_sessions:
+        raise HTTPException(status_code=404, detail="Login session not found")
+
+    session_info = simplify_sessions[session_id]
+    username = session_info["username"]
+
+    simplify_integration = SimplifyJobsIntegration()
+    html_content = simplify_integration.get_login_page_html(session_id, username)
+
+    return html_content
+
+@app.post("/api/simplify/submit-session", tags=["Simplify Integration"])
+async def submit_simplify_session(request: dict):
+    """Receive manually submitted Simplify Jobs session cookies"""
+    try:
+        session_id = request.get("session_id")
+        cookie_string = request.get("cookie_string", "")
+        user_agent = request.get("user_agent", "")
+
+        if session_id not in simplify_sessions:
+            raise HTTPException(status_code=404, detail="Login session not found")
+
+        # Parse cookies
+        cookies = {{}}
+        if cookie_string:
+            # Handle different cookie formats
+            if ";" in cookie_string:
+                for cookie in cookie_string.split(";"):
+                    if "=" in cookie:
+                        name, value = cookie.strip().split("=", 1)
+                        cookies[name] = value
+            else:
+                if "=" in cookie_string:
+                    name, value = cookie_string.strip().split("=", 1)
+                    cookies[name] = value
+
+        # Store session data
+        user_id = simplify_sessions[session_id]["user_id"]
+        user_simplify_sessions[user_id] = {{
+            "cookies": cookies,
+            "user_agent": user_agent,
+            "session_id": session_id,
+            "created_at": datetime.now()
+        }}
+
+        # Update session status
+        simplify_sessions[session_id]["cookies_received"] = True
+        simplify_sessions[session_id]["status"] = "cookies_received"
+
+        return {{"success": True, "message": "Simplify Jobs session captured successfully"}}
+
+    except Exception as e:
+        logger.error(f"Error submitting Simplify session: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/simplify/session-status/{session_id}", tags=["Simplify Integration"])
+async def get_simplify_session_status(session_id: str):
+    """Get current status of Simplify login session"""
+    if session_id not in simplify_sessions:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    return simplify_sessions[session_id]
+
+@app.get("/api/simplify/verify-session/{session_id}", tags=["Simplify Integration"])
+async def verify_simplify_session(session_id: str):
+    """Verify that the captured Simplify session works"""
+    try:
+        if session_id not in simplify_sessions:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        session_info = simplify_sessions[session_id]
+        user_id = session_info["user_id"]
+
+        if user_id not in user_simplify_sessions:
+            return {{"valid": False, "error": "No session data found for user"}}
+
+        session_data = user_simplify_sessions[user_id]
+
+        # Test the session with a simple API call
+        session = requests.Session()
+
+        # Set cookies
+        for name, value in session_data["cookies"].items():
+            session.cookies.set(name, value)
+
+        # Set headers
+        headers = {{
+            "User-Agent": session_data.get("user_agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"),
+            "Accept": "application/json",
+            "Referer": "https://simplify.jobs/"
+        }}
+
+        # Test with profile endpoint
+        response = session.get("https://api.simplify.jobs/v2/profile", headers=headers)
+
+        if response.status_code == 200:
+            # Update session status
+            simplify_sessions[session_id]["status"] = "verified"
+            return {{
+                "valid": True,
+                "user_id": user_id,
+                "message": "Simplify Jobs session verified successfully"
+            }}
+        else:
+            return {{
+                "valid": False,
+                "error": f"Session verification failed with status {response.status_code}"
+            }}
+
+    except Exception as e:
+        logger.error(f"Error verifying Simplify session: {e}")
+        return {{"valid": False, "error": f"Session verification failed: {str(e)}"}}
+
+@app.post("/api/simplify/api-request", tags=["Simplify Integration"])
+async def make_simplify_api_request(
+        request: SimplifyAPIRequest,
+        user_id: str = Depends(get_user_id)
+):
+    """Make authenticated API requests to Simplify Jobs using stored session"""
+    try:
+        if user_id not in user_simplify_sessions:
+            raise HTTPException(status_code=404, detail="No Simplify Jobs session found for user")
+
+        session_data = user_simplify_sessions[user_id]
+
+        # Create session with stored cookies
+        session = requests.Session()
+        for name, value in session_data["cookies"].items():
+            session.cookies.set(name, value)
+
+        headers = {{
+            "User-Agent": session_data.get("user_agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"),
+            "Accept": "application/json",
+            "Referer": "https://simplify.jobs/"
+        }}
+
+        url = f"https://api.simplify.jobs/v2{request.endpoint}"
+
+        if request.method.upper() == "GET":
+            response = session.get(url, headers=headers)
+        elif request.method.upper() == "POST":
+            headers["Content-Type"] = "application/json"
+            response = session.post(url, headers=headers, json=request.data)
+        else:
+            raise HTTPException(status_code=400, detail="Unsupported method")
+
+        return {{
+            "status_code": response.status_code,
+            "data": response.json() if response.headers.get("content-type", "").startswith("application/json") else response.text,
+            "headers": dict(response.headers)
+        }}
+
+    except Exception as e:
+        logger.error(f"Error making Simplify API request: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/simplify/user-session/{user_id}", tags=["Simplify Integration"])
+async def get_user_simplify_session(user_id: str = Depends(get_user_id)):
+    """Get Simplify session info for a user"""
+    if user_id in user_simplify_sessions:
+        session_data = user_simplify_sessions[user_id]
+        return {{
+            "has_session": True,
+            "session_info": {{
+                "created_at": session_data["created_at"],
+                "session_id": session_data["session_id"],
+                "cookies_count": len(session_data["cookies"])
+            }}
+        }}
+    else:
+        return {{"has_session": False}}
+
 if __name__ == "__main__":
     # Run the FastAPI app with Uvicorn
     host = os.environ.get('API_HOST', '0.0.0.0')
