@@ -649,6 +649,109 @@ async def shutdown_event():
     except Exception as e:
         logger.error(f"Error cleaning up resources: {e}")
 
+@app.get("/simplify-login-helper", response_class=HTMLResponse)
+async def simplify_login_helper():
+    """Serve a helper page for capturing Simplify login cookies"""
+    html_content = """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Connect to Simplify Jobs</title>
+        <style>
+            body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
+            .instruction { background: #f0f8ff; padding: 15px; border-radius: 5px; margin: 15px 0; }
+            .button { background: #0066cc; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; }
+            .status { padding: 10px; margin: 10px 0; border-radius: 5px; }
+            .success { background: #d4edda; color: #155724; }
+            .error { background: #f8d7da; color: #721c24; }
+        </style>
+    </head>
+    <body>
+        <h1>Connect to Simplify Jobs</h1>
+        
+        <div class="instruction">
+            <h3>Step 1: Login to Simplify</h3>
+            <p>Click the button below to go to Simplify Jobs and complete your login.</p>
+            <button class="button" onclick="goToSimplify()">Go to Simplify Login</button>
+        </div>
+
+        <div class="instruction">
+            <h3>Step 2: Capture Session</h3>
+            <p>After successful login, click here to capture your session:</p>
+            <button class="button" onclick="captureSession()">Capture Session</button>
+        </div>
+
+        <div id="status"></div>
+
+        <script>
+            function goToSimplify() {
+                window.open('https://simplify.jobs/auth/login', '_blank');
+            }
+
+            function captureSession() {
+                try {
+                    // Get cookies from current domain if we're on simplify.jobs
+                    let cookies = {};
+                    
+                    if (window.location.hostname.includes('simplify.jobs')) {
+                        // We're on Simplify domain, can access cookies directly
+                        document.cookie.split(';').forEach(cookie => {
+                            const [name, value] = cookie.trim().split('=');
+                            if (name && value) {
+                                cookies[name] = decodeURIComponent(value);
+                            }
+                        });
+                    } else {
+                        // Prompt user to manually enter key cookies
+                        const auth = prompt('Enter authorization cookie value from Simplify:');
+                        const csrf = prompt('Enter csrf cookie value from Simplify:');
+                        
+                        if (auth && csrf) {
+                            cookies = { authorization: auth, csrf: csrf };
+                        } else {
+                            throw new Error('Required cookies not provided');
+                        }
+                    }
+
+                    // Send to parent window
+                    if (window.opener) {
+                        window.opener.postMessage({
+                            type: 'SIMPLIFY_COOKIES_CAPTURED',
+                            cookies: cookies,
+                            csrf_token: cookies.csrf || '',
+                            timestamp: new Date().toISOString()
+                        }, '*');
+                        
+                        document.getElementById('status').innerHTML = 
+                            '<div class="status success">Session captured! You can close this window.</div>';
+                        
+                        setTimeout(() => window.close(), 2000);
+                    }
+                } catch (error) {
+                    document.getElementById('status').innerHTML = 
+                        '<div class="status error">Error: ' + error.message + '</div>';
+                        
+                    if (window.opener) {
+                        window.opener.postMessage({
+                            type: 'SIMPLIFY_COOKIES_ERROR',
+                            error: error.message
+                        }, '*');
+                    }
+                }
+            }
+
+            // Auto-capture if we detect we're logged into Simplify
+            window.addEventListener('load', function() {
+                if (document.cookie.includes('authorization') && document.cookie.includes('csrf')) {
+                    setTimeout(captureSession, 1000);
+                }
+            });
+        </script>
+    </body>
+    </html>
+    """
+    return HTMLResponse(content=html_content)
+
 
 @app.post("/api/simplify/store-session")
 async def store_simplify_session(session_data: dict, user_id: str = Depends(get_user_id)):
