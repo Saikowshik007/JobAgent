@@ -87,29 +87,6 @@ services:
       - "traefik.http.routers.api-http.entrypoints=web"
       - "traefik.http.routers.api-http.middlewares=https-redirect"
 
-    depends_on:
-      - selenium-chrome
-
-  # Selenium Chrome service (unchanged)
-  selenium-chrome:
-    image: selenium/standalone-chrome:latest
-    container_name: jobtrak-selenium
-    expose:
-      - "4444"
-    ports:
-      - "7900:7900"  # VNC access
-    networks:
-      - jobtrak-network
-    environment:
-      - SE_NODE_MAX_SESSIONS=4
-      - SE_NODE_SESSION_TIMEOUT=60
-      - SE_SCREEN_WIDTH=1920
-      - SE_SCREEN_HEIGHT=1080
-      - SE_VNC_NO_PASSWORD=1
-    volumes:
-      - /dev/shm:/dev/shm
-    restart: unless-stopped
-
 networks:
   jobtrak-network:
     driver: bridge
