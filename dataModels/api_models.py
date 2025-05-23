@@ -47,16 +47,3 @@ class UploadToSimplifyRequest(BaseModel):
     """Resume upload to Simplify request model."""
     job_id: str = Field(..., description="ID of the job")
     resume_id: Optional[str] = None
-
-class SimplifyLoginRequest(BaseModel):
-    username: str
-
-class SimplifyAPIRequest(BaseModel):
-    endpoint: str
-    method: str = "GET"
-    data: Optional[Dict[str, Any]] = None
-
-class SubmitSimplifySessionRequest(BaseModel):
-    session_id: str
-    cookies: Dict[str, str]
-    user_agent: Optional[str] = None
