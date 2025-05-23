@@ -1,6 +1,6 @@
 import hashlib
 
-
+import requests
 from fastapi import FastAPI, HTTPException, Depends, Query, Header, UploadFile, Form, File
 from fastapi.middleware.cors import CORSMiddleware
 from typing import  Optional
@@ -9,10 +9,12 @@ import os
 from datetime import datetime
 import uvicorn
 from dotenv import load_dotenv
+from starlette.responses import HTMLResponse
 
 import config
 from dataModels.api_models import JobStatusUpdateRequest, GenerateResumeRequest, \
-    UploadToSimplifyRequest
+    UploadToSimplifyRequest, user_simplify_sessions, SimplifyAPIRequest, simplify_sessions, SimplifyJobsIntegration, \
+    SimplifyLoginRequest
 from services.resume_generator import ResumeGenerator
 from services.resume_improver import ResumeImprover  # Import the ResumeImprover class
 
