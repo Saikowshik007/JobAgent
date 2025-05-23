@@ -58,7 +58,7 @@ services:
       - "traefik.http.routers.api.middlewares=cors"
     depends_on:
       - selenium-chrome
-    command: ["python", "api_controller.py"]
+    command: ["python", "api_controller.api_controller"]
 
   # Selenium Chrome service
   selenium-chrome:
