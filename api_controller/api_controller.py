@@ -32,7 +32,7 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
-user_simplify_sessions = {}
+user_sessions = {}
 # FastAPI app instance
 app = FastAPI(
     title="JobTrak API",
@@ -649,173 +649,65 @@ async def shutdown_event():
     except Exception as e:
         logger.error(f"Error cleaning up resources: {e}")
 
-@app.get("/simplify-login-helper", response_class=HTMLResponse)
-async def simplify_login_helper():
-    """Serve a helper page for capturing Simplify login cookies"""
-    html_content = """
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>Connect to Simplify Jobs</title>
-        <style>
-            body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
-            .instruction { background: #f0f8ff; padding: 15px; border-radius: 5px; margin: 15px 0; }
-            .button { background: #0066cc; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; }
-            .status { padding: 10px; margin: 10px 0; border-radius: 5px; }
-            .success { background: #d4edda; color: #155724; }
-            .error { background: #f8d7da; color: #721c24; }
-        </style>
-    </head>
-    <body>
-        <h1>Connect to Simplify Jobs</h1>
-        
-        <div class="instruction">
-            <h3>Step 1: Login to Simplify</h3>
-            <p>Click the button below to go to Simplify Jobs and complete your login.</p>
-            <button class="button" onclick="goToSimplify()">Go to Simplify Login</button>
-        </div>
-
-        <div class="instruction">
-            <h3>Step 2: Capture Session</h3>
-            <p>After successful login, click here to capture your session:</p>
-            <button class="button" onclick="captureSession()">Capture Session</button>
-        </div>
-
-        <div id="status"></div>
-
-        <script>
-            function goToSimplify() {
-                window.open('https://simplify.jobs/auth/login', '_blank');
-            }
-
-            function captureSession() {
-                try {
-                    // Get cookies from current domain if we're on simplify.jobs
-                    let cookies = {};
-                    
-                    if (window.location.hostname.includes('simplify.jobs')) {
-                        // We're on Simplify domain, can access cookies directly
-                        document.cookie.split(';').forEach(cookie => {
-                            const [name, value] = cookie.trim().split('=');
-                            if (name && value) {
-                                cookies[name] = decodeURIComponent(value);
-                            }
-                        });
-                    } else {
-                        // Prompt user to manually enter key cookies
-                        const auth = prompt('Enter authorization cookie value from Simplify:');
-                        const csrf = prompt('Enter csrf cookie value from Simplify:');
-                        
-                        if (auth && csrf) {
-                            cookies = { authorization: auth, csrf: csrf };
-                        } else {
-                            throw new Error('Required cookies not provided');
-                        }
-                    }
-
-                    // Send to parent window
-                    if (window.opener) {
-                        window.opener.postMessage({
-                            type: 'SIMPLIFY_COOKIES_CAPTURED',
-                            cookies: cookies,
-                            csrf_token: cookies.csrf || '',
-                            timestamp: new Date().toISOString()
-                        }, '*');
-                        
-                        document.getElementById('status').innerHTML = 
-                            '<div class="status success">Session captured! You can close this window.</div>';
-                        
-                        setTimeout(() => window.close(), 2000);
-                    }
-                } catch (error) {
-                    document.getElementById('status').innerHTML = 
-                        '<div class="status error">Error: ' + error.message + '</div>';
-                        
-                    if (window.opener) {
-                        window.opener.postMessage({
-                            type: 'SIMPLIFY_COOKIES_ERROR',
-                            error: error.message
-                        }, '*');
-                    }
-                }
-            }
-
-            // Auto-capture if we detect we're logged into Simplify
-            window.addEventListener('load', function() {
-                if (document.cookie.includes('authorization') && document.cookie.includes('csrf')) {
-                    setTimeout(captureSession, 1000);
-                }
-            });
-        </script>
-    </body>
-    </html>
-    """
-    return HTMLResponse(content=html_content)
-
-
 @app.post("/api/simplify/store-session")
-async def store_simplify_session(session_data: dict, user_id: str = Depends(get_user_id)):
-    """Store Simplify session data for a user"""
+async def store_simplify_session(
+        session_data: dict,
+        user_id: str = Depends(get_user_id)
+):
+    """Store Simplify session data manually provided by user"""
     try:
-        user_simplify_sessions[user_id] = {
-            **session_data,
+        # Store the session data
+        user_sessions[user_id] = {
+            'authorization': session_data.get('authorization'),
+            'csrf_token': session_data.get('csrf_token'),
+            'raw_cookies': session_data.get('raw_cookies', ''),
             'stored_at': datetime.now(),
             'user_id': user_id
         }
+
+        logger.info(f"Stored Simplify session for user {user_id}")
         return {"message": "Session stored successfully"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/api/simplify/capture-session")
-async def capture_simplify_session(user_id: str = Depends(get_user_id)):
-    """Capture session from browser cookies (this is a placeholder - actual implementation depends on your setup)"""
-    try:
-        # This is where you'd implement cookie capture logic
-        # For now, return success to allow testing
-        return {"message": "Session capture initiated"}
     except Exception as e:
+        logger.error(f"Error storing session: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/api/simplify/check-session")
-async def check_simplify_session(user_id: str = Depends(get_user_id)):
-    """Check if user has a valid Simplify session"""
-    has_session = user_id in user_simplify_sessions
-    return {"has_session": has_session}
 
 @app.post("/api/simplify/upload-resume")
 async def upload_resume_to_simplify(
         request_data: dict,
         user_id: str = Depends(get_user_id)
 ):
-    """Upload a resume to Simplify Jobs using the exact curl format you provided"""
+    """Upload resume to Simplify using stored session data"""
     try:
         resume_id = request_data.get('resume_id')
         job_id = request_data.get('job_id')
 
-        if user_id not in user_simplify_sessions:
-            raise HTTPException(status_code=400, detail="No Simplify session found. Please login first.")
+        if not resume_id:
+            raise HTTPException(status_code=400, detail="Resume ID is required")
 
-        session = user_simplify_sessions[user_id]
+        # Check if user has session data
+        if user_id not in user_sessions:
+            raise HTTPException(
+                status_code=400,
+                detail="No Simplify session found. Please complete the session capture step first."
+            )
 
-        # Get the resume file from your system
-        # You'll need to implement this based on how you store resumes
-        resume_file_path = f"/path/to/resumes/{resume_id}.pdf"  # Adjust this path
+        session = user_sessions[user_id]
 
-        # Prepare the multipart form data exactly like your curl
-        files = {
-            'file': ('resume.pdf', open(resume_file_path, 'rb'), 'application/pdf')
-        }
+        # Get the resume PDF file
+        resume_file_path = get_resume_file_path(resume_id)  # You'll need to implement this
 
-        # Extract cookies from session (you'll need to store these from the browser)
-        cookies = session.get('cookies', {})
+        if not os.path.exists(resume_file_path):
+            raise HTTPException(status_code=404, detail="Resume file not found")
 
+        # Prepare headers exactly like your curl request
         headers = {
             'accept': '*/*',
             'accept-language': 'en-US,en;q=0.9',
             'origin': 'https://simplify.jobs',
             'referer': 'https://simplify.jobs/',
             'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',
-            'x-csrf-token': session.get('csrf_token', ''),
+            'x-csrf-token': session['csrf_token'],
             'dnt': '1',
             'sec-ch-ua': '"Chromium";v="136", "Google Chrome";v="136", "Not.A/Brand";v="99"',
             'sec-ch-ua-mobile': '?0',
@@ -825,26 +717,81 @@ async def upload_resume_to_simplify(
             'sec-fetch-site': 'same-site'
         }
 
-        # Make the request to Simplify's API
-        response = requests.post(
-            'https://api.simplify.jobs/v2/candidate/me/resume/upload',
-            files=files,
-            headers=headers,
-            cookies=cookies,
-            timeout=30
-        )
+        # Prepare cookies
+        cookies = {
+            'authorization': session['authorization'],
+            'csrf': session['csrf_token']
+        }
+
+        # If user provided raw cookies, parse and add them
+        if session.get('raw_cookies'):
+            try:
+                raw_cookies = session['raw_cookies']
+                for cookie in raw_cookies.split(';'):
+                    if '=' in cookie:
+                        name, value = cookie.strip().split('=', 1)
+                        cookies[name] = value
+            except Exception as e:
+                logger.warning(f"Failed to parse raw cookies: {e}")
+
+        # Prepare the file for upload
+        with open(resume_file_path, 'rb') as resume_file:
+            files = {
+                'file': ('resume.pdf', resume_file, 'application/pdf')
+            }
+
+            # Make the request to Simplify's API
+            response = requests.post(
+                'https://api.simplify.jobs/v2/candidate/me/resume/upload',
+                files=files,
+                headers=headers,
+                cookies=cookies,
+                timeout=30
+            )
+
+        logger.info(f"Simplify API response: {response.status_code}")
 
         if response.status_code == 200:
-            return {"message": "Resume uploaded successfully", "data": response.json()}
+            try:
+                response_data = response.json()
+                return {
+                    "message": "Resume uploaded successfully to Simplify",
+                    "data": response_data
+                }
+            except json.JSONDecodeError:
+                return {"message": "Resume uploaded successfully to Simplify"}
         else:
+            logger.error(f"Simplify upload failed: {response.status_code} - {response.text}")
             raise HTTPException(
                 status_code=response.status_code,
-                detail=f"Upload failed: {response.text}"
+                detail=f"Simplify upload failed: {response.text}"
             )
 
     except Exception as e:
         logger.error(f"Error uploading resume to Simplify: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+def get_resume_file_path(resume_id: str) -> str:
+    """Get the file path for a resume PDF"""
+    # Implement this based on how you store resume files
+    # Example:
+    resume_dir = os.getenv('RESUME_STORAGE_PATH', './resumes')
+    return os.path.join(resume_dir, f"{resume_id}.pdf")
+
+@app.get("/api/simplify/check-session")
+async def check_simplify_session(user_id: str = Depends(get_user_id)):
+    """Check if user has a valid Simplify session"""
+    has_session = user_id in user_sessions
+    session_age = None
+
+    if has_session:
+        stored_at = user_sessions[user_id]['stored_at']
+        session_age = (datetime.now() - stored_at).total_seconds() / 3600  # hours
+
+    return {
+        "has_session": has_session,
+        "session_age_hours": session_age
+    }
 
 if __name__ == "__main__":
     # Run the FastAPI app with Uvicorn
