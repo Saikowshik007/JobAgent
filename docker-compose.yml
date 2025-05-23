@@ -79,6 +79,10 @@ services:
       - "traefik.http.middlewares.api-ratelimit.ratelimit.burst=50"
       - "traefik.http.middlewares.api-ratelimit.ratelimit.period=1m"
 
+      # Define HTTPS redirect middleware
+      - "traefik.http.middlewares.https-redirect.redirectscheme.scheme=https"
+      - "traefik.http.middlewares.https-redirect.redirectscheme.permanent=true"
+
       # Apply middlewares
       - "traefik.http.routers.api.middlewares=api-cors,api-ratelimit"
 
@@ -86,6 +90,7 @@ services:
       - "traefik.http.routers.api-http.rule=Host(`jobtrackai.duckdns.org`) && PathPrefix(`/api`)"
       - "traefik.http.routers.api-http.entrypoints=web"
       - "traefik.http.routers.api-http.middlewares=https-redirect"
+
 
 networks:
   jobtrak-network:
