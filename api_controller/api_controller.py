@@ -812,22 +812,6 @@ async def upload_resume_pdf_to_simplify(
             'sec-fetch-site': 'same-site'
         }
 
-        # Prepare cookies
-        cookies = {
-            'authorization': session['authorization'],
-            'csrf': session['csrf_token']
-        }
-
-        # If user provided raw cookies, parse and add them
-        if session.get('raw_cookies'):
-            try:
-                raw_cookies = session['raw_cookies']
-                for cookie in raw_cookies.split(';'):
-                    if '=' in cookie:
-                        name, value = cookie.strip().split('=', 1)
-                        cookies[name] = value
-            except Exception as e:
-                logger.warning(f"Failed to parse raw cookies: {e}")
 
         # Prepare the file for upload
         files = {
@@ -839,7 +823,6 @@ async def upload_resume_pdf_to_simplify(
             'https://api.simplify.jobs/v2/candidate/me/resume/upload',
             files=files,
             headers=headers,
-            cookies=cookies,
             timeout=30
         )
 
