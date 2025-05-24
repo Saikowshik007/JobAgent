@@ -969,6 +969,24 @@ async def get_simplify_tokens(user_id: str = Depends(get_user_id)):
         logger.error(f"Error getting stored tokens for user {user_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/api/simplify/auto-capture")
+async def auto_capture_tokens(
+        request_data: dict,
+        user_id: str = Depends(get_user_id)
+):
+    """Automatically capture tokens from bookmarklet or extension"""
+    try:
+        # Store the auto-captured session data with all possible fields
+        user_sessions[user_id] = {
+            'authorization': request_data.get('authorization'),
+            'csrf_token': request_data.get('csrf'),
+            'raw_cookies': request_data.get('cookies', ''),
+            'baggage': request_data.get('baggage', ''),
+            'sentry_trace': request_data.get('sentry_trace', ''),
+            'stored_at': datetime.now(),
+            'user_id': user_id,
+            'capture_method': 'auto'
+
 
 if __name__ == "__main__":
     # Run the FastAPI app with Uvicorn
