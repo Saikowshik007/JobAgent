@@ -844,7 +844,7 @@ async def upload_resume_pdf_to_simplify(
 
         logger.info(f"Simplify API response: {response.status_code}")
 
-        if response.status_code == 200:
+        if response.status_code == 201:
             try:
                 response_data = response.json()
                 return {
