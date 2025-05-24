@@ -41,24 +41,41 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Comprehensive CORS configuration
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        # Production origins
+# Get allowed origins dynamically
+def get_allowed_origins():
+    """Get the list of allowed CORS origins."""
+    # Base origins that are always allowed
+    origins = [
         "https://job-agent-ui.vercel.app",
-        "https://*.vercel.app",
         "https://jobtrackai.duckdns.org",
-
-        # Development origins
+        "http://jobtrackai.duckdns.org",
         "http://localhost:3000",
         "https://localhost:3000",
         "http://127.0.0.1:3000",
         "https://127.0.0.1:3000",
         "http://localhost:3001",
         "https://localhost:3001",
-        "*"
-    ],
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+    ]
+
+    # Add debug origins if in debug mode
+    if os.environ.get('API_DEBUG'):
+        debug_origins = [
+            "http://localhost:3002",
+            "http://localhost:5000",
+            "http://192.168.1.100:3000",
+            "http://192.168.1.101:3000",
+        ]
+        origins.extend(debug_origins)
+
+    logger.info(f"CORS allowed origins: {origins}")
+    return origins
+
+# CORS configuration - NO WILDCARDS when using credentials
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=get_allowed_origins(),
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH", "HEAD"],
     allow_headers=[
@@ -89,9 +106,6 @@ app.add_middleware(
         "X-Forwarded-For",
         "X-Forwarded-Proto",
         "X-Real-IP",
-
-        # Wildcard for any other headers
-        "*"
     ],
     expose_headers=[
         "Content-Range",
