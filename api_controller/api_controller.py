@@ -869,6 +869,10 @@ async def upload_resume_pdf_to_simplify(
             headers['sentry-trace'] = session['sentry_trace']
 
         logger.info(f"CSRF Token: {session['csrf_token'][:20]}...")
+        cookies = {
+            'authorization': session['authorization'],
+            'csrf': session['csrf_token']
+        }
 
         # Prepare the file for upload - let requests handle multipart encoding
         files = {
@@ -880,7 +884,7 @@ async def upload_resume_pdf_to_simplify(
             'https://api.simplify.jobs/v2/candidate/me/resume/upload',
             files=files,
             headers=headers,
-            # No cookies parameter - the curl command doesn't send cookies
+            cookies= cookies,
             timeout=30
         )
 
