@@ -719,6 +719,127 @@ async def store_simplify_session(
         logger.error(f"Error storing session: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/api/simplify/upload-resume")
+async def upload_resume_to_simplify(
+        request_data: dict,
+        user_id: str = Depends(get_user_id)
+):
+    """Upload resume to Simplify using stored session data"""
+    try:
+        resume_id = request_data.get('resume_id')
+        job_id = request_data.get('job_id')
+
+        if not resume_id:
+            raise HTTPException(status_code=400, detail="Resume ID is required")
+
+        # Check if user has session data
+        if user_id not in user_sessions:
+            raise HTTPException(
+                status_code=400,
+                detail="No Simplify session found. Please complete the session capture step first."
+            )
+
+        session = user_sessions[user_id]
+
+        # Get the resume PDF file
+        resume_file_path = get_resume_file_path(resume_id)  # You'll need to implement this
+
+        if not os.path.exists(resume_file_path):
+            raise HTTPException(status_code=404, detail="Resume file not found")
+
+        # Prepare headers exactly like your curl request
+        headers = {
+            'accept': '*/*',
+            'accept-language': 'en-US,en;q=0.9',
+            'origin': 'https://simplify.jobs',
+            'referer': 'https://simplify.jobs/',
+            'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',
+            'x-csrf-token': session['csrf_token'],
+            'dnt': '1',
+            'sec-ch-ua': '"Chromium";v="136", "Google Chrome";v="136", "Not.A/Brand";v="99"',
+            'sec-ch-ua-mobile': '?0',
+            'sec-ch-ua-platform': '"Windows"',
+            'sec-fetch-dest': 'empty',
+            'sec-fetch-mode': 'cors',
+            'sec-fetch-site': 'same-site'
+        }
+
+        # Prepare cookies
+        cookies = {
+            'authorization': session['authorization'],
+            'csrf': session['csrf_token']
+        }
+
+        # If user provided raw cookies, parse and add them
+        if session.get('raw_cookies'):
+            try:
+                raw_cookies = session['raw_cookies']
+                for cookie in raw_cookies.split(';'):
+                    if '=' in cookie:
+                        name, value = cookie.strip().split('=', 1)
+                        cookies[name] = value
+            except Exception as e:
+                logger.warning(f"Failed to parse raw cookies: {e}")
+
+        # Prepare the file for upload
+        with open(resume_file_path, 'rb') as resume_file:
+            files = {
+                'file': ('resume.pdf', resume_file, 'application/pdf')
+            }
+
+            # Make the request to Simplify's API
+            response = requests.post(
+                'https://api.simplify.jobs/v2/candidate/me/resume/upload',
+                files=files,
+                headers=headers,
+                cookies=cookies,
+                timeout=30
+            )
+
+        logger.info(f"Simplify API response: {response.status_code}")
+
+        if response.status_code == 200:
+            try:
+                response_data = response.json()
+                return {
+                    "message": "Resume uploaded successfully to Simplify",
+                    "data": response_data
+                }
+            except:
+                return {"message": "Resume uploaded successfully to Simplify"}
+        else:
+            logger.error(f"Simplify upload failed: {response.status_code} - {response.text}")
+            raise HTTPException(
+                status_code=response.status_code,
+                detail=f"Simplify upload failed: {response.text}"
+            )
+
+    except Exception as e:
+        logger.error(f"Error uploading resume to Simplify: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+def get_resume_file_path(resume_id: str) -> str:
+    """Get the file path for a resume PDF"""
+    # Implement this based on how you store resume files
+    # Example:
+    resume_dir = os.getenv('RESUME_STORAGE_PATH', './resumes')
+    return os.path.join(resume_dir, f"{resume_id}.pdf")
+
+@app.get("/api/simplify/check-session")
+async def check_simplify_session(user_id: str = Depends(get_user_id)):
+    """Check if user has a valid Simplify session"""
+    has_session = user_id in user_sessions
+    session_age = None
+
+    if has_session:
+        stored_at = user_sessions[user_id]['stored_at']
+        session_age = (datetime.now() - stored_at).total_seconds() / 3600  # hours
+
+    return {
+        "has_session": has_session,
+        "session_age_hours": session_age
+    }
+
 @app.post("/api/simplify/upload-resume-pdf")
 async def upload_resume_pdf_to_simplify(
         resume_pdf: UploadFile = File(...),
