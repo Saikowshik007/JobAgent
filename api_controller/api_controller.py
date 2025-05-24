@@ -943,6 +943,32 @@ async def upload_resume_pdf_to_simplify(
         logger.error(f"Error uploading PDF resume to Simplify: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/api/simplify/get-tokens")
+async def get_simplify_tokens(user_id: str = Depends(get_user_id)):
+    """Get stored Simplify tokens for the user"""
+    try:
+        if user_id not in user_sessions:
+            raise HTTPException(
+                status_code=404, 
+                detail="No stored tokens found. Please capture tokens first."
+            )
+        
+        session = user_sessions[user_id]
+        
+        # Return only the necessary tokens (don't expose everything)
+        return {
+            "authorization": session.get('authorization'),
+            "csrf": session.get('csrf_token'),
+            "has_tokens": bool(session.get('authorization') and session.get('csrf_token')),
+            "stored_at": session.get('stored_at').isoformat() if session.get('stored_at') else None
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting stored tokens for user {user_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/api/simplify/auto-capture")
 async def auto_capture_tokens(
         request_data: dict,
@@ -960,6 +986,10 @@ async def auto_capture_tokens(
             'stored_at': datetime.now(),
             'user_id': user_id,
             'capture_method': 'auto'
+
+
+
+
         }
 
         logger.info(f"Auto-captured Simplify session for user {user_id}")
@@ -969,6 +999,7 @@ async def auto_capture_tokens(
     except Exception as e:
         logger.error(f"Error auto-capturing tokens: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
 
 if __name__ == "__main__":
     # Run the FastAPI app with Uvicorn
