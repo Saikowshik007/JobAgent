@@ -988,6 +988,19 @@ async def auto_capture_tokens(
             'capture_method': 'auto'
 
 
+
+
+        }
+
+        logger.info(f"Auto-captured Simplify session for user {user_id}")
+        logger.info(f"Captured tokens: {list(request_data.keys())}")
+        return {"message": "Tokens captured successfully via automation"}
+
+    except Exception as e:
+        logger.error(f"Error auto-capturing tokens: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 if __name__ == "__main__":
     # Run the FastAPI app with Uvicorn
     host = os.environ.get('API_HOST', '0.0.0.0')
