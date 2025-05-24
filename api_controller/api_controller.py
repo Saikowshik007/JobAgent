@@ -694,127 +694,6 @@ async def shutdown_event():
     except Exception as e:
         logger.error(f"Error cleaning up resources: {e}")
 
-@app.post("/api/simplify/upload-resume")
-async def upload_resume_to_simplify(
-        request_data: dict,
-        user_id: str = Depends(get_user_id)
-):
-    """Upload resume to Simplify using stored session data"""
-    try:
-        resume_id = request_data.get('resume_id')
-        job_id = request_data.get('job_id')
-
-        if not resume_id:
-            raise HTTPException(status_code=400, detail="Resume ID is required")
-
-        # Check if user has session data
-        if user_id not in user_sessions:
-            raise HTTPException(
-                status_code=400,
-                detail="No Simplify session found. Please complete the session capture step first."
-            )
-
-        session = user_sessions[user_id]
-
-        # Get the resume PDF file
-        resume_file_path = get_resume_file_path(resume_id)  # You'll need to implement this
-
-        if not os.path.exists(resume_file_path):
-            raise HTTPException(status_code=404, detail="Resume file not found")
-
-        # Prepare headers exactly like your curl request
-        headers = {
-            'accept': '*/*',
-            'accept-language': 'en-US,en;q=0.9',
-            'origin': 'https://simplify.jobs',
-            'referer': 'https://simplify.jobs/',
-            'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',
-            'x-csrf-token': session['csrf_token'],
-            'dnt': '1',
-            'sec-ch-ua': '"Chromium";v="136", "Google Chrome";v="136", "Not.A/Brand";v="99"',
-            'sec-ch-ua-mobile': '?0',
-            'sec-ch-ua-platform': '"Windows"',
-            'sec-fetch-dest': 'empty',
-            'sec-fetch-mode': 'cors',
-            'sec-fetch-site': 'same-site'
-        }
-
-        # Prepare cookies
-        cookies = {
-            'authorization': session['authorization'],
-            'csrf': session['csrf_token']
-        }
-
-        # If user provided raw cookies, parse and add them
-        if session.get('raw_cookies'):
-            try:
-                raw_cookies = session['raw_cookies']
-                for cookie in raw_cookies.split(';'):
-                    if '=' in cookie:
-                        name, value = cookie.strip().split('=', 1)
-                        cookies[name] = value
-            except Exception as e:
-                logger.warning(f"Failed to parse raw cookies: {e}")
-
-        # Prepare the file for upload
-        with open(resume_file_path, 'rb') as resume_file:
-            files = {
-                'file': ('resume.pdf', resume_file, 'application/pdf')
-            }
-
-            # Make the request to Simplify's API
-            response = requests.post(
-                'https://api.simplify.jobs/v2/candidate/me/resume/upload',
-                files=files,
-                headers=headers,
-                cookies=cookies,
-                timeout=30
-            )
-
-        logger.info(f"Simplify API response: {response.status_code}")
-
-        if response.status_code == 200:
-            try:
-                response_data = response.json()
-                return {
-                    "message": "Resume uploaded successfully to Simplify",
-                    "data": response_data
-                }
-            except:
-                return {"message": "Resume uploaded successfully to Simplify"}
-        else:
-            logger.error(f"Simplify upload failed: {response.status_code} - {response.text}")
-            raise HTTPException(
-                status_code=response.status_code,
-                detail=f"Simplify upload failed: {response.text}"
-            )
-
-    except Exception as e:
-        logger.error(f"Error uploading resume to Simplify: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-def get_resume_file_path(resume_id: str) -> str:
-    """Get the file path for a resume PDF"""
-    # Implement this based on how you store resume files
-    # Example:
-    resume_dir = os.getenv('RESUME_STORAGE_PATH', './resumes')
-    return os.path.join(resume_dir, f"{resume_id}.pdf")
-
-@app.get("/api/simplify/check-session")
-async def check_simplify_session(user_id: str = Depends(get_user_id)):
-    """Check if user has a valid Simplify session"""
-    has_session = user_id in user_sessions
-    session_age = None
-
-    if has_session:
-        stored_at = user_sessions[user_id]['stored_at']
-        session_age = (datetime.now() - stored_at).total_seconds() / 3600  # hours
-
-    return {
-        "has_session": has_session,
-        "session_age_hours": session_age
-    }
-
 @app.post("/api/simplify/upload-resume-pdf")
 async def upload_resume_pdf_to_simplify(
         resume_pdf: UploadFile = File(...),
@@ -891,7 +770,7 @@ async def upload_resume_pdf_to_simplify(
         logger.info(f"Simplify API response: {response.status_code}")
         logger.info(f"Response headers: {dict(response.headers)}")
 
-        if response.status_code == 200:
+        if response.status_code == 201:
             try:
                 response_data = response.json()
                 return {
@@ -948,12 +827,118 @@ async def get_simplify_tokens(user_id: str = Depends(get_user_id)):
         logger.error(f"Error getting stored tokens for user {user_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
+
+@app.get("/api/simplify/check-session")
+async def check_simplify_session(user_id: str = Depends(get_user_id)):
+    """Check if user has a valid Simplify session and validate tokens"""
+    has_session = user_id in user_sessions
+    session_age = None
+    is_valid = False
+
+    if has_session:
+        session = user_sessions[user_id]
+        stored_at = session['stored_at']
+        session_age = (datetime.now() - stored_at).total_seconds() / 3600  # hours
+
+        # Validate tokens with Simplify API
+        try:
+            logger.info(f"Validating Simplify tokens for user {user_id}")
+
+            # Prepare headers exactly like the curl command
+            headers = {
+                'accept': '*/*',
+                'accept-language': 'en-US,en;q=0.9',
+                'client': 'Dunder',
+                'content-length': '0',
+                'content-type': 'application/json',
+                'dnt': '1',
+                'origin': 'https://simplify.jobs',
+                'priority': 'u=1, i',
+                'referer': 'https://simplify.jobs/',
+                'sec-ch-ua': '"Chromium";v="136", "Google Chrome";v="136", "Not.A/Brand";v="99"',
+                'sec-ch-ua-mobile': '?0',
+                'sec-ch-ua-platform': '"Windows"',
+                'sec-fetch-dest': 'empty',
+                'sec-fetch-mode': 'cors',
+                'sec-fetch-site': 'same-site',
+                'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',
+                'x-csrf-token': session.get('csrf_token', '')
+            }
+
+            # Add optional headers if available
+            if session.get('baggage'):
+                headers['baggage'] = session['baggage']
+            if session.get('sentry_trace'):
+                headers['sentry-trace'] = session['sentry_trace']
+
+            # Prepare cookies
+            cookies = {
+                'authorization': session.get('authorization', ''),
+                'csrf': session.get('csrf_token', '')
+            }
+
+            # Add any additional cookies if they were stored
+            if session.get('raw_cookies'):
+                try:
+                    raw_cookies = session['raw_cookies']
+                    for cookie in raw_cookies.split(';'):
+                        if '=' in cookie:
+                            name, value = cookie.strip().split('=', 1)
+                            if name not in cookies:  # Don't override auth/csrf
+                                cookies[name] = value
+                except Exception as e:
+                    logger.warning(f"Failed to parse raw cookies: {e}")
+
+            # Make validation request to Simplify
+            response = requests.post(
+                'https://api.simplify.jobs/v2/auth/validate',
+                headers=headers,
+                cookies=cookies,
+                timeout=10
+            )
+
+            logger.info(f"Simplify auth validation response: {response.status_code}")
+
+            if response.status_code == 200:
+                is_valid = True
+                logger.info(f"✅ Tokens are valid for user {user_id}")
+            else:
+                logger.warning(f"❌ Tokens are invalid for user {user_id}: {response.status_code} - {response.text}")
+                # Discard invalid session
+                del user_sessions[user_id]
+                has_session = False
+                session_age = None
+
+        except requests.exceptions.RequestException as e:
+            logger.error(f"❌ Failed to validate tokens for user {user_id}: {e}")
+            # Network error - keep session but mark as unvalidated
+            # Don't delete session in case it's just a temporary network issue
+            is_valid = False
+
+        except Exception as e:
+            logger.error(f"❌ Unexpected error validating tokens for user {user_id}: {e}")
+            # Unexpected error - discard session to be safe
+            if user_id in user_sessions:
+                del user_sessions[user_id]
+            has_session = False
+            session_age = None
+            is_valid = False
+
+    return {
+        "has_session": has_session,
+        "session_age_hours": session_age,
+        "is_valid": is_valid,
+        "message": "Session validated with Simplify API" if is_valid else "Session invalid or validation failed"
+    }
+
+
 @app.post("/api/simplify/store-tokens")
 async def store_simplify_tokens(
         request_data: dict,
         user_id: str = Depends(get_user_id)
 ):
-    """Store both CSRF and authorization tokens for Simplify"""
+    """Store both CSRF and authorization tokens for Simplify with immediate validation"""
     try:
         csrf_token = request_data.get('csrf')
         auth_token = request_data.get('authorization')
@@ -964,8 +949,8 @@ async def store_simplify_tokens(
                 detail="Both 'csrf' and 'authorization' tokens are required"
             )
 
-        # Store the tokens with additional metadata
-        user_sessions[user_id] = {
+        # Store the tokens temporarily for validation
+        temp_session = {
             'authorization': auth_token,
             'csrf_token': csrf_token,
             'stored_at': datetime.now(),
@@ -973,8 +958,65 @@ async def store_simplify_tokens(
             'capture_method': 'manual_tokens'
         }
 
-        logger.info(f"Stored Simplify tokens for user {user_id}")
-        return {"message": "Tokens stored successfully"}
+        # Validate tokens immediately before storing permanently
+        try:
+            logger.info(f"Validating provided tokens for user {user_id}")
+
+            headers = {
+                'accept': '*/*',
+                'accept-language': 'en-US,en;q=0.9',
+                'client': 'Dunder',
+                'content-length': '0',
+                'content-type': 'application/json',
+                'dnt': '1',
+                'origin': 'https://simplify.jobs',
+                'referer': 'https://simplify.jobs/',
+                'sec-ch-ua': '"Chromium";v="136", "Google Chrome";v="136", "Not.A/Brand";v="99"',
+                'sec-ch-ua-mobile': '?0',
+                'sec-ch-ua-platform': '"Windows"',
+                'sec-fetch-dest': 'empty',
+                'sec-fetch-mode': 'cors',
+                'sec-fetch-site': 'same-site',
+                'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',
+                'x-csrf-token': csrf_token
+            }
+
+            cookies = {
+                'authorization': auth_token,
+                'csrf': csrf_token
+            }
+
+            response = requests.post(
+                'https://api.simplify.jobs/v2/auth/validate',
+                headers=headers,
+                cookies=cookies,
+                timeout=10
+            )
+
+            if response.status_code != 200:
+                logger.warning(f"Token validation failed: {response.status_code} - {response.text}")
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid tokens: Simplify API returned {response.status_code}. Please check your tokens and try again."
+                )
+
+            logger.info(f"✅ Tokens validated successfully for user {user_id}")
+
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Network error during token validation: {e}")
+            raise HTTPException(
+                status_code=503,
+                detail="Unable to validate tokens due to network error. Please try again later."
+            )
+
+        # Tokens are valid, store them permanently
+        user_sessions[user_id] = temp_session
+
+        logger.info(f"Stored validated Simplify tokens for user {user_id}")
+        return {
+            "message": "Tokens validated and stored successfully",
+            "validated_at": datetime.now().isoformat()
+        }
 
     except HTTPException:
         raise
