@@ -57,7 +57,6 @@ def get_allowed_origins():
         "https://localhost:3001",
         "http://localhost:8000",
         "http://127.0.0.1:8000",
-        "https://simplify.jobs",
     ]
 
     # Add debug origins if in debug mode
@@ -694,8 +693,6 @@ async def shutdown_event():
     except Exception as e:
         logger.error(f"Error cleaning up resources: {e}")
 
-# Updated sections for the FastAPI backend to properly handle Simplify uploads
-
 @app.post("/api/simplify/store-session")
 async def store_simplify_session(
         session_data: dict,
@@ -703,98 +700,35 @@ async def store_simplify_session(
 ):
     """Store Simplify session data manually provided by user"""
     try:
-        # Store the session data with proper validation
-        authorization = session_data.get('authorization', '').strip()
-        csrf_token = session_data.get('csrf_token', '').strip()
-        raw_cookies = session_data.get('raw_cookies', '').strip()
-
-        if not authorization or not csrf_token:
-            raise HTTPException(
-                status_code=400,
-                detail="Both authorization token and CSRF token are required"
-            )
-
         # Store the session data
         user_sessions[user_id] = {
-            'authorization': authorization,
-            'csrf_token': csrf_token,
-            'raw_cookies': raw_cookies,
+            'authorization': session_data.get('authorization'),
+            'csrf_token': session_data.get('csrf_token'),
+            'raw_cookies': session_data.get('raw_cookies', ''),
             'stored_at': datetime.now(),
             'user_id': user_id
         }
 
         logger.info(f"Stored Simplify session for user {user_id}")
-        return {
-            "message": "Session stored successfully",
-            "has_authorization": bool(authorization),
-            "has_csrf": bool(csrf_token),
-            "has_cookies": bool(raw_cookies)
-        }
+        return {"message": "Session stored successfully"}
 
     except Exception as e:
         logger.error(f"Error storing session: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-
-@app.post("/api/simplify/auto-capture")
-async def auto_capture_tokens(
+@app.post("/api/simplify/upload-resume")
+async def upload_resume_to_simplify(
         request_data: dict,
         user_id: str = Depends(get_user_id)
 ):
-    """Automatically capture tokens from bookmarklet or extension"""
+    """Upload resume to Simplify using stored session data"""
     try:
-        # Validate that we have the required tokens
-        auth_token = request_data.get('authorization', '').strip()
-        csrf_token = request_data.get('csrf', '').strip()
-        cookies_string = request_data.get('cookies', '').strip()
+        resume_id = request_data.get('resume_id')
+        job_id = request_data.get('job_id')
 
-        if not auth_token or not csrf_token:
-            raise HTTPException(
-                status_code=400,
-                detail="Missing required tokens. Make sure you're logged into Simplify Jobs."
-            )
+        if not resume_id:
+            raise HTTPException(status_code=400, detail="Resume ID is required")
 
-        # Store the auto-captured session data
-        user_sessions[user_id] = {
-            'authorization': auth_token,
-            'csrf_token': csrf_token,
-            'raw_cookies': cookies_string,
-            'stored_at': datetime.now(),
-            'user_id': user_id,
-            'capture_method': 'auto',
-            'source_url': request_data.get('url', ''),
-            'captured_at': request_data.get('timestamp', datetime.now().isoformat())
-        }
-
-        logger.info(f"Auto-captured Simplify session for user {user_id} from {request_data.get('url', 'unknown')}")
-
-        return {
-            "message": "Tokens captured successfully via automation",
-            "user_id": user_id,
-            "capture_method": "auto",
-            "tokens_found": {
-                "authorization": bool(auth_token),
-                "csrf": bool(csrf_token),
-                "cookies": bool(cookies_string)
-            }
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error auto-capturing tokens: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.post("/api/simplify/upload-resume-pdf")
-async def upload_resume_pdf_to_simplify(
-        resume_pdf: UploadFile = File(...),
-        resume_id: str = Form(...),
-        job_id: str = Form(None),
-        user_id: str = Depends(get_user_id)
-):
-    """Upload a PDF resume to Simplify using stored session data"""
-    try:
         # Check if user has session data
         if user_id not in user_sessions:
             raise HTTPException(
@@ -804,47 +738,13 @@ async def upload_resume_pdf_to_simplify(
 
         session = user_sessions[user_id]
 
-        # Validate session data
-        if not session.get('authorization') or not session.get('csrf_token'):
-            raise HTTPException(
-                status_code=400,
-                detail="Invalid session data. Missing authorization or CSRF token."
-            )
+        # Get the resume PDF file
+        resume_file_path = get_resume_file_path(resume_id)  # You'll need to implement this
 
-        # Validate the uploaded file
-        if not resume_pdf.filename.lower().endswith('.pdf'):
-            raise HTTPException(status_code=400, detail="Only PDF files are supported")
+        if not os.path.exists(resume_file_path):
+            raise HTTPException(status_code=404, detail="Resume file not found")
 
-        # Read the PDF content
-        pdf_content = await resume_pdf.read()
-
-        if len(pdf_content) == 0:
-            raise HTTPException(status_code=400, detail="PDF file is empty")
-
-        logger.info(f"Received PDF file: {resume_pdf.filename}, size: {len(pdf_content)} bytes")
-
-        # Build the cookies string properly
-        cookies_dict = {}
-
-        # Add authorization cookie
-        cookies_dict['authorization'] = session['authorization']
-
-        # Parse additional cookies if available
-        if session.get('raw_cookies'):
-            try:
-                # Parse cookie string format: "name1=value1; name2=value2"
-                for cookie_pair in session['raw_cookies'].split(';'):
-                    cookie_pair = cookie_pair.strip()
-                    if '=' in cookie_pair:
-                        name, value = cookie_pair.split('=', 1)
-                        cookies_dict[name.strip()] = value.strip()
-            except Exception as e:
-                logger.warning(f"Failed to parse raw cookies: {e}")
-
-        # Convert cookies dict to string format
-        cookie_string = '; '.join([f"{name}={value}" for name, value in cookies_dict.items()])
-
-        # Prepare headers exactly like the working curl request
+        # Prepare headers exactly like your curl request
         headers = {
             'accept': '*/*',
             'accept-language': 'en-US,en;q=0.9',
@@ -852,7 +752,6 @@ async def upload_resume_pdf_to_simplify(
             'referer': 'https://simplify.jobs/',
             'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',
             'x-csrf-token': session['csrf_token'],
-            'cookie': cookie_string,  # This is the crucial missing piece
             'dnt': '1',
             'sec-ch-ua': '"Chromium";v="136", "Google Chrome";v="136", "Not.A/Brand";v="99"',
             'sec-ch-ua-mobile': '?0',
@@ -862,116 +761,81 @@ async def upload_resume_pdf_to_simplify(
             'sec-fetch-site': 'same-site'
         }
 
-        logger.info(f"Making request with cookies: {cookie_string[:100]}..." if len(cookie_string) > 100 else cookie_string)
-
-        # Prepare the file for upload
-        files = {
-            'file': (resume_pdf.filename, pdf_content, 'application/pdf')
+        # Prepare cookies
+        cookies = {
+            'authorization': session['authorization'],
+            'csrf': session['csrf_token']
         }
 
-        # Make the request to Simplify's API
-        response = requests.post(
-            'https://api.simplify.jobs/v2/candidate/me/resume/upload',
-            files=files,
-            headers=headers,
-            timeout=30
-        )
+        # If user provided raw cookies, parse and add them
+        if session.get('raw_cookies'):
+            try:
+                raw_cookies = session['raw_cookies']
+                for cookie in raw_cookies.split(';'):
+                    if '=' in cookie:
+                        name, value = cookie.strip().split('=', 1)
+                        cookies[name] = value
+            except Exception as e:
+                logger.warning(f"Failed to parse raw cookies: {e}")
+
+        # Prepare the file for upload
+        with open(resume_file_path, 'rb') as resume_file:
+            files = {
+                'file': ('resume.pdf', resume_file, 'application/pdf')
+            }
+
+            # Make the request to Simplify's API
+            response = requests.post(
+                'https://api.simplify.jobs/v2/candidate/me/resume/upload',
+                files=files,
+                headers=headers,
+                cookies=cookies,
+                timeout=30
+            )
 
         logger.info(f"Simplify API response: {response.status_code}")
-        logger.info(f"Response headers: {dict(response.headers)}")
 
-        if response.status_code == 201:
+        if response.status_code == 200:
             try:
                 response_data = response.json()
-                logger.info(f"Upload successful: {response_data}")
                 return {
-                    "message": "Resume PDF uploaded successfully to Simplify",
-                    "data": response_data,
-                    "resume_id": resume_id,
-                    "job_id": job_id,
-                    "pdf_size": len(pdf_content)
+                    "message": "Resume uploaded successfully to Simplify",
+                    "data": response_data
                 }
-            except Exception as json_error:
-                logger.warning(f"Failed to parse JSON response: {json_error}")
-                return {
-                    "message": "Resume PDF uploaded successfully to Simplify",
-                    "response_text": response.text,
-                    "resume_id": resume_id,
-                    "job_id": job_id,
-                    "pdf_size": len(pdf_content)
-                }
-        elif response.status_code == 401:
-            logger.error("Authentication failed - session may be expired")
-            raise HTTPException(
-                status_code=401,
-                detail="Authentication failed. Your Simplify session may have expired. Please recapture your session tokens."
-            )
-        elif response.status_code == 403:
-            logger.error("Authorization failed - CSRF token may be invalid")
-            raise HTTPException(
-                status_code=403,
-                detail="Authorization failed. Your CSRF token may be invalid. Please recapture your session tokens."
-            )
+            except:
+                return {"message": "Resume uploaded successfully to Simplify"}
         else:
             logger.error(f"Simplify upload failed: {response.status_code} - {response.text}")
             raise HTTPException(
                 status_code=response.status_code,
-                detail=f"Simplify upload failed (HTTP {response.status_code}): {response.text}"
+                detail=f"Simplify upload failed: {response.text}"
             )
 
-    except HTTPException:
-        raise
-    except requests.exceptions.Timeout:
-        logger.error("Request to Simplify API timed out")
-        raise HTTPException(status_code=504, detail="Upload request timed out. Please try again.")
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Network error during Simplify upload: {e}")
-        raise HTTPException(status_code=502, detail=f"Network error: {str(e)}")
     except Exception as e:
-        logger.error(f"Error uploading PDF resume to Simplify: {e}")
+        logger.error(f"Error uploading resume to Simplify: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+def get_resume_file_path(resume_id: str) -> str:
+    """Get the file path for a resume PDF"""
+    # Implement this based on how you store resume files
+    # Example:
+    resume_dir = os.getenv('RESUME_STORAGE_PATH', './resumes')
+    return os.path.join(resume_dir, f"{resume_id}.pdf")
 
 @app.get("/api/simplify/check-session")
 async def check_simplify_session(user_id: str = Depends(get_user_id)):
     """Check if user has a valid Simplify session"""
     has_session = user_id in user_sessions
     session_age = None
-    session_details = {}
 
     if has_session:
-        session = user_sessions[user_id]
-        stored_at = session['stored_at']
+        stored_at = user_sessions[user_id]['stored_at']
         session_age = (datetime.now() - stored_at).total_seconds() / 3600  # hours
-
-        session_details = {
-            "has_authorization": bool(session.get('authorization')),
-            "has_csrf": bool(session.get('csrf_token')),
-            "has_cookies": bool(session.get('raw_cookies')),
-            "capture_method": session.get('capture_method', 'manual'),
-            "stored_at": stored_at.isoformat()
-        }
 
     return {
         "has_session": has_session,
-        "session_age_hours": session_age,
-        "session_details": session_details if has_session else None
+        "session_age_hours": session_age
     }
-
-
-@app.delete("/api/simplify/clear-session")
-async def clear_simplify_session(user_id: str = Depends(get_user_id)):
-    """Clear the stored Simplify session for the user"""
-    try:
-        if user_id in user_sessions:
-            del user_sessions[user_id]
-            logger.info(f"Cleared Simplify session for user {user_id}")
-            return {"message": "Session cleared successfully"}
-        else:
-            return {"message": "No session found to clear"}
-    except Exception as e:
-        logger.error(f"Error clearing session: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
     # Run the FastAPI app with Uvicorn
