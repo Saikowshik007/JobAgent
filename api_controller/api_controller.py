@@ -33,6 +33,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 user_sessions = {}
+
 # FastAPI app instance
 app = FastAPI(
     title="JobTrak API",
@@ -40,35 +41,33 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Add CORS middleware
+# Comprehensive CORS configuration
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "https://*.vercel.app",                # All Vercel subdomains
-        "https://job-agent-ui.vercel.app",     # Your specific Vercel domain
-        "https://localhost:3000",              # Local HTTPS development
-        "http://localhost:3000",               # Local HTTP development
-        "https://127.0.0.1:3000",             # Local IP HTTPS
-        "http://127.0.0.1:3000",              # Local IP HTTP
-        # Add your actual public IP here
-        f"https://{os.environ.get('PUBLIC_IP', 'YOUR_PUBLIC_IP')}",
-        f"http://{os.environ.get('PUBLIC_IP', 'YOUR_PUBLIC_IP')}",
-        # Wildcard for any origin (use with caution in production)
-        "*"  # Only if you want to allow all origins
+        # Production origins
+        "https://job-agent-ui.vercel.app",
+        "https://*.vercel.app",
+        "https://jobtrackai.duckdns.org",
+
+        # Development origins
+        "http://localhost:3000",
+        "https://localhost:3000",
+        "http://127.0.0.1:3000",
+        "https://127.0.0.1:3000",
+        "http://localhost:3001",
+        "https://localhost:3001",
+        "*"
     ],
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH", "HEAD"],
     allow_headers=[
+        # Standard headers
         "Accept",
         "Accept-Language",
         "Content-Language",
         "Content-Type",
         "Authorization",
-        "X-Api-Key",
-        "x-api-key",
-        "X-User-Id",
-        "x-user-id",
-        "x_user_id",
         "Cache-Control",
         "DNT",
         "If-Modified-Since",
@@ -76,10 +75,39 @@ app.add_middleware(
         "Origin",
         "User-Agent",
         "X-Requested-With",
-        "Range"
+        "Range",
+
+        # Custom API headers
+        "X-Api-Key",
+        "x-api-key",
+        "X-User-Id",
+        "x-user-id",
+        "x_user_id",
+
+        # Additional headers that might be needed
+        "X-CSRF-Token",
+        "X-Forwarded-For",
+        "X-Forwarded-Proto",
+        "X-Real-IP",
+
+        # Wildcard for any other headers
+        "*"
     ],
-    expose_headers=["Content-Range", "X-Content-Range"],
+    expose_headers=[
+        "Content-Range",
+        "X-Content-Range",
+        "X-Total-Count",
+        "Access-Control-Allow-Origin",
+        "Access-Control-Allow-Credentials"
+    ],
+    max_age=3600,  # Cache preflight requests for 1 hour
 )
+
+# Add explicit OPTIONS handler for all routes
+@app.options("/{full_path:path}")
+async def options_handler(full_path: str):
+    """Handle all OPTIONS requests explicitly"""
+    return {"message": "OK"}
 
 # Default user ID if none provided
 DEFAULT_USER_ID = "default_user"
@@ -760,7 +788,7 @@ async def upload_resume_to_simplify(
                     "message": "Resume uploaded successfully to Simplify",
                     "data": response_data
                 }
-            except json.JSONDecodeError:
+            except:
                 return {"message": "Resume uploaded successfully to Simplify"}
         else:
             logger.error(f"Simplify upload failed: {response.status_code} - {response.text}")
