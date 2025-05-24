@@ -140,9 +140,10 @@ class ResumeImprover:
             manual_review (bool, optional): Whether to wait for manual review. Defaults to True.
         """
         logger.info("Extracting matched skills...")
+
         self.skills = self.extract_matched_skills(verbose=False)
         logger.info("Writing objective...")
-        # self.objective = self.write_objective(verbose=False)
+        self.objective = self.write_objective(verbose=False)
         logger.info("Updating bullet points...")
         self.experiences = self.rewrite_unedited_experiences(verbose=False)
         logger.info("Updating projects...")
