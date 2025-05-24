@@ -49,7 +49,6 @@ def get_allowed_origins():
         "https://job-agent-ui.vercel.app",
         "https://jobtrackai.duckdns.org",
         "http://jobtrackai.duckdns.org",
-        "https://simplify.jobs",  # ADDED FOR BOOKMARKLET
         "http://localhost:3000",
         "https://localhost:3000",
         "http://127.0.0.1:3000",
@@ -58,6 +57,7 @@ def get_allowed_origins():
         "https://localhost:3001",
         "http://localhost:8000",
         "http://127.0.0.1:8000",
+        "https://simplify.jobs",
     ]
 
     # Add debug origins if in debug mode
@@ -694,8 +694,6 @@ async def shutdown_event():
     except Exception as e:
         logger.error(f"Error cleaning up resources: {e}")
 
-# ===== SIMPLIFY INTEGRATION ENDPOINTS =====
-
 @app.post("/api/simplify/store-session")
 async def store_simplify_session(
         session_data: dict,
@@ -766,21 +764,6 @@ async def auto_capture_tokens(
     except Exception as e:
         logger.error(f"Error auto-capturing tokens: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/api/simplify/check-session")
-async def check_simplify_session(user_id: str = Depends(get_user_id)):
-    """Check if user has a valid Simplify session"""
-    has_session = user_id in user_sessions
-    session_age = None
-
-    if has_session:
-        stored_at = user_sessions[user_id]['stored_at']
-        session_age = (datetime.now() - stored_at).total_seconds() / 3600  # hours
-
-    return {
-        "has_session": has_session,
-        "session_age_hours": session_age
-    }
 
 @app.post("/api/simplify/upload-resume-pdf")
 async def upload_resume_pdf_to_simplify(
@@ -862,7 +845,7 @@ async def upload_resume_pdf_to_simplify(
 
         logger.info(f"Simplify API response: {response.status_code}")
 
-        if response.status_code in [200, 201]:  # Accept both 200 and 201
+        if response.status_code == 201:
             try:
                 response_data = response.json()
                 return {
@@ -899,7 +882,20 @@ def get_resume_file_path(resume_id: str) -> str:
     resume_dir = os.getenv('RESUME_STORAGE_PATH', './resumes')
     return os.path.join(resume_dir, f"{resume_id}.pdf")
 
-# ===== MAIN APPLICATION ENTRY POINT =====
+@app.get("/api/simplify/check-session")
+async def check_simplify_session(user_id: str = Depends(get_user_id)):
+    """Check if user has a valid Simplify session"""
+    has_session = user_id in user_sessions
+    session_age = None
+
+    if has_session:
+        stored_at = user_sessions[user_id]['stored_at']
+        session_age = (datetime.now() - stored_at).total_seconds() / 3600  # hours
+
+    return {
+        "has_session": has_session,
+        "session_age_hours": session_age
+    }
 
 if __name__ == "__main__":
     # Run the FastAPI app with Uvicorn
