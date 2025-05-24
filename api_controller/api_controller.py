@@ -716,6 +716,54 @@ async def store_simplify_session(
         logger.error(f"Error storing session: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/api/simplify/auto-capture")
+async def auto_capture_tokens(
+        request_data: dict,
+        user_id: str = Depends(get_user_id)
+):
+    """Automatically capture tokens from bookmarklet or extension"""
+    try:
+        # Validate that we have the required tokens
+        auth_token = request_data.get('authorization')
+        csrf_token = request_data.get('csrf')
+
+        if not auth_token or not csrf_token:
+            raise HTTPException(
+                status_code=400,
+                detail="Missing required tokens. Make sure you're logged into Simplify Jobs."
+            )
+
+        # Store the auto-captured session data
+        user_sessions[user_id] = {
+            'authorization': auth_token,
+            'csrf_token': csrf_token,
+            'raw_cookies': request_data.get('cookies', ''),
+            'stored_at': datetime.now(),
+            'user_id': user_id,
+            'capture_method': 'auto',
+            'source_url': request_data.get('url', ''),
+            'captured_at': request_data.get('timestamp', datetime.now().isoformat())
+        }
+
+        logger.info(f"Auto-captured Simplify session for user {user_id} from {request_data.get('url', 'unknown')}")
+
+        return {
+            "message": "Tokens captured successfully via automation",
+            "user_id": user_id,
+            "capture_method": "auto",
+            "tokens_found": {
+                "authorization": bool(auth_token),
+                "csrf": bool(csrf_token),
+                "cookies": bool(request_data.get('cookies'))
+            }
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error auto-capturing tokens: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/api/simplify/upload-resume-pdf")
 async def upload_resume_pdf_to_simplify(
         resume_pdf: UploadFile = File(...),
