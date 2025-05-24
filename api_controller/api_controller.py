@@ -965,7 +965,7 @@ async def auto_capture_tokens(
             'capture_method': 'auto'
         }
 
-        logger.info(f"Auto-captured Simplify session for user {user_id}")
+        logger.info(f"Auto-captured Simplify session for user {user_id} and tokens:{request_data}")
         return {"message": "Tokens captured successfully via automation"}
 
     except Exception as e:
