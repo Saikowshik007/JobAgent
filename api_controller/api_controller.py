@@ -694,31 +694,6 @@ async def shutdown_event():
     except Exception as e:
         logger.error(f"Error cleaning up resources: {e}")
 
-@app.post("/api/simplify/store-session")
-async def store_simplify_session(
-        session_data: dict,
-        user_id: str = Depends(get_user_id)
-):
-    """Store Simplify session data manually provided by user"""
-    try:
-        # Store the session data with additional fields
-        user_sessions[user_id] = {
-            'authorization': session_data.get('authorization'),
-            'csrf_token': session_data.get('csrf_token'),
-            'raw_cookies': session_data.get('raw_cookies', ''),
-            'baggage': session_data.get('baggage', ''),
-            'sentry_trace': session_data.get('sentry_trace', ''),
-            'stored_at': datetime.now(),
-            'user_id': user_id
-        }
-
-        logger.info(f"Stored Simplify session for user {user_id}")
-        return {"message": "Session stored successfully"}
-
-    except Exception as e:
-        logger.error(f"Error storing session: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
 @app.post("/api/simplify/upload-resume")
 async def upload_resume_to_simplify(
         request_data: dict,
@@ -969,37 +944,39 @@ async def get_simplify_tokens(user_id: str = Depends(get_user_id)):
         logger.error(f"Error getting stored tokens for user {user_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/api/simplify/auto-capture")
-async def auto_capture_tokens(
+@app.post("/api/simplify/store-tokens")
+async def store_simplify_tokens(
         request_data: dict,
         user_id: str = Depends(get_user_id)
 ):
-    """Automatically capture tokens from bookmarklet or extension"""
+    """Store both CSRF and authorization tokens for Simplify"""
     try:
-        # Store the auto-captured session data with all possible fields
+        csrf_token = request_data.get('csrf')
+        auth_token = request_data.get('authorization')
+
+        if not csrf_token or not auth_token:
+            raise HTTPException(
+                status_code=400,
+                detail="Both 'csrf' and 'authorization' tokens are required"
+            )
+
+        # Store the tokens with additional metadata
         user_sessions[user_id] = {
-            'authorization': request_data.get('authorization'),
-            'csrf_token': request_data.get('csrf'),
-            'raw_cookies': request_data.get('cookies', ''),
-            'baggage': request_data.get('baggage', ''),
-            'sentry_trace': request_data.get('sentry_trace', ''),
+            'authorization': auth_token,
+            'csrf_token': csrf_token,
             'stored_at': datetime.now(),
             'user_id': user_id,
-            'capture_method': 'auto'
-
-
-
-
+            'capture_method': 'manual_tokens'
         }
 
-        logger.info(f"Auto-captured Simplify session for user {user_id}")
-        logger.info(f"Captured tokens: {list(request_data.keys())}")
-        return {"message": "Tokens captured successfully via automation"}
+        logger.info(f"Stored Simplify tokens for user {user_id}")
+        return {"message": "Tokens stored successfully"}
 
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error auto-capturing tokens: {e}")
+        logger.error(f"Error storing tokens: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
 
 if __name__ == "__main__":
     # Run the FastAPI app with Uvicorn
