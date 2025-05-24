@@ -947,6 +947,30 @@ async def upload_resume_pdf_to_simplify(
         logger.error(f"Error uploading PDF resume to Simplify: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/api/simplify/auto-capture")
+async def auto_capture_tokens(
+        request_data: dict,
+        user_id: str = Depends(get_user_id)
+):
+    """Automatically capture tokens from bookmarklet or extension"""
+    try:
+        # Store the auto-captured session data
+        user_sessions[user_id] = {
+            'authorization': request_data.get('authorization'),
+            'csrf_token': request_data.get('csrf'),
+            'raw_cookies': request_data.get('cookies', ''),
+            'stored_at': datetime.now(),
+            'user_id': user_id,
+            'capture_method': 'auto'
+        }
+
+        logger.info(f"Auto-captured Simplify session for user {user_id}")
+        return {"message": "Tokens captured successfully via automation"}
+
+    except Exception as e:
+        logger.error(f"Error auto-capturing tokens: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 if __name__ == "__main__":
     # Run the FastAPI app with Uvicorn
     host = os.environ.get('API_HOST', '0.0.0.0')
