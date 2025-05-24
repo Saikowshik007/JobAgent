@@ -837,6 +837,116 @@ async def check_simplify_session(user_id: str = Depends(get_user_id)):
         "session_age_hours": session_age
     }
 
+@app.post("/api/simplify/upload-resume-pdf")
+async def upload_resume_pdf_to_simplify(
+        resume_pdf: UploadFile = File(...),
+        resume_id: str = Form(...),
+        job_id: str = Form(None),
+        user_id: str = Depends(get_user_id)
+):
+    """Upload a PDF resume to Simplify using stored session data"""
+    try:
+        # Check if user has session data
+        if user_id not in user_sessions:
+            raise HTTPException(
+                status_code=400,
+                detail="No Simplify session found. Please complete the session capture step first."
+            )
+
+        session = user_sessions[user_id]
+
+        # Validate the uploaded file
+        if not resume_pdf.filename.lower().endswith('.pdf'):
+            raise HTTPException(status_code=400, detail="Only PDF files are supported")
+
+        # Read the PDF content
+        pdf_content = await resume_pdf.read()
+
+        if len(pdf_content) == 0:
+            raise HTTPException(status_code=400, detail="PDF file is empty")
+
+        logger.info(f"Received PDF file: {resume_pdf.filename}, size: {len(pdf_content)} bytes")
+
+        # Prepare headers exactly like the working curl request
+        headers = {
+            'accept': '*/*',
+            'accept-language': 'en-US,en;q=0.9',
+            'origin': 'https://simplify.jobs',
+            'referer': 'https://simplify.jobs/',
+            'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',
+            'x-csrf-token': session['csrf_token'],
+            'dnt': '1',
+            'sec-ch-ua': '"Chromium";v="136", "Google Chrome";v="136", "Not.A/Brand";v="99"',
+            'sec-ch-ua-mobile': '?0',
+            'sec-ch-ua-platform': '"Windows"',
+            'sec-fetch-dest': 'empty',
+            'sec-fetch-mode': 'cors',
+            'sec-fetch-site': 'same-site'
+        }
+
+        # Prepare cookies
+        cookies = {
+            'authorization': session['authorization'],
+            'csrf': session['csrf_token']
+        }
+
+        # If user provided raw cookies, parse and add them
+        if session.get('raw_cookies'):
+            try:
+                raw_cookies = session['raw_cookies']
+                for cookie in raw_cookies.split(';'):
+                    if '=' in cookie:
+                        name, value = cookie.strip().split('=', 1)
+                        cookies[name] = value
+            except Exception as e:
+                logger.warning(f"Failed to parse raw cookies: {e}")
+
+        # Prepare the file for upload
+        files = {
+            'file': (resume_pdf.filename, pdf_content, 'application/pdf')
+        }
+
+        # Make the request to Simplify's API
+        response = requests.post(
+            'https://api.simplify.jobs/v2/candidate/me/resume/upload',
+            files=files,
+            headers=headers,
+            cookies=cookies,
+            timeout=30
+        )
+
+        logger.info(f"Simplify API response: {response.status_code}")
+
+        if response.status_code == 200:
+            try:
+                response_data = response.json()
+                return {
+                    "message": "Resume PDF uploaded successfully to Simplify",
+                    "data": response_data,
+                    "resume_id": resume_id,
+                    "job_id": job_id,
+                    "pdf_size": len(pdf_content)
+                }
+            except:
+                return {
+                    "message": "Resume PDF uploaded successfully to Simplify",
+                    "resume_id": resume_id,
+                    "job_id": job_id,
+                    "pdf_size": len(pdf_content)
+                }
+        else:
+            logger.error(f"Simplify upload failed: {response.status_code} - {response.text}")
+            raise HTTPException(
+                status_code=response.status_code,
+                detail=f"Simplify upload failed: {response.text}"
+            )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error uploading PDF resume to Simplify: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 if __name__ == "__main__":
     # Run the FastAPI app with Uvicorn
     host = os.environ.get('API_HOST', '0.0.0.0')
