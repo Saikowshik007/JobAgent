@@ -943,32 +943,32 @@ async def upload_resume_pdf_to_simplify(
         logger.error(f"Error uploading PDF resume to Simplify: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/api/simplify/auto-capture")
-async def auto_capture_tokens(
-        request_data: dict,
-        user_id: str = Depends(get_user_id)
-):
-    """Automatically capture tokens from bookmarklet or extension"""
+@app.get("/api/simplify/get-tokens")
+async def get_simplify_tokens(user_id: str = Depends(get_user_id)):
+    """Get stored Simplify tokens for the user"""
     try:
-        # Store the auto-captured session data with all possible fields
-        user_sessions[user_id] = {
-            'authorization': request_data.get('authorization'),
-            'csrf_token': request_data.get('csrf'),
-            'raw_cookies': request_data.get('cookies', ''),
-            'baggage': request_data.get('baggage', ''),
-            'sentry_trace': request_data.get('sentry_trace', ''),
-            'stored_at': datetime.now(),
-            'user_id': user_id,
-            'capture_method': 'auto'
+        if user_id not in user_sessions:
+            raise HTTPException(
+                status_code=404, 
+                detail="No stored tokens found. Please capture tokens first."
+            )
+        
+        session = user_sessions[user_id]
+        
+        # Return only the necessary tokens (don't expose everything)
+        return {
+            "authorization": session.get('authorization'),
+            "csrf": session.get('csrf_token'),
+            "has_tokens": bool(session.get('authorization') and session.get('csrf_token')),
+            "stored_at": session.get('stored_at').isoformat() if session.get('stored_at') else None
         }
-
-        logger.info(f"Auto-captured Simplify session for user {user_id}")
-        logger.info(f"Captured tokens: {list(request_data.keys())}")
-        return {"message": "Tokens captured successfully via automation"}
-
+        
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error auto-capturing tokens: {e}")
+        logger.error(f"Error getting stored tokens for user {user_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
 
 if __name__ == "__main__":
     # Run the FastAPI app with Uvicorn
