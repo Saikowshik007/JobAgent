@@ -79,7 +79,7 @@ services:
       - "traefik.http.routers.api.middlewares=api-ratelimit"
 
       # HTTP to HTTPS redirect
-      - "traefik.http.routers.api-http.rule=Host(`jobtrackai.duckdns.org`) && PathPrefix(`/api`)"
+      - "traefik.http.routers.api-http.rule=Host(`jobtrackai.duckdns.org`) && PathPrefix(`/`)"
       - "traefik.http.routers.api-http.entrypoints=web"
       - "traefik.http.routers.api-http.middlewares=https-redirect"
 
