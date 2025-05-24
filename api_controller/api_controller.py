@@ -57,6 +57,7 @@ def get_allowed_origins():
         "https://localhost:3001",
         "http://localhost:8000",
         "http://127.0.0.1:8000",
+        "https://simplify.jobs"
     ]
 
     # Add debug origins if in debug mode
