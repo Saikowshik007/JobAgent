@@ -716,19 +716,15 @@ async def store_simplify_session(
         logger.error(f"Error storing session: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/api/simplify/upload-resume")
-async def upload_resume_to_simplify(
-        request_data: dict,
+@app.post("/api/simplify/upload-resume-pdf")
+async def upload_resume_pdf_to_simplify(
+        resume_pdf: UploadFile = File(...),
+        resume_id: str = Form(...),
+        job_id: str = Form(None),
         user_id: str = Depends(get_user_id)
 ):
-    """Upload resume to Simplify using stored session data"""
+    """Upload a PDF resume to Simplify using stored session data"""
     try:
-        resume_id = request_data.get('resume_id')
-        job_id = request_data.get('job_id')
-
-        if not resume_id:
-            raise HTTPException(status_code=400, detail="Resume ID is required")
-
         # Check if user has session data
         if user_id not in user_sessions:
             raise HTTPException(
@@ -738,13 +734,19 @@ async def upload_resume_to_simplify(
 
         session = user_sessions[user_id]
 
-        # Get the resume PDF file
-        resume_file_path = get_resume_file_path(resume_id)  # You'll need to implement this
+        # Validate the uploaded file
+        if not resume_pdf.filename.lower().endswith('.pdf'):
+            raise HTTPException(status_code=400, detail="Only PDF files are supported")
 
-        if not os.path.exists(resume_file_path):
-            raise HTTPException(status_code=404, detail="Resume file not found")
+        # Read the PDF content
+        pdf_content = await resume_pdf.read()
 
-        # Prepare headers exactly like your curl request
+        if len(pdf_content) == 0:
+            raise HTTPException(status_code=400, detail="PDF file is empty")
+
+        logger.info(f"Received PDF file: {resume_pdf.filename}, size: {len(pdf_content)} bytes")
+
+        # Prepare headers exactly like the working curl request
         headers = {
             'accept': '*/*',
             'accept-language': 'en-US,en;q=0.9',
@@ -779,19 +781,18 @@ async def upload_resume_to_simplify(
                 logger.warning(f"Failed to parse raw cookies: {e}")
 
         # Prepare the file for upload
-        with open(resume_file_path, 'rb') as resume_file:
-            files = {
-                'file': ('resume.pdf', resume_file, 'application/pdf')
-            }
+        files = {
+            'file': (resume_pdf.filename, pdf_content, 'application/pdf')
+        }
 
-            # Make the request to Simplify's API
-            response = requests.post(
-                'https://api.simplify.jobs/v2/candidate/me/resume/upload',
-                files=files,
-                headers=headers,
-                cookies=cookies,
-                timeout=30
-            )
+        # Make the request to Simplify's API
+        response = requests.post(
+            'https://api.simplify.jobs/v2/candidate/me/resume/upload',
+            files=files,
+            headers=headers,
+            cookies=cookies,
+            timeout=30
+        )
 
         logger.info(f"Simplify API response: {response.status_code}")
 
@@ -799,11 +800,19 @@ async def upload_resume_to_simplify(
             try:
                 response_data = response.json()
                 return {
-                    "message": "Resume uploaded successfully to Simplify",
-                    "data": response_data
+                    "message": "Resume PDF uploaded successfully to Simplify",
+                    "data": response_data,
+                    "resume_id": resume_id,
+                    "job_id": job_id,
+                    "pdf_size": len(pdf_content)
                 }
             except:
-                return {"message": "Resume uploaded successfully to Simplify"}
+                return {
+                    "message": "Resume PDF uploaded successfully to Simplify",
+                    "resume_id": resume_id,
+                    "job_id": job_id,
+                    "pdf_size": len(pdf_content)
+                }
         else:
             logger.error(f"Simplify upload failed: {response.status_code} - {response.text}")
             raise HTTPException(
@@ -811,8 +820,10 @@ async def upload_resume_to_simplify(
                 detail=f"Simplify upload failed: {response.text}"
             )
 
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error uploading resume to Simplify: {e}")
+        logger.error(f"Error uploading PDF resume to Simplify: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 def get_resume_file_path(resume_id: str) -> str:
