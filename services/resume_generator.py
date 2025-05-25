@@ -43,7 +43,7 @@ class ResumeGenerator:
         )
 
         # Update job status
-        await self.cache_manager.update_job_status(job.id, self.user_id, JobStatus.RESUME_GENERATED)
+        await self.cache_manager.update_job_status(job_id, self.user_id, JobStatus.RESUME_GENERATED)
 
         # Start background generation (non-blocking)
         asyncio.create_task(self._generate_resume_background(
