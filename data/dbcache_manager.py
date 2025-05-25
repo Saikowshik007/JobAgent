@@ -295,6 +295,47 @@ class DBCacheManager:
 
         return success
 
+    async def update_job_resume_id(self, job_id: str, user_id: str, resume_id: str) -> bool:
+        """
+        Update job's resume_id field in both cache and database.
+
+        Args:
+            job_id: ID of the job to update
+            user_id: ID of the user who owns the job
+            resume_id: ID of the generated resume
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        success = True
+
+        # Update in database
+        if self.db:
+            try:
+                async with self.db.get_connection() as conn:
+                    await conn.execute('''
+                        UPDATE jobs SET resume_id = $1, updated_at = NOW()
+                        WHERE id = $2 AND user_id = $3
+                    ''', resume_id, job_id, user_id)
+                logger.info(f"Updated job {job_id} with resume_id {resume_id} in database")
+            except Exception as e:
+                logger.error(f"Error updating job resume_id in database for user {user_id}: {e}")
+                success = False
+
+        # Update in cache - get job, update resume_id, and re-add to cache
+        if self.job_cache and success:
+            try:
+                job = self.job_cache.get_job(job_id, user_id)
+                if job:
+                    job.resume_id = resume_id
+                    self.job_cache.add_job(job, user_id)
+                    logger.info(f"Updated job {job_id} with resume_id {resume_id} in cache")
+            except Exception as e:
+                logger.error(f"Error updating job resume_id in cache for user {user_id}: {e}")
+                # Don't mark as failure if cache update fails but DB succeeded
+
+        return success
+
     async def get_all_jobs(self, user_id: str, status=None, limit: int = None, offset: int = 0) -> List:
         """
         Get all jobs for a user, optionally filtered by status.

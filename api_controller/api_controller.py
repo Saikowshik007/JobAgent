@@ -451,11 +451,7 @@ async def generate_resume(
 ):
     """Generate a tailored resume for a specific job using the provided resume data."""
     try:
-        # Initialize resume generator with unified cache manager
         resume_generator = ResumeGenerator(cache_manager, user_id, api_key)
-
-        # Start the resume generation process with the provided resume data
-        # This is now non-blocking and uses cache for status tracking
         resume_info = await resume_generator.generate_resume(
             job_id=request.job_id,
             template=request.template or "standard",

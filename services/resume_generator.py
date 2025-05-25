@@ -42,9 +42,6 @@ class ResumeGenerator:
             resume_id, self.user_id, ResumeGenerationStatus.PENDING
         )
 
-        # Update job status
-        await self.cache_manager.update_job_status(job_id, self.user_id, JobStatus.RESUME_GENERATED)
-
         # Start background generation (non-blocking)
         asyncio.create_task(self._generate_resume_background(
             job_dict, resume_id, template, customize, resume_data
@@ -92,10 +89,18 @@ class ResumeGenerator:
             # Save completed resume to database
             await self.cache_manager.save_resume(resume, self.user_id)
 
+            # IMPORTANT FIX: Update the job with the resume_id
+            await self._update_job_with_resume_id(job_dict.get('id'), resume_id)
+
             # Update cache with completed status
             await self.cache_manager.set_resume_status(
                 resume_id, self.user_id, ResumeGenerationStatus.COMPLETED,
                 data={"yaml_content": yaml_content}
+            )
+
+            # Update job status to RESUME_GENERATED after everything is complete
+            await self.cache_manager.update_job_status(
+                job_dict.get('id'), self.user_id, JobStatus.RESUME_GENERATED
             )
 
             logger.info(f"Resume generation completed for job {job_dict.get('id')} for user {self.user_id}")
@@ -108,6 +113,20 @@ class ResumeGenerator:
                 resume_id, self.user_id, ResumeGenerationStatus.FAILED,
                 error=str(e)
             )
+
+    async def _update_job_with_resume_id(self, job_id: str, resume_id: str):
+        """Update the job record with the generated resume ID."""
+        try:
+            # Use the new cache manager method to update job's resume_id
+            success = await self.cache_manager.update_job_resume_id(job_id, self.user_id, resume_id)
+
+            if success:
+                logger.info(f"Successfully updated job {job_id} with resume_id {resume_id}")
+            else:
+                logger.error(f"Failed to update job {job_id} with resume_id {resume_id}")
+
+        except Exception as e:
+            logger.error(f"Error updating job {job_id} with resume_id {resume_id}: {e}")
 
     def _generate_resume_sync(self, job_dict: dict, resume_data: Optional[Dict[str, Any]]) -> str:
         """Synchronous resume generation that runs in thread pool."""
@@ -244,6 +263,10 @@ class ResumeGenerator:
 
             if not success:
                 raise ValueError("Failed to save uploaded resume")
+
+            # If this resume is for a specific job, update the job's resume_id
+            if job_id:
+                await self._update_job_with_resume_id(job_id, resume_id)
 
             return {
                 "message": "Resume uploaded successfully",
