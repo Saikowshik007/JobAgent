@@ -86,9 +86,8 @@ SKILLS_MATCHER:
     8. Categorize all extracted skills appropriately
     9. Verify all skills are actually mentioned or demonstrated in the <Resume>
     10. Remove any duplicate skills or unnecessarily similar entries
-    11. For each skill, create a factual note about where/how it appears in the resume without job alignment justifications
-    12. Confirm all <Criteria> are met and make necessary adjustments
-    13. Provide your <Final Answer> with properly formatted and categorized skills lists that focus on the candidate's actual experience without explicit job alignment justifications
+    11. Confirm all <Criteria> are met and make necessary adjustments
+    12. Provide your <Final Answer> with properly formatted and categorized skills lists that focus on the candidate's actual experience without explicit job alignment justifications
 
 OBJECTIVE_WRITER:
   system_message: >

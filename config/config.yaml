@@ -30,8 +30,8 @@ cache:
 # Model Configuration
 model:
   provider: openai
-  name: gpt-4o-mini
-  temperature: 0.5
+  name: gpt-4o
+  temperature: 0.3
 
 # Project Paths
 paths:
