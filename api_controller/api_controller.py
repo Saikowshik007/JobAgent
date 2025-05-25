@@ -547,46 +547,6 @@ async def upload_resume(
         logger.error(f"Error uploading resume for user {user_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-# Upload to Simplify endpoint (placeholder, to be implemented later)
-@app.post("/api/resume/upload-to-simplify", tags=["Resume"])
-async def upload_to_simplify(
-        request: UploadToSimplifyRequest,
-        cache_manager: DBCacheManager = Depends(get_cache_manager),
-        user_id: str = Depends(get_user_id)
-):
-    """Upload a resume to Simplify.jobs."""
-    # This is a placeholder - you'll implement the actual Simplify integration later
-    try:
-        # Check if job exists
-        job_dict = await cache_manager.get_job(request.job_id, user_id)
-        if not job_dict:
-            raise HTTPException(status_code=404, detail=f"Job not found with ID: {request.job_id} for user: {user_id}")
-
-        # Check if resume exists
-        resume_id = request.resume_id or job_dict.get('resume_id')
-        if not resume_id:
-            raise HTTPException(status_code=400, detail="No resume ID provided or associated with this job")
-
-        resume = await cache_manager.get_resume(resume_id, user_id)
-        if not resume:
-            raise HTTPException(status_code=404, detail=f"Resume not found with ID: {resume_id} for user: {user_id}")
-
-        # Placeholder response
-        return {
-            "message": "Simplify.jobs upload functionality will be implemented in a future update",
-            "job_id": request.job_id,
-            "resume_id": resume_id,
-            "user_id": user_id,
-            "job": job_dict,
-            "resume": resume.to_dict()
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error uploading resume to Simplify for job {request.job_id} for user {user_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
 @app.post("/api/resume/{resume_id}/update-yaml", tags=["Resume"])
 async def update_resume_yaml(
         resume_id: str,
