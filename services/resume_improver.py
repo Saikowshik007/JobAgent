@@ -129,39 +129,6 @@ class ResumeImprover:
         self.job_post = JobPost(self.job_post_raw,self.api_key)
         self.parsed_job = self.job_post.parse_job_post(verbose=False)
 
-
-    def create_draft_tailored_resume(
-            self, auto_open=True, manual_review=True, skip_pdf_create=False
-    ):
-        """Run a full review of the resume against the job post.
-
-        Args:
-            auto_open (bool, optional): Whether to automatically open the generated resume. Defaults to True.
-            manual_review (bool, optional): Whether to wait for manual review. Defaults to True.
-        """
-        logger.info("Extracting matched skills...")
-
-        self.skills = self.extract_matched_skills(verbose=False)
-        logger.info("Writing objective...")
-        self.objective = self.write_objective(verbose=False)
-        logger.info("Updating bullet points...")
-        self.experiences = self.rewrite_unedited_experiences(verbose=False)
-        logger.info("Updating projects...")
-        self.projects = self.rewrite_unedited_projects(verbose=False)
-        logger.info("Done updating...")
-        self.yaml_loc = os.path.join(self.job_data_location, "resume.yaml")
-        resume_dict = dict(
-            editing=True,
-            basic=self.basic_info,
-            objective=self.objective,
-            education=self.education,
-            experiences=self.experiences,
-            projects=self.projects,
-            skills=self.skills,
-        )
-
-    pass
-
     def _create_tailored_resume_in_background(
             self, auto_open=True, manual_review=True, background_runner=None
     ):
@@ -411,6 +378,7 @@ class ResumeImprover:
 
         chain_inputs = self._get_formatted_chain_inputs(chain=chain)
         objective = chain.invoke(chain_inputs).dict()
+        logger.warning("Objective: "+ objective)
         if not objective or "final_answer" not in objective:
             return None
         return objective["final_answer"]
