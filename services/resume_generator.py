@@ -170,11 +170,13 @@ class ResumeGenerator:
             logger.info("Updating projects...")
             projects = resume_improver.rewrite_unedited_projects(verbose=False)
 
+            objective = resume_improver.write_objective()
+
             # Create resume content dictionary
             yaml_content_dict = {
                 'editing': False,
                 'basic': resume_improver.basic_info,
-                'objective': resume_improver.objective,
+                'objective': objective,
                 'education': resume_improver.education,
                 'experiences': experiences,
                 'projects': projects,
