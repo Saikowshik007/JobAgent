@@ -378,7 +378,7 @@ class ResumeImprover:
 
         chain_inputs = self._get_formatted_chain_inputs(chain=chain)
         objective = chain.invoke(chain_inputs).dict()
-        logger.warning("Objective: "+ objective)
+        logger.warning("Objective: "+ str(objective))
         if not objective or "final_answer" not in objective:
             return None
         return objective["final_answer"]
