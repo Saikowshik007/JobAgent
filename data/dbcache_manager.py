@@ -432,9 +432,6 @@ class DBCacheManager:
         if self.job_cache:
             stats["job_cache"] = self.job_cache.get_stats()
 
-        if self.search_cache:
-            stats["search_cache"] = getattr(self.search_cache, 'get_stats', lambda: {})()
-
         return stats
 
     # Database Health Check
@@ -443,7 +440,6 @@ class DBCacheManager:
         health_info = {
             "database": "unavailable",
             "job_cache": "available" if self.job_cache else "unavailable",
-            "search_cache": "available" if self.search_cache else "unavailable",
             "resume_cache": "available" if self.resume_cache else "unavailable"
         }
 
