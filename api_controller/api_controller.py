@@ -128,7 +128,7 @@ async def options_handler(full_path: str):
 DEFAULT_USER_ID = "default_user"
 
 # Initialize function to set up application state
-async def initialize(db_url=None, job_cache_size=None, search_cache_size=None):
+async def initialize(db_url=None, job_cache_size=None):
     """Initialize the FastAPI application with required components."""
     try:
         # Get configuration from environment variables if not provided
@@ -137,10 +137,6 @@ async def initialize(db_url=None, job_cache_size=None, search_cache_size=None):
 
         if job_cache_size is None:
             job_cache_size = int(config.get("cache.job_cache_size", 1000))
-
-        if search_cache_size is None:
-            search_cache_size = int(config.get("cache.search_cache_size", 1000))
-
         # Initialize database
         db = Database(db_url)
         await db.initialize_pool()
@@ -150,7 +146,7 @@ async def initialize(db_url=None, job_cache_size=None, search_cache_size=None):
         # Initialize caches
         job_cache = JobCache(max_size=job_cache_size)
         resume_cache = ResumeCache()
-        logger.info(f"Initialized caches with sizes - job: {job_cache_size}, search: {search_cache_size}")
+        logger.info(f"Initialized caches with sizes - job: {job_cache_size}, resume: {resume_cache}")
 
         # Initialize unified cache manager (no more separate cache managers!)
         cache_manager = DBCacheManager(
