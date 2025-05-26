@@ -1,51 +1,76 @@
-import logging
+"""
+Main FastAPI application with proper initialization.
+"""
 import os
-import uvicorn
+import logging
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from dotenv import load_dotenv
 
-# Import routers
-from routers import jobs, resume, system, simplify
-from core.config import get_allowed_origins
 from core.database import initialize_app
-import config
-
-# Load environment variables
-load_dotenv()
+from routers import system, jobs, resume, simplify
 
 # Configure logging
 logging.basicConfig(
-    level=config.get("api.level"),
+    level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
 
-# FastAPI app instance
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Application lifespan manager."""
+    logger.info("Starting application initialization...")
+
+    try:
+        # Initialize the application with all required components
+        success = await initialize_app(app)
+
+        if not success:
+            logger.error("Failed to initialize application")
+            raise RuntimeError("Application initialization failed")
+
+        logger.info("Application initialized successfully")
+        yield
+
+    except Exception as e:
+        logger.error(f"Error during application startup: {e}")
+        raise
+    finally:
+        # Cleanup code here if needed
+        logger.info("Application shutting down...")
+
+        # Close database connections if they exist
+        if hasattr(app.state, 'db'):
+            try:
+                await app.state.db.close_pool()
+                logger.info("Database connections closed")
+            except Exception as e:
+                logger.error(f"Error closing database: {e}")
+
+# Create FastAPI app with lifespan
 app = FastAPI(
     title="JobTrak API",
     description="API for analyzing job postings and tracking job applications",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan
 )
 
-# CORS configuration
+# Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=get_allowed_origins(),
+    allow_origins=[
+        "http://localhost:3000",  # React dev server
+        "http://127.0.0.1:3000",
+        "https://localhost:3000",
+        "https://127.0.0.1:3000",
+        # Add your production domain here
+        "https://yourdomain.com"
+    ],
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH", "HEAD"],
-    allow_headers=[
-        "Accept", "Accept-Language", "Content-Language", "Content-Type",
-        "Authorization", "Cache-Control", "DNT", "If-Modified-Since",
-        "Keep-Alive", "Origin", "User-Agent", "X-Requested-With", "Range",
-        "X-Api-Key", "x-api-key", "X-User-Id", "x-user-id", "x_user_id",
-        "X-CSRF-Token", "X-Forwarded-For", "X-Forwarded-Proto", "X-Real-IP",
-    ],
-    expose_headers=[
-        "Content-Range", "X-Content-Range", "X-Total-Count",
-        "Access-Control-Allow-Origin", "Access-Control-Allow-Credentials"
-    ],
-    max_age=3600,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["*"],
 )
 
 # Include routers
@@ -54,39 +79,37 @@ app.include_router(jobs.router, prefix="/api/jobs", tags=["Jobs"])
 app.include_router(resume.router, prefix="/api/resume", tags=["Resume"])
 app.include_router(simplify.router, prefix="/api/simplify", tags=["Simplify"])
 
-# Startup event
-@app.on_event("startup")
-async def startup_event():
-    """Initialize application on startup."""
-    try:
-        import requests
-        public_ip = requests.get('https://ipinfo.io/ip', timeout=5).text.strip()
-        logger.info(f"🌐 Server starting - Public IP: {public_ip}")
-        logger.info(f"🔗 API accessible at: https://{public_ip}/api/")
-        app.state.public_ip = public_ip
-    except Exception as e:
-        logger.warning(f"Could not detect public IP: {e}")
+@app.get("/")
+async def root():
+    """Root endpoint."""
+    return {
+        "message": "JobTrak API",
+        "version": "1.0.0",
+        "status": "running"
+    }
 
-    success = await initialize_app(app)
-    if not success:
-        logger.error("Failed to initialize application during startup")
-        raise Exception("Application initialization failed")
-
-# Shutdown event
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Clean up resources when the application shuts down."""
-    try:
-        if hasattr(app.state, 'db'):
-            await app.state.db.close_pool()
-        logger.info("Successfully cleaned up resources on shutdown")
-    except Exception as e:
-        logger.error(f"Error cleaning up resources: {e}")
+@app.get("/health")
+async def health_check():
+    """Simple health check endpoint."""
+    return {
+        "status": "healthy",
+        "cache_manager_initialized": hasattr(app.state, "cache_manager"),
+        "database_initialized": hasattr(app.state, "db")
+    }
 
 if __name__ == "__main__":
-    host = os.environ.get('API_HOST', '0.0.0.0')
-    port = int(os.environ.get('API_PORT', 8000))
-    debug = os.environ.get('API_DEBUG', '').lower() in ('true', '1', 'yes')
+    import uvicorn
 
-    logger.info(f"Starting API server on {host}:{port} (debug={debug})")
-    uvicorn.run(app, host=host, port=port, log_level="debug" if debug else "info")
+    # Get configuration from environment
+    host = os.getenv("HOST", "0.0.0.0")
+    port = int(os.getenv("PORT", 8000))
+
+    logger.info(f"Starting server on {host}:{port}")
+
+    uvicorn.run(
+        "main:app",
+        host=host,
+        port=port,
+        reload=os.getenv("RELOAD", "false").lower() == "true",
+        log_level="info"
+    )
