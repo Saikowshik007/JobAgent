@@ -6,7 +6,6 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
 
 from core.database import initialize_app
 from routers import system, jobs, resume, simplify
@@ -56,6 +55,8 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan
 )
+
+# CORS is now configured in config.py - don't duplicate it here!
 
 # Include routers
 app.include_router(system.router, prefix="/api", tags=["System"])
