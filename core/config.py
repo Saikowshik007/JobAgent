@@ -4,6 +4,10 @@ Configuration management for the JobTrak API.
 import os
 import logging
 
+from starlette.middleware.cors import CORSMiddleware
+
+from main import app
+
 logger = logging.getLogger(__name__)
 
 def get_allowed_origins():
@@ -36,3 +40,46 @@ def get_allowed_origins():
 
     logger.info(f"CORS allowed origins: {origins}")
     return origins
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=get_allowed_origins(),  # NO WILDCARD with credentials
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH", "HEAD"],
+    allow_headers=[
+        # Standard headers
+        "Accept",
+        "Accept-Language",
+        "Content-Language",
+        "Content-Type",
+        "Authorization",
+        "Cache-Control",
+        "DNT",
+        "If-Modified-Since",
+        "Keep-Alive",
+        "Origin",
+        "User-Agent",
+        "X-Requested-With",
+        "Range",
+
+        # Custom API headers
+        "X-Api-Key",
+        "x-api-key",
+        "X-User-Id",
+        "x-user-id",
+        "x_user_id",
+
+        # Additional headers
+        "X-CSRF-Token",
+        "X-Forwarded-For",
+        "X-Forwarded-Proto",
+        "X-Real-IP",
+    ],
+    expose_headers=[
+        "Content-Range",
+        "X-Content-Range",
+        "X-Total-Count",
+        "Access-Control-Allow-Origin",
+        "Access-Control-Allow-Credentials"
+    ],
+    max_age=3600,  # Cache preflight requests for 1 hour
+)
