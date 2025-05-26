@@ -3,7 +3,7 @@ import concurrent
 import uuid
 import yaml
 from datetime import datetime
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from yaml import YAMLError
 
 import config
@@ -27,14 +27,30 @@ class ResumeGenerator:
         self.thread_pool = concurrent.futures.ThreadPoolExecutor(max_workers=4)
 
     async def generate_resume(self, job_id: str, template: str = "standard",
-                              customize: bool = True, resume_data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """Generate a tailored resume for a specific job."""
+                              customize: bool = True, resume_data: Optional[Dict[str, Any]] = None,
+                              handle_existing: str = "replace") -> Dict[str, Any]:
+        """
+        Generate a tailored resume for a specific job with orphaning prevention.
+
+        Args:
+            job_id: Job ID to generate resume for
+            template: Resume template to use
+            customize: Whether to customize resume for the job
+            resume_data: User's resume data
+            handle_existing: How to handle existing resumes - "replace", "keep_both", "error"
+        """
         # Get the job from database
         job_dict = await self.cache_manager.get_job(job_id, self.user_id)
         if not job_dict:
             raise ValueError(f"Job not found with ID: {job_id} for user: {self.user_id}")
 
-        # Generate a unique ID for the resume
+        # Check for existing resumes linked to this job
+        existing_resumes = await self.cache_manager.get_resumes_for_job(job_id, self.user_id)
+
+        if existing_resumes and handle_existing == "error":
+            raise ValueError(f"Job {job_id} already has {len(existing_resumes)} resume(s). Use handle_existing='replace' or 'keep_both' to proceed.")
+
+        # Generate a unique ID for the new resume
         resume_id = str(uuid.uuid4())
 
         # Set initial status in cache
@@ -44,7 +60,7 @@ class ResumeGenerator:
 
         # Start background generation (non-blocking)
         asyncio.create_task(self._generate_resume_background(
-            job_dict, resume_id, template, customize, resume_data
+            job_dict, resume_id, template, customize, resume_data, existing_resumes, handle_existing
         ))
 
         return {
@@ -54,12 +70,14 @@ class ResumeGenerator:
             "job_id": job_id,
             "user_id": self.user_id,
             "template": template,
+            "existing_resumes_count": len(existing_resumes),
+            "handle_existing": handle_existing,
             "estimated_completion_seconds": 60
         }
-
     async def _generate_resume_background(self, job_dict: dict, resume_id: str, template: str,
-                                          customize: bool, resume_data: Optional[Dict[str, Any]]):
-        """Background task to generate resume using thread pool."""
+                                          customize: bool, resume_data: Optional[Dict[str, Any]],
+                                          existing_resumes: List = None, handle_existing: str = "replace"):
+        """Background task to generate resume with orphaning prevention."""
         try:
             logger.info(f"Starting resume generation for job {job_dict.get('id')} for user {self.user_id}")
 
@@ -89,7 +107,30 @@ class ResumeGenerator:
             # Save completed resume to database
             await self.cache_manager.save_resume(resume, self.user_id)
 
-            # IMPORTANT FIX: Update the job with the resume_id
+            # Handle existing resumes BEFORE updating the job
+            if existing_resumes:
+                if handle_existing == "replace":
+                    logger.info(f"Replacing {len(existing_resumes)} existing resume(s) for job {job_dict.get('id')}")
+
+                    # Delete old resumes (but don't update the job yet since we're about to set the new one)
+                    for old_resume in existing_resumes:
+                        try:
+                            success = await self.cache_manager.delete_resume(old_resume.id, self.user_id)
+                            if success:
+                                logger.info(f"Deleted old resume {old_resume.id} for job {job_dict.get('id')}")
+                                # Remove from generation cache too
+                                await self.cache_manager.remove_resume_status(old_resume.id, self.user_id)
+                            else:
+                                logger.warning(f"Failed to delete old resume {old_resume.id}")
+                        except Exception as e:
+                            logger.error(f"Error deleting old resume {old_resume.id}: {e}")
+
+                elif handle_existing == "keep_both":
+                    logger.info(f"Keeping {len(existing_resumes)} existing resume(s) alongside new resume for job {job_dict.get('id')}")
+                    # Don't delete anything, just add the new resume
+                    # Note: Only the newest resume will be linked to the job
+
+            # Update the job with the NEW resume_id (this is always done, regardless of handle_existing)
             await self._update_job_with_resume_id(job_dict.get('id'), resume_id)
 
             # Update cache with completed status
@@ -113,7 +154,6 @@ class ResumeGenerator:
                 resume_id, self.user_id, ResumeGenerationStatus.FAILED,
                 error=str(e)
             )
-
     async def _update_job_with_resume_id(self, job_id: str, resume_id: str):
         """Update the job record with the generated resume ID."""
         try:
@@ -306,3 +346,89 @@ class ResumeGenerator:
         """Cleanup thread pool on deletion."""
         if hasattr(self, 'thread_pool'):
             self.thread_pool.shutdown(wait=False)
+
+    async def replace_job_resume(self, job_id: str, new_resume_id: str) -> Dict[str, Any]:
+        """Replace the current resume for a job with a new one, handling orphaning properly."""
+        try:
+            # Verify the job exists
+            job_dict = await self.cache_manager.get_job(job_id, self.user_id)
+            if not job_dict:
+                raise ValueError(f"Job not found with ID: {job_id} for user: {self.user_id}")
+
+            # Verify the new resume exists and belongs to this user
+            new_resume = await self.cache_manager.get_resume(new_resume_id, self.user_id)
+            if not new_resume:
+                raise ValueError(f"Resume not found with ID: {new_resume_id} for user: {self.user_id}")
+
+            # Get current resume(s) for this job
+            current_resumes = await self.cache_manager.get_resumes_for_job(job_id, self.user_id)
+
+            # Update the job to point to the new resume
+            success = await self.cache_manager.update_job_resume_id(job_id, self.user_id, new_resume_id)
+
+            if not success:
+                raise ValueError("Failed to update job with new resume ID")
+
+            # Update the new resume to point to this job (if it wasn't already)
+            if new_resume.job_id != job_id:
+                new_resume.job_id = job_id
+                await self.cache_manager.save_resume(new_resume, self.user_id)
+
+            # Optionally orphan the old resumes (don't delete them, just clear their job_id)
+            orphaned_resumes = []
+            for old_resume in current_resumes:
+                if old_resume.id != new_resume_id:  # Don't orphan the new resume we just linked
+                    old_resume.job_id = None  # Orphan it
+                    await self.cache_manager.save_resume(old_resume, self.user_id)
+                    orphaned_resumes.append(old_resume.id)
+
+            return {
+                "message": f"Successfully replaced resume for job {job_id}",
+                "job_id": job_id,
+                "new_resume_id": new_resume_id,
+                "orphaned_resumes": orphaned_resumes,
+                "user_id": self.user_id
+            }
+
+        except Exception as e:
+            logger.error(f"Error replacing job resume for job {job_id} for user {self.user_id}: {e}")
+            raise
+
+    async def cleanup_orphaned_resumes(self, user_id: Optional[str] = None) -> Dict[str, Any]:
+        """Find orphaned resumes (resumes not linked to any job)."""
+        target_user_id = user_id or self.user_id
+
+        try:
+            # Get all resumes for the user
+            all_resumes = await self.cache_manager.get_all_resumes(target_user_id)
+
+            # Find orphaned resumes (job_id is None or points to non-existent job)
+            orphaned_resumes = []
+            for resume in all_resumes:
+                if not resume.job_id:
+                    orphaned_resumes.append({
+                        "resume_id": resume.id,
+                        "reason": "no_job_id",
+                        "date_created": resume.date_created.isoformat() if resume.date_created else None
+                    })
+                else:
+                    # Check if the job still exists
+                    job = await self.cache_manager.get_job(resume.job_id, target_user_id)
+                    if not job:
+                        orphaned_resumes.append({
+                            "resume_id": resume.id,
+                            "reason": "job_not_found",
+                            "missing_job_id": resume.job_id,
+                            "date_created": resume.date_created.isoformat() if resume.date_created else None
+                        })
+
+            return {
+                "user_id": target_user_id,
+                "total_resumes": len(all_resumes),
+                "orphaned_count": len(orphaned_resumes),
+                "orphaned_resumes": orphaned_resumes
+            }
+
+        except Exception as e:
+            logger.error(f"Error finding orphaned resumes for user {target_user_id}: {e}")
+            raise

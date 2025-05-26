@@ -4,7 +4,7 @@ import uuid
 import requests
 from fastapi import FastAPI, HTTPException, Depends, Query, Header, UploadFile, Form, File
 from fastapi.middleware.cors import CORSMiddleware
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 import logging
 import os
 from datetime import datetime
@@ -979,7 +979,473 @@ async def store_simplify_tokens(
     except Exception as e:
         logger.error(f"Error storing tokens: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+# Add these new endpoints to your existing api_controller.py
+# Keep all existing endpoint names and signatures unchanged
 
+# Job Deletion API
+@app.delete("/api/jobs/{job_id}", tags=["Jobs"])
+async def delete_job(
+        job_id: str,
+        cascade_resumes: bool = Query(False, description="Also delete associated resumes"),
+        cache_manager: DBCacheManager = Depends(get_cache_manager),
+        user_id: str = Depends(get_user_id)
+):
+    """Delete a job and optionally its associated resumes."""
+    try:
+        # First check if job exists
+        job_dict = await cache_manager.get_job(job_id, user_id)
+        if not job_dict:
+            raise HTTPException(status_code=404, detail=f"Job not found with ID: {job_id} for user: {user_id}")
+
+        # Find associated resumes if cascade is requested
+        deleted_resumes = []
+        if cascade_resumes:
+            # Get resumes associated with this job
+            associated_resumes = await cache_manager.get_resumes_for_job(job_id, user_id)
+            for resume in associated_resumes:
+                success = await cache_manager.delete_resume(resume.id, user_id)
+                if success:
+                    deleted_resumes.append(resume.id)
+                    logger.info(f"Deleted associated resume {resume.id} for job {job_id}")
+
+        # Delete the job
+        success = await cache_manager.delete_job(job_id, user_id)
+
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to delete job")
+
+        return {
+            "message": "Job deleted successfully",
+            "job_id": job_id,
+            "user_id": user_id,
+            "deleted_resumes": deleted_resumes if cascade_resumes else [],
+            "cascade_resumes": cascade_resumes
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting job {job_id} for user {user_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Resume Deletion API
+@app.delete("/api/resume/{resume_id}", tags=["Resume"])
+async def delete_resume(
+        resume_id: str,
+        update_job: bool = Query(True, description="Update associated job to remove resume_id reference"),
+        cache_manager: DBCacheManager = Depends(get_cache_manager),
+        user_id: str = Depends(get_user_id)
+):
+    """Delete a resume and optionally update the associated job."""
+    try:
+        # First check if resume exists and get its details
+        resume = await cache_manager.get_resume(resume_id, user_id)
+        if not resume:
+            raise HTTPException(status_code=404, detail=f"Resume not found with ID: {resume_id} for user: {user_id}")
+
+        job_id = resume.job_id
+
+        # Delete the resume
+        success = await cache_manager.delete_resume(resume_id, user_id)
+
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to delete resume")
+
+        # Update associated job if requested and job exists
+        job_updated = False
+        if update_job and job_id:
+            try:
+                # Clear the resume_id from the job
+                job_update_success = await cache_manager.update_job_resume_id(job_id, user_id, None)
+                if job_update_success:
+                    job_updated = True
+                    logger.info(f"Cleared resume_id from job {job_id}")
+            except Exception as e:
+                logger.warning(f"Failed to update job {job_id} after resume deletion: {e}")
+
+        # Also remove from resume generation cache
+        await cache_manager.remove_resume_status(resume_id, user_id)
+
+        return {
+            "message": "Resume deleted successfully",
+            "resume_id": resume_id,
+            "user_id": user_id,
+            "associated_job_id": job_id,
+            "job_updated": job_updated
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting resume {resume_id} for user {user_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Get resumes for a specific job
+@app.get("/api/jobs/{job_id}/resumes", tags=["Jobs", "Resume"])
+async def get_job_resumes(
+        job_id: str,
+        cache_manager: DBCacheManager = Depends(get_cache_manager),
+        user_id: str = Depends(get_user_id)
+):
+    """Get all resumes associated with a specific job."""
+    try:
+        # Check if job exists
+        job_dict = await cache_manager.get_job(job_id, user_id)
+        if not job_dict:
+            raise HTTPException(status_code=404, detail=f"Job not found with ID: {job_id} for user: {user_id}")
+
+        # Get resumes for this job
+        resumes = await cache_manager.get_resumes_for_job(job_id, user_id)
+
+        # Convert to dict format
+        resumes_dict = [resume.to_dict() for resume in resumes]
+
+        return {
+            "job_id": job_id,
+            "user_id": user_id,
+            "resume_count": len(resumes_dict),
+            "resumes": resumes_dict
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting resumes for job {job_id} for user {user_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Get all resumes for a user
+@app.get("/api/resumes", tags=["Resume"])
+async def get_user_resumes(
+        job_id: Optional[str] = Query(None, description="Filter by job ID"),
+        limit: int = Query(100, ge=1, le=1000),
+        offset: int = Query(0, ge=0),
+        cache_manager: DBCacheManager = Depends(get_cache_manager),
+        user_id: str = Depends(get_user_id)
+):
+    """Get all resumes for a user with optional filtering."""
+    try:
+        resumes = await cache_manager.get_all_resumes(user_id, job_id, limit, offset)
+
+        # Convert to dict format
+        resumes_dict = [resume.to_dict() for resume in resumes]
+
+        return {
+            "user_id": user_id,
+            "job_id_filter": job_id,
+            "count": len(resumes_dict),
+            "limit": limit,
+            "offset": offset,
+            "resumes": resumes_dict
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting resumes for user {user_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Enhanced resume generation (add handle_existing parameter to existing endpoint)
+@app.post("/api/resume/generate-safe", tags=["Resume"])
+async def generate_resume_safe(
+        request: GenerateResumeRequest,
+        handle_existing: str = Query("replace", regex="^(replace|keep_both|error)$",
+                                     description="How to handle existing resumes: replace, keep_both, or error"),
+        cache_manager: DBCacheManager = Depends(get_cache_manager),
+        user_id: str = Depends(get_user_id),
+        api_key: str = Depends(get_user_key)
+):
+    """Generate a tailored resume with orphaning prevention."""
+    try:
+        resume_generator = ResumeGenerator(cache_manager, user_id, api_key)
+        resume_info = await resume_generator.generate_resume(
+            job_id=request.job_id,
+            template=request.template or "standard",
+            customize=request.customize,
+            resume_data=request.resume_data,
+            handle_existing=handle_existing
+        )
+
+        return resume_info
+
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error generating safe resume for job {request.job_id} for user {user_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Replace job's current resume with a different one
+@app.put("/api/jobs/{job_id}/resume/{resume_id}", tags=["Jobs", "Resume"])
+async def replace_job_resume(
+        job_id: str,
+        resume_id: str,
+        cache_manager: DBCacheManager = Depends(get_cache_manager),
+        user_id: str = Depends(get_user_id)
+):
+    """Replace the current resume for a job with a different resume."""
+    try:
+        resume_generator = ResumeGenerator(cache_manager, user_id, "")
+        result = await resume_generator.replace_job_resume(job_id, resume_id)
+        return result
+
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error replacing resume for job {job_id} for user {user_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Clear job's resume reference
+@app.delete("/api/jobs/{job_id}/resume", tags=["Jobs", "Resume"])
+async def clear_job_resume(
+        job_id: str,
+        cache_manager: DBCacheManager = Depends(get_cache_manager),
+        user_id: str = Depends(get_user_id)
+):
+    """Clear the resume reference from a job (orphan the current resume)."""
+    try:
+        # Check if job exists
+        job_dict = await cache_manager.get_job(job_id, user_id)
+        if not job_dict:
+            raise HTTPException(status_code=404, detail=f"Job not found with ID: {job_id} for user: {user_id}")
+
+        current_resume_id = job_dict.get('resume_id')
+
+        # Clear the resume_id from the job
+        success = await cache_manager.update_job_resume_id(job_id, user_id, None)
+
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to clear job resume reference")
+
+        # If there was a resume linked, orphan it (clear its job_id)
+        if current_resume_id:
+            try:
+                resume = await cache_manager.get_resume(current_resume_id, user_id)
+                if resume:
+                    resume.job_id = None  # Orphan the resume
+                    await cache_manager.save_resume(resume, user_id)
+                    logger.info(f"Orphaned resume {current_resume_id} from job {job_id}")
+            except Exception as e:
+                logger.warning(f"Failed to orphan resume {current_resume_id}: {e}")
+
+        return {
+            "message": "Job resume reference cleared successfully",
+            "job_id": job_id,
+            "orphaned_resume_id": current_resume_id,
+            "user_id": user_id
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error clearing job resume for job {job_id} for user {user_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Find orphaned resumes
+@app.get("/api/resumes/orphaned", tags=["Resume"])
+async def get_orphaned_resumes(
+        cache_manager: DBCacheManager = Depends(get_cache_manager),
+        user_id: str = Depends(get_user_id)
+):
+    """Find all orphaned resumes (resumes not linked to any job)."""
+    try:
+        resume_generator = ResumeGenerator(cache_manager, user_id, "")
+        result = await resume_generator.cleanup_orphaned_resumes(user_id)
+        return result
+
+    except Exception as e:
+        logger.error(f"Error finding orphaned resumes for user {user_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Batch delete orphaned resumes
+@app.delete("/api/resumes/orphaned", tags=["Resume"])
+async def delete_orphaned_resumes(
+        confirm: bool = Query(False, description="Must be true to actually delete"),
+        older_than_days: int = Query(7, ge=0, description="Only delete orphaned resumes older than this many days"),
+        cache_manager: DBCacheManager = Depends(get_cache_manager),
+        user_id: str = Depends(get_user_id)
+):
+    """Delete all orphaned resumes older than specified days."""
+    try:
+        if not confirm:
+            raise HTTPException(
+                status_code=400,
+                detail="Must set confirm=true to actually delete orphaned resumes"
+            )
+
+        resume_generator = ResumeGenerator(cache_manager, user_id, "")
+
+        # First, find orphaned resumes
+        orphaned_info = await resume_generator.cleanup_orphaned_resumes(user_id)
+
+        # Filter by age and delete
+        deleted_resumes = []
+        cutoff_date = datetime.now() - timedelta(days=older_than_days)
+
+        for orphan in orphaned_info["orphaned_resumes"]:
+            try:
+                # Check age if date_created is available
+                if orphan.get("date_created"):
+                    created_date = datetime.fromisoformat(orphan["date_created"])
+                    if created_date > cutoff_date:
+                        continue  # Skip, too recent
+
+                # Delete the orphaned resume
+                success = await cache_manager.delete_resume(orphan["resume_id"], user_id)
+                if success:
+                    deleted_resumes.append(orphan["resume_id"])
+                    # Also remove from generation cache
+                    await cache_manager.remove_resume_status(orphan["resume_id"], user_id)
+
+            except Exception as e:
+                logger.error(f"Error deleting orphaned resume {orphan['resume_id']}: {e}")
+
+        return {
+            "message": f"Deleted {len(deleted_resumes)} orphaned resumes",
+            "deleted_resume_ids": deleted_resumes,
+            "total_orphaned_found": len(orphaned_info["orphaned_resumes"]),
+            "older_than_days": older_than_days,
+            "user_id": user_id
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting orphaned resumes for user {user_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Batch operations for jobs
+@app.delete("/api/jobs/batch", tags=["Jobs"])
+async def delete_jobs_batch(
+        job_ids: List[str],
+        cascade_resumes: bool = Query(False, description="Also delete associated resumes"),
+        cache_manager: DBCacheManager = Depends(get_cache_manager),
+        user_id: str = Depends(get_user_id)
+):
+    """Delete multiple jobs in a batch operation."""
+    try:
+        if not job_ids:
+            raise HTTPException(status_code=400, detail="No job IDs provided")
+
+        if len(job_ids) > 100:  # Reasonable limit
+            raise HTTPException(status_code=400, detail="Too many jobs (max 100 per batch)")
+
+        deleted_jobs = []
+        deleted_resumes = []
+        failed_jobs = []
+
+        for job_id in job_ids:
+            try:
+                # Check if job exists
+                job_dict = await cache_manager.get_job(job_id, user_id)
+                if not job_dict:
+                    failed_jobs.append({"job_id": job_id, "reason": "not_found"})
+                    continue
+
+                # Handle cascading resume deletion
+                if cascade_resumes:
+                    associated_resumes = await cache_manager.get_resumes_for_job(job_id, user_id)
+                    for resume in associated_resumes:
+                        success = await cache_manager.delete_resume(resume.id, user_id)
+                        if success:
+                            deleted_resumes.append(resume.id)
+
+                # Delete the job
+                success = await cache_manager.delete_job(job_id, user_id)
+                if success:
+                    deleted_jobs.append(job_id)
+                else:
+                    failed_jobs.append({"job_id": job_id, "reason": "delete_failed"})
+
+            except Exception as e:
+                logger.error(f"Error deleting job {job_id}: {e}")
+                failed_jobs.append({"job_id": job_id, "reason": str(e)})
+
+        return {
+            "message": f"Batch delete completed: {len(deleted_jobs)} jobs deleted",
+            "deleted_jobs": deleted_jobs,
+            "deleted_resumes": deleted_resumes if cascade_resumes else [],
+            "failed_jobs": failed_jobs,
+            "cascade_resumes": cascade_resumes,
+            "user_id": user_id
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in batch job deletion for user {user_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Job statistics with resume information
+@app.get("/api/jobs/stats-detailed", tags=["Jobs"])
+async def get_detailed_job_stats(
+        cache_manager: DBCacheManager = Depends(get_cache_manager),
+        user_id: str = Depends(get_user_id)
+):
+    """Get detailed job statistics including resume information."""
+    try:
+        # Get basic job stats
+        job_stats = await cache_manager.get_job_stats(user_id)
+
+        # Get all jobs to analyze resume relationships
+        all_jobs = await cache_manager.get_all_jobs(user_id)
+
+        # Analyze resume linkage
+        jobs_with_resumes = 0
+        jobs_without_resumes = 0
+        total_job_resume_links = 0
+
+        for job in all_jobs:
+            if job.resume_id:
+                jobs_with_resumes += 1
+                total_job_resume_links += 1
+            else:
+                jobs_without_resumes += 1
+
+        # Get all resumes
+        all_resumes = await cache_manager.get_all_resumes(user_id)
+
+        # Analyze orphaned resumes
+        orphaned_resumes = 0
+        linked_resumes = 0
+
+        for resume in all_resumes:
+            if not resume.job_id:
+                orphaned_resumes += 1
+            else:
+                # Verify the job still exists
+                job = await cache_manager.get_job(resume.job_id, user_id)
+                if job:
+                    linked_resumes += 1
+                else:
+                    orphaned_resumes += 1  # Job was deleted but resume still references it
+
+        return {
+            "user_id": user_id,
+            "job_stats": job_stats,
+            "resume_stats": {
+                "total_resumes": len(all_resumes),
+                "linked_resumes": linked_resumes,
+                "orphaned_resumes": orphaned_resumes,
+                "jobs_with_resumes": jobs_with_resumes,
+                "jobs_without_resumes": jobs_without_resumes,
+                "total_job_resume_links": total_job_resume_links
+            },
+            "health_ratios": {
+                "jobs_with_resumes_ratio": round(jobs_with_resumes / len(all_jobs) * 100, 2) if all_jobs else 0,
+                "orphaned_resume_ratio": round(orphaned_resumes / len(all_resumes) * 100, 2) if all_resumes else 0
+            }
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting detailed job stats for user {user_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 if __name__ == "__main__":
     # Run the FastAPI app with Uvicorn
     host = os.environ.get('API_HOST', '0.0.0.0')

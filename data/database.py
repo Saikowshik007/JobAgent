@@ -634,3 +634,90 @@ class Database:
                 }
         except Exception as e:
             return {"status": "unhealthy", "error": str(e)}
+
+        # Add these methods to your existing Database class in database.py
+# Keep all existing method names and signatures unchanged
+
+    async def delete_job(self, job_id: str, user_id: str) -> bool:
+        """Delete a job from the database."""
+        try:
+            async with self.get_connection() as conn:
+                result = await conn.execute(
+                    "DELETE FROM jobs WHERE id = $1 AND user_id = $2",
+                    job_id, user_id
+                )
+                # Check if any rows were affected
+                return result != "DELETE 0"
+        except Exception as e:
+            logger.error(f"Error deleting job {job_id} for user {user_id}: {e}")
+            return False
+
+    async def delete_resume(self, resume_id: str, user_id: str) -> bool:
+        """Delete a resume from the database."""
+        try:
+            async with self.get_connection() as conn:
+                result = await conn.execute(
+                    "DELETE FROM resumes WHERE id = $1 AND user_id = $2",
+                    resume_id, user_id
+                )
+                # Check if any rows were affected
+                return result != "DELETE 0"
+        except Exception as e:
+            logger.error(f"Error deleting resume {resume_id} for user {user_id}: {e}")
+            return False
+
+    async def get_resumes_for_job(self, job_id: str, user_id: str) -> List[Resume]:
+        """Get all resumes associated with a specific job."""
+        try:
+            async with self.get_connection() as conn:
+                rows = await conn.fetch(
+                    "SELECT * FROM resumes WHERE job_id = $1 AND user_id = $2 ORDER BY date_created DESC",
+                    job_id, user_id
+                )
+                return [self._row_to_resume(row) for row in rows]
+        except Exception as e:
+            logger.error(f"Error getting resumes for job {job_id} for user {user_id}: {e}")
+            return []
+
+    async def get_all_resumes(self, user_id: str, job_id: Optional[str] = None,
+                              limit: int = None, offset: int = 0) -> List[Resume]:
+        """Get all resumes for a user with optional filtering."""
+        try:
+            async with self.get_connection() as conn:
+                if job_id:
+                    query = '''
+                    SELECT * FROM resumes 
+                    WHERE user_id = $1 AND job_id = $2 
+                    ORDER BY date_created DESC
+                    '''
+                    params = [user_id, job_id]
+                else:
+                    query = '''
+                    SELECT * FROM resumes 
+                    WHERE user_id = $1 
+                    ORDER BY date_created DESC
+                    '''
+                    params = [user_id]
+
+                if limit:
+                    query += f" LIMIT ${len(params) + 1} OFFSET ${len(params) + 2}"
+                    params.extend([limit, offset])
+
+                rows = await conn.fetch(query, *params)
+                return [self._row_to_resume(row) for row in rows]
+        except Exception as e:
+            logger.error(f"Error getting all resumes for user {user_id}: {e}")
+            return []
+
+    async def update_job_resume_id(self, job_id: str, user_id: str, resume_id: Optional[str]) -> bool:
+        """Update job's resume_id field (can be None to clear)."""
+        try:
+            async with self.get_connection() as conn:
+                result = await conn.execute('''
+                    UPDATE jobs SET resume_id = $1, updated_at = NOW()
+                    WHERE id = $2 AND user_id = $3
+                ''', resume_id, job_id, user_id)
+                return result != "UPDATE 0"
+        except Exception as e:
+            logger.error(f"Error updating job resume_id for job {job_id} for user {user_id}: {e}")
+            return False

@@ -31,4 +31,4 @@ ENV PYTHONUNBUFFERED=1 \
 # Expose the port
 EXPOSE 8000 5678
 
-CMD ["python", "-m", "api_controller.api_controller"]
+CMD ["python", "-m", "main"]
