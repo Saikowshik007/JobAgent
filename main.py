@@ -1,3 +1,5 @@
+# 1. FIRST - Update your main.py (complete rewrite to ensure proper order)
+
 """
 Main FastAPI application with proper initialization.
 """
@@ -6,6 +8,7 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from starlette.middleware.cors import CORSMiddleware  # Use Starlette directly
 
 from core.database import initialize_app
 from routers import system, jobs, resume, simplify
@@ -16,6 +19,40 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+def get_allowed_origins():
+    """Get the list of allowed CORS origins."""
+    # Base origins that are always allowed
+    origins = [
+        # Production origins - EXACT MATCHES
+        "https://job-agent-ui.vercel.app",
+        "https://jobtrackai.duckdns.org",
+        "http://jobtrackai.duckdns.org",
+        "https://simplify.jobs",
+
+        # Development origins
+        "http://localhost:3000",
+        "https://localhost:3000",
+        "http://127.0.0.1:3000",
+        "https://127.0.0.1:3000",
+        "http://localhost:3001",
+        "https://localhost:3001",
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+    ]
+
+    # Add debug origins if in debug mode
+    if os.environ.get('API_DEBUG') or os.environ.get('DEBUG'):
+        debug_origins = [
+            "http://localhost:3002",
+            "http://localhost:5000",
+            "http://192.168.1.100:3000",
+            "http://192.168.1.101:3000",
+        ]
+        origins.extend(debug_origins)
+
+    logger.info(f"CORS allowed origins: {origins}")
+    return origins
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -56,9 +93,50 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# CORS is now configured in config.py - don't duplicate it here!
+# Configure CORS IMMEDIATELY after app creation - this is critical!
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=get_allowed_origins(),  # Specific origins, not ["*"]
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH", "HEAD"],
+    allow_headers=[
+        # Standard headers
+        "Accept",
+        "Accept-Language",
+        "Content-Language",
+        "Content-Type",
+        "Authorization",
+        "Cache-Control",
+        "DNT",
+        "If-Modified-Since",
+        "Keep-Alive",
+        "Origin",
+        "User-Agent",
+        "X-Requested-With",
+        "Range",
+        # Custom API headers
+        "X-Api-Key",
+        "x-api-key",
+        "X-User-Id",
+        "x-user-id",
+        "x_user_id",
+        # Additional headers
+        "X-CSRF-Token",
+        "X-Forwarded-For",
+        "X-Forwarded-Proto",
+        "X-Real-IP",
+    ],
+    expose_headers=[
+        "Content-Range",
+        "X-Content-Range",
+        "X-Total-Count",
+        "Access-Control-Allow-Origin",
+        "Access-Control-Allow-Credentials"
+    ],
+    max_age=3600,  # Cache preflight requests for 1 hour
+)
 
-# Include routers
+# Include routers AFTER CORS middleware
 app.include_router(system.router, prefix="/api", tags=["System"])
 app.include_router(jobs.router, prefix="/api/jobs", tags=["Jobs"])
 app.include_router(resume.router, prefix="/api/resume", tags=["Resume"])
@@ -80,6 +158,16 @@ async def health_check():
         "status": "healthy",
         "cache_manager_initialized": hasattr(app.state, "cache_manager"),
         "database_initialized": hasattr(app.state, "db")
+    }
+
+# Add a specific CORS debug endpoint
+@app.get("/api/cors-test")
+async def cors_test():
+    """Test endpoint specifically for CORS debugging."""
+    return {
+        "message": "CORS test successful",
+        "timestamp": "2025-05-26",
+        "origin_allowed": True
     }
 
 if __name__ == "__main__":
