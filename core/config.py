@@ -14,9 +14,13 @@ def get_allowed_origins():
     """Get the list of allowed CORS origins."""
     # Base origins that are always allowed
     origins = [
+        # Production origins
         "https://job-agent-ui.vercel.app",
         "https://jobtrackai.duckdns.org",
         "http://jobtrackai.duckdns.org",
+        "https://simplify.jobs",
+
+        # Development origins
         "http://localhost:3000",
         "https://localhost:3000",
         "http://127.0.0.1:3000",
@@ -25,11 +29,10 @@ def get_allowed_origins():
         "https://localhost:3001",
         "http://localhost:8000",
         "http://127.0.0.1:8000",
-        "https://simplify.jobs"
     ]
 
     # Add debug origins if in debug mode
-    if os.environ.get('API_DEBUG'):
+    if os.environ.get('API_DEBUG') or os.environ.get('DEBUG'):
         debug_origins = [
             "http://localhost:3002",
             "http://localhost:5000",
@@ -40,6 +43,8 @@ def get_allowed_origins():
 
     logger.info(f"CORS allowed origins: {origins}")
     return origins
+
+# Add CORS middleware to the app
 app.add_middleware(
     CORSMiddleware,
     allow_origins=get_allowed_origins(),  # NO WILDCARD with credentials
