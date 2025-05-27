@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 class DBCacheManager:
     """
     Unified cache manager that handles all caching operations including jobs, search results, and resumes.
-    This manager provides a single interface for all database and cache interactions.
+    This manager provides a single interface for all database and cache interactions with consistent caching patterns.
     """
 
     # Thread local storage to ensure thread safety
@@ -36,6 +36,10 @@ class DBCacheManager:
             self.resume_cache = ResumeCache()
         else:
             self.resume_cache = resume_cache
+
+        # Add in-memory resume storage for consistency with job caching
+        self._resume_memory_cache = {}
+        self._resume_cache_lock = threading.RLock()
 
     # Job Management Methods
     async def get_cached_search_results(self, keywords: str, location: str, filters: Dict[str, Any], user_id: str) -> List[Dict[str, Any]]:
@@ -294,6 +298,7 @@ class DBCacheManager:
                 # Don't mark as failure if cache update fails but DB succeeded
 
         return success
+
     async def get_all_jobs(self, user_id: str, status=None, limit: int = None, offset: int = 0) -> List:
         """
         Get all jobs for a user, optionally filtered by status.
@@ -333,10 +338,33 @@ class DBCacheManager:
                 return {'total': 0}
         return {'total': 0}
 
-    # Resume Management Methods
+    async def delete_job(self, job_id: str, user_id: str) -> bool:
+        """Delete a job from both database and cache."""
+        success = True
+
+        # Delete from database first
+        if self.db:
+            try:
+                success = await self.db.delete_job(job_id, user_id)
+            except Exception as e:
+                logger.error(f"Error deleting job from database for user {user_id}: {e}")
+                success = False
+
+        # Remove from cache
+        if self.job_cache and success:
+            try:
+                self.job_cache.remove_job(job_id, user_id)
+            except Exception as e:
+                logger.error(f"Error removing job from cache for user {user_id}: {e}")
+                # Don't mark as failure if cache removal fails but DB succeeded
+
+        return success
+
+    # Resume Management Methods - FIXED FOR CONSISTENCY
     async def save_resume(self, resume, user_id: str) -> bool:
         """
-        Save a resume to the database.
+        Save a resume to both database and in-memory cache (consistent with job caching).
+        This method handles both new resumes and updates with proper cache invalidation.
 
         Args:
             resume: Resume object to save
@@ -345,17 +373,35 @@ class DBCacheManager:
         Returns:
             bool: True if successful, False otherwise
         """
+        success = True
+
+        # Save to database
         if self.db:
             try:
-                return await self.db.save_resume(resume, user_id)
+                success = await self.db.save_resume(resume, user_id)
             except Exception as e:
                 logger.error(f"Error saving resume to database for user {user_id}: {e}")
-                return False
-        return False
+                success = False
+
+        # Update in-memory cache for consistency with job caching
+        if success:
+            try:
+                # For updates, we need to invalidate first to ensure fresh data
+                self._remove_resume_from_cache(resume.id, user_id)
+
+                # Add/update resume in cache
+                self._add_resume_to_cache(resume, user_id)
+
+                logger.info(f"Updated resume {resume.id} in cache for user {user_id}")
+            except Exception as e:
+                logger.error(f"Error adding resume to cache for user {user_id}: {e}")
+                # Don't mark as failure if cache update fails but DB succeeded
+
+        return success
 
     async def get_resume(self, resume_id: str, user_id: str):
         """
-        Get a resume by ID.
+        Get a resume by ID from cache or database (consistent with job retrieval).
 
         Args:
             resume_id: ID of the resume to retrieve
@@ -364,13 +410,138 @@ class DBCacheManager:
         Returns:
             Resume object if found, None otherwise
         """
+        # Try in-memory cache first (consistent with job caching)
+        cached_resume = self._get_resume_from_cache(resume_id, user_id)
+        if cached_resume:
+            return cached_resume
+
+        # If not in cache, try database
         if self.db:
             try:
-                return await self.db.get_resume(resume_id, user_id)
+                resume = await self.db.get_resume(resume_id, user_id)
+                if resume:
+                    # Update cache with this resume (consistent with job caching)
+                    self._add_resume_to_cache(resume, user_id)
+                    return resume
             except Exception as e:
                 logger.error(f"Error getting resume from database for user {user_id}: {e}")
                 return None
         return None
+
+    async def update_resume(self, resume, user_id: str) -> bool:
+        """
+        Update a resume in both database and cache with proper cache invalidation.
+
+        Args:
+            resume: Updated Resume object
+            user_id: ID of the user who owns the resume
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        success = True
+
+        # Update in database first
+        if self.db:
+            try:
+                success = await self.db.save_resume(resume, user_id)  # Using save_resume as it handles upserts
+            except Exception as e:
+                logger.error(f"Error updating resume in database for user {user_id}: {e}")
+                success = False
+
+        # Invalidate and update cache
+        if success:
+            try:
+                # Remove old cached version to ensure fresh data
+                self._remove_resume_from_cache(resume.id, user_id)
+
+                # Add updated resume to cache
+                self._add_resume_to_cache(resume, user_id)
+
+                logger.info(f"Updated resume {resume.id} in cache for user {user_id}")
+            except Exception as e:
+                logger.error(f"Error updating resume in cache for user {user_id}: {e}")
+                # Don't mark as failure if cache update fails but DB succeeded
+
+        return success
+
+    async def delete_resume(self, resume_id: str, user_id: str) -> bool:
+        """Delete a resume from both database and cache (consistent with job deletion)."""
+        success = True
+
+        # Delete from database first
+        if self.db:
+            try:
+                success = await self.db.delete_resume(resume_id, user_id)
+            except Exception as e:
+                logger.error(f"Error deleting resume from database for user {user_id}: {e}")
+                success = False
+
+        # Remove from cache (consistent with job deletion)
+        if success:
+            try:
+                self._remove_resume_from_cache(resume_id, user_id)
+                logger.info(f"Removed resume {resume_id} from cache for user {user_id}")
+            except Exception as e:
+                logger.error(f"Error removing resume from cache for user {user_id}: {e}")
+                # Don't mark as failure if cache removal fails but DB succeeded
+
+        return success
+
+    async def get_resumes_for_job(self, job_id: str, user_id: str):
+        """Get all resumes associated with a specific job."""
+        if self.db:
+            try:
+                resumes = await self.db.get_resumes_for_job(job_id, user_id)
+                # Cache the retrieved resumes for future use
+                for resume in resumes:
+                    self._add_resume_to_cache(resume, user_id)
+                return resumes
+            except Exception as e:
+                logger.error(f"Error getting resumes for job from database for user {user_id}: {e}")
+                return []
+        return []
+
+    async def get_all_resumes(self, user_id: str, job_id: Optional[str] = None,
+                              limit: int = None, offset: int = 0):
+        """Get all resumes for a user with optional filtering."""
+        if self.db:
+            try:
+                resumes = await self.db.get_all_resumes(user_id, job_id, limit, offset)
+                # Cache the retrieved resumes for future use
+                for resume in resumes:
+                    self._add_resume_to_cache(resume, user_id)
+                return resumes
+            except Exception as e:
+                logger.error(f"Error getting all resumes from database for user {user_id}: {e}")
+                return []
+        return []
+
+    async def update_job_resume_id(self, job_id: str, user_id: str, resume_id: Optional[str]) -> bool:
+        """Update job's resume_id field in both cache and database (can be None to clear)."""
+        success = True
+
+        # Update in database
+        if self.db:
+            try:
+                success = await self.db.update_job_resume_id(job_id, user_id, resume_id)
+            except Exception as e:
+                logger.error(f"Error updating job resume_id in database for user {user_id}: {e}")
+                success = False
+
+        # Update in cache - get job, update resume_id, and re-add to cache
+        if self.job_cache and success:
+            try:
+                job = self.job_cache.get_job(job_id, user_id)
+                if job:
+                    job.resume_id = resume_id
+                    self.job_cache.add_job(job, user_id)
+                    logger.info(f"Updated job {job_id} with resume_id {resume_id} in cache")
+            except Exception as e:
+                logger.error(f"Error updating job resume_id in cache for user {user_id}: {e}")
+                # Don't mark as failure if cache update fails but DB succeeded
+
+        return success
 
     # Resume Generation Status Management (now integrated)
     async def get_resume_status(self, resume_id: str, user_id: str) -> Optional[Dict]:
@@ -410,6 +581,9 @@ class DBCacheManager:
             # Clear resume cache
             await self.resume_cache.clear_user_cache(user_id)
 
+            # Clear in-memory resume cache
+            self._clear_user_resume_cache(user_id)
+
             logger.info(f"Cleared all cache data for user {user_id}")
         except Exception as e:
             logger.error(f"Error clearing cache for user {user_id}: {e}")
@@ -418,6 +592,7 @@ class DBCacheManager:
         """Clean up expired cache entries."""
         try:
             await self.resume_cache.cleanup_expired()
+            self._cleanup_expired_resume_cache()
             logger.info("Cleaned up expired cache entries")
         except Exception as e:
             logger.error(f"Error cleaning up expired cache: {e}")
@@ -427,6 +602,7 @@ class DBCacheManager:
         stats = {
             "timestamp": "now",
             "resume_cache": self.resume_cache.get_stats() if self.resume_cache else {},
+            "resume_memory_cache": self._get_resume_cache_stats(),
         }
 
         if self.job_cache:
@@ -440,7 +616,8 @@ class DBCacheManager:
         health_info = {
             "database": "unavailable",
             "job_cache": "available" if self.job_cache else "unavailable",
-            "resume_cache": "available" if self.resume_cache else "unavailable"
+            "resume_cache": "available" if self.resume_cache else "unavailable",
+            "resume_memory_cache": "available"
         }
 
         if self.db:
@@ -479,82 +656,97 @@ class DBCacheManager:
         # Hash for consistent ID
         return hashlib.md5(key_str.encode()).hexdigest()
 
-    async def delete_job(self, job_id: str, user_id: str) -> bool:
-        """Delete a job from both database and cache."""
-        success = True
+    # NEW: In-memory Resume Cache Methods for Consistency
+    def _add_resume_to_cache(self, resume, user_id: str):
+        """Add resume to in-memory cache with proper versioning."""
+        import time
+        with self._resume_cache_lock:
+            cache_key = f"{user_id}:{resume.id}"
+            self._resume_memory_cache[cache_key] = {
+                "resume": resume,
+                "cached_at": time.time(),
+                "user_id": user_id,
+                "version": getattr(resume, 'updated_at', time.time())  # Track version for consistency
+            }
 
-        # Delete from database first
-        if self.db:
-            try:
-                success = await self.db.delete_job(job_id, user_id)
-            except Exception as e:
-                logger.error(f"Error deleting job from database for user {user_id}: {e}")
-                success = False
+    def _get_resume_from_cache(self, resume_id: str, user_id: str):
+        """Get resume from in-memory cache with staleness check."""
+        import time
+        with self._resume_cache_lock:
+            cache_key = f"{user_id}:{resume_id}"
+            entry = self._resume_memory_cache.get(cache_key)
+            if entry:
+                # Simple TTL check (1 hour)
+                if time.time() - entry["cached_at"] < 3600:
+                    return entry["resume"]
+                else:
+                    # Remove expired entry
+                    del self._resume_memory_cache[cache_key]
+                    logger.debug(f"Removed expired resume {resume_id} from cache for user {user_id}")
+            return None
 
-        # Remove from cache
-        if self.job_cache and success:
-            try:
-                self.job_cache.remove_job(job_id, user_id)
-            except Exception as e:
-                logger.error(f"Error removing job from cache for user {user_id}: {e}")
-                # Don't mark as failure if cache removal fails but DB succeeded
+    def _remove_resume_from_cache(self, resume_id: str, user_id: str):
+        """Remove resume from in-memory cache."""
+        with self._resume_cache_lock:
+            cache_key = f"{user_id}:{resume_id}"
+            if cache_key in self._resume_memory_cache:
+                del self._resume_memory_cache[cache_key]
+                logger.debug(f"Invalidated cache for resume {resume_id} for user {user_id}")
 
-        return success
+    def _invalidate_related_caches(self, resume_id: str, user_id: str):
+        """
+        Invalidate caches that might be affected by resume changes.
+        This includes job caches that reference this resume.
+        """
+        try:
+            # If this resume is associated with jobs, we might need to invalidate job cache entries
+            # that reference this resume_id
+            if self.job_cache:
+                # Get user jobs and check for resume references
+                user_jobs = self.job_cache.get_user_jobs(user_id)
+                for job in user_jobs:
+                    if hasattr(job, 'resume_id') and job.resume_id == resume_id:
+                        # Re-add job to cache to ensure consistency
+                        self.job_cache.add_job(job, user_id)
 
-    async def delete_resume(self, resume_id: str, user_id: str) -> bool:
-        """Delete a resume from the database."""
-        if self.db:
-            try:
-                return await self.db.delete_resume(resume_id, user_id)
-            except Exception as e:
-                logger.error(f"Error deleting resume from database for user {user_id}: {e}")
-                return False
-        return False
+            logger.debug(f"Invalidated related caches for resume {resume_id} for user {user_id}")
+        except Exception as e:
+            logger.warning(f"Error invalidating related caches for resume {resume_id}: {e}")
 
-    async def get_resumes_for_job(self, job_id: str, user_id: str):
-        """Get all resumes associated with a specific job."""
-        if self.db:
-            try:
-                return await self.db.get_resumes_for_job(job_id, user_id)
-            except Exception as e:
-                logger.error(f"Error getting resumes for job from database for user {user_id}: {e}")
-                return []
-        return []
+    def _clear_user_resume_cache(self, user_id: str):
+        """Clear all resume cache entries for a user."""
+        with self._resume_cache_lock:
+            keys_to_remove = [k for k in self._resume_memory_cache.keys() if k.startswith(f"{user_id}:")]
+            for key in keys_to_remove:
+                del self._resume_memory_cache[key]
+            if keys_to_remove:
+                logger.info(f"Cleared {len(keys_to_remove)} resume cache entries for user {user_id}")
 
-    async def get_all_resumes(self, user_id: str, job_id: Optional[str] = None,
-                              limit: int = None, offset: int = 0):
-        """Get all resumes for a user with optional filtering."""
-        if self.db:
-            try:
-                return await self.db.get_all_resumes(user_id, job_id, limit, offset)
-            except Exception as e:
-                logger.error(f"Error getting all resumes from database for user {user_id}: {e}")
-                return []
-        return []
+    def _cleanup_expired_resume_cache(self):
+        """Clean up expired resume cache entries."""
+        import time
+        with self._resume_cache_lock:
+            now = time.time()
+            expired_keys = [
+                k for k, v in self._resume_memory_cache.items()
+                if now - v["cached_at"] > 3600  # 1 hour TTL
+            ]
+            for key in expired_keys:
+                del self._resume_memory_cache[key]
+            if expired_keys:
+                logger.debug(f"Cleaned up {len(expired_keys)} expired resume cache entries")
 
-    # Enhanced version of existing update_job_resume_id method (same name)
-    async def update_job_resume_id(self, job_id: str, user_id: str, resume_id: Optional[str]) -> bool:
-        """Update job's resume_id field in both cache and database (can be None to clear)."""
-        success = True
+    def _get_resume_cache_stats(self) -> Dict[str, Any]:
+        """Get resume cache statistics."""
+        import time
+        with self._resume_cache_lock:
+            now = time.time()
+            active_entries = sum(1 for v in self._resume_memory_cache.values()
+                                 if now - v["cached_at"] < 3600)
 
-        # Update in database
-        if self.db:
-            try:
-                success = await self.db.update_job_resume_id(job_id, user_id, resume_id)
-            except Exception as e:
-                logger.error(f"Error updating job resume_id in database for user {user_id}: {e}")
-                success = False
-
-        # Update in cache - get job, update resume_id, and re-add to cache
-        if self.job_cache and success:
-            try:
-                job = self.job_cache.get_job(job_id, user_id)
-                if job:
-                    job.resume_id = resume_id
-                    self.job_cache.add_job(job, user_id)
-                    logger.info(f"Updated job {job_id} with resume_id {resume_id} in cache")
-            except Exception as e:
-                logger.error(f"Error updating job resume_id in cache for user {user_id}: {e}")
-                # Don't mark as failure if cache update fails but DB succeeded
-
-        return success
+            return {
+                "total_entries": len(self._resume_memory_cache),
+                "active_entries": active_entries,
+                "expired_entries": len(self._resume_memory_cache) - active_entries,
+                "memory_estimate_kb": len(str(self._resume_memory_cache)) // 1024
+            }
