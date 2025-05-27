@@ -186,14 +186,34 @@ class ResumeImprover:
             extracted_skills = extracted_skills.dict().get("final_answer", {})
             result = []
 
+            # Process technical skills with proper YAML structure
             if "technical_skills" in extracted_skills:
-                result.append(
-                    dict(category="Technical", skills=extracted_skills["technical_skills"])
-                )
+                technical_skills_dict = {}
+
+                # Parse the technical skills response to create proper subcategories
+                tech_skills = extracted_skills["technical_skills"]
+                if isinstance(tech_skills, dict):
+                    # If already structured as dict with subcategories
+                    technical_skills_dict = tech_skills
+                elif isinstance(tech_skills, list):
+                    # If it's a list, we need to parse it to create subcategories
+                    technical_skills_dict = self._parse_skills_list_to_dict(tech_skills)
+
+                result.append({
+                    "category": "Technical",
+                    "skills": technical_skills_dict
+                })
+
+            # Process non-technical skills as simple list
             if "non_technical_skills" in extracted_skills:
-                result.append(
-                    dict(category="Non-technical", skills=extracted_skills["non_technical_skills"])
-                )
+                non_tech_skills = extracted_skills["non_technical_skills"]
+                if isinstance(non_tech_skills, list):
+                    # Filter out any category headers that might be mixed in
+                    clean_skills = [skill for skill in non_tech_skills if not skill.startswith('>')]
+                    result.append({
+                        "category": "Non-technical",
+                        "skills": clean_skills
+                    })
 
             # Combine with existing skills
             self._combine_skill_lists(result, self.skills or [])
@@ -202,6 +222,55 @@ class ResumeImprover:
         except Exception as e:
             logger.error(f"Error in extract_matched_skills: {e}")
             return self.skills or []
+
+    def _parse_skills_list_to_dict(self, skills_list: list) -> dict:
+        """Parse a mixed list of skills and category headers into a proper dictionary structure."""
+        result = {}
+        current_category = "Other"
+
+        for item in skills_list:
+            if isinstance(item, str):
+                if item.startswith('>'):
+                    # This is a category header
+                    current_category = item.replace('>', '').strip()
+                    if current_category not in result:
+                        result[current_category] = []
+                else:
+                    # This is a skill
+                    if current_category not in result:
+                        result[current_category] = []
+                    result[current_category].append(item)
+
+        return result
+
+    def _combine_skill_lists(self, l1: list[dict], l2: list[dict]):
+        """Combine two lists of skill categories without duplicating lowercase entries."""
+        l1_categories_lowercase = {s["category"].lower(): i for i, s in enumerate(l1)}
+
+        for s in l2:
+            category_lower = s["category"].lower()
+
+            if category_lower in l1_categories_lowercase:
+                existing_index = l1_categories_lowercase[category_lower]
+                existing_skills = l1[existing_index]["skills"]
+                new_skills = s["skills"]
+
+                # Handle both dict and list formats
+                if isinstance(existing_skills, dict) and isinstance(new_skills, dict):
+                    # Merge dictionaries
+                    for subcat, skills in new_skills.items():
+                        if subcat in existing_skills:
+                            self._combine_skills_in_category(existing_skills[subcat], skills)
+                        else:
+                            existing_skills[subcat] = skills
+                elif isinstance(existing_skills, list) and isinstance(new_skills, list):
+                    # Merge lists
+                    self._combine_skills_in_category(existing_skills, new_skills)
+                # If formats don't match, keep the new format
+                elif isinstance(new_skills, dict):
+                    l1[existing_index]["skills"] = new_skills
+            else:
+                l1.append(s)
 
     def rewrite_unedited_experiences(self, **chain_kwargs) -> list:
         """Rewrite unedited experiences in the resume."""

@@ -72,7 +72,7 @@ SKILLS_MATCHER:
     - Each skill must be presented in sentence case format
     - No skill should appear more than once in the final list - remove all duplicates
     - For technical skills: Present subcategories with individual skills listed under each category
-    - For non-technical skills: Present as a simple list without subcategorization
+    - For non-technical skills: Present as a simple list without sub-categorization
     - Only create technical subcategories that actually contain skills from the resume
     - Do NOT include phrases like "which aligns with the job requirement" or "addressing the job posting needs"
     - Focus on presenting the candidate's actual skills objectively without justifying their relevance to a specific job
