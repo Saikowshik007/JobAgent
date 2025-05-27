@@ -285,7 +285,7 @@ async def delete_jobs_batch(
         logger.error(f"Error in batch job deletion for user {user_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/stats")
+@router.get("/status")
 async def get_job_stats(
         cache_manager: DBCacheManager = Depends(get_cache_manager),
         user_id: str = Depends(get_user_id)
