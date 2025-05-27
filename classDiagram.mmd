@@ -1,80 +1,201 @@
 classDiagram
-    class JobTrakSystem {
-        +initialize()
-        +start_job_search()
-        +generate_resume()
-        +apply_to_job()
-        +upload_to_simplify()
+    %% API Layer - FastAPI Routers
+    class JobsRouter {
+        +analyze_job(job_url, status, cache_manager, user_id, api_key)
+        +get_jobs(status, company, limit, offset, cache_manager, user_id)
+        +get_job(job_id, cache_manager, user_id)
+        +update_job_status(job_id, request, cache_manager, user_id)
+        +delete_job(job_id, cascade_resumes, cache_manager, user_id)
+        +delete_jobs_batch(job_ids, cascade_resumes, cache_manager, user_id)
+        +get_job_stats(cache_manager, user_id)
+        +get_job_resumes(job_id, cache_manager, user_id)
     }
 
-    class Database {
-        +save_job()
-        +get_job()
-        +get_all_jobs()
-        +update_job_status()
-        +job_exists()
-        +save_resume()
-        +get_resume()
-        +save_search_history()
-        +update_simplify_upload_status()
+    class ResumeRouter {
+        +generate_resume(request, handle_existing, cache_manager, user_id, api_key)
+        +download_resume(resume_id, format, cache_manager, user_id)
+        +check_resume_status(resume_id, cache_manager, user_id)
+        +upload_resume(file, job_id, cache_manager, user_id)
+        +update_resume_yaml(resume_id, yaml_content, cache_manager, user_id)
+        +delete_resume(resume_id, update_job, cache_manager, user_id)
+        +get_user_resumes(job_id, limit, offset, cache_manager, user_id)
+        +get_active_resume_generations(cache_manager, user_id)
     }
 
-    class APIController {
-        +search_jobs()
-        +get_jobs()
-        +get_job()
-        +update_job_status()
-        +generate_resume()
-        +upload_to_simplify()
-        +get_system_status()
+    class SimplifyRouter {
+        +upload_resume_pdf_to_simplify(resume_pdf, resume_id, job_id, user_id)
+        +get_simplify_tokens(user_id)
+        +check_simplify_session(user_id)
+        +store_simplify_tokens(request_data, user_id)
     }
 
-    class LinkedInDriver {
-        -email: str
-        -password: str
-        -driver: WebDriver
-        +login()
-        +close()
-        +random_delay()
+    class SystemRouter {
+        +get_system_status(request, cache_manager, user_id)
+        +clear_cache(request, cache_manager, user_id)
+        +cleanup_cache(request, cache_manager, user_id)
+        +get_cache_stats(request, cache_manager, user_id)
     }
 
-    class JobSearcher {
-        -linkedin_driver: LinkedInDriver
-        +search_jobs()
-        +extract_job_details()
-        -_apply_filters()
-        -_collect_job_listings()
-    }
-
+    %% Core Service Layer
     class ResumeGenerator {
-        +create_tailored_resume()
-        +generate_pdf()
+        -cache_manager: DBCacheManager
+        -user_id: str
+        -api_key: str
+        -thread_pool: ThreadPoolExecutor
+        +generate_resume(job_id, template, customize, resume_data, handle_existing)
+        -_generate_resume_background(job_dict, resume_id, template, customize, resume_data, existing_resumes, handle_existing)
+        -_generate_resume_sync(job_dict, resume_data)
+        -_update_job_with_resume_id(job_id, resume_id)
+        -_setup_resume_data(resume_improver, resume_data)
+        +check_resume_status(resume_id)
+        +get_resume_content(resume_id)
+        +upload_resume(file_path, file_content, job_id)
+        +replace_job_resume(job_id, new_resume_id)
+        +cleanup_orphaned_resumes(user_id)
     }
 
-    class SimplifyIntegration {
-        -email: str
-        -password: str
-        -driver: WebDriver
-        +login_to_simplify()
-        +upload_resume()
-        +is_session_valid()
-        +save_cookies()
-        +load_cookies()
+    class ResumeImprover {
+        -job_post_html_data: str
+        -job_post_raw: str
+        -resume: dict
+        -job_post: JobPost
+        -parsed_job: dict
+        -llm_kwargs: dict
+        -api_key: str
+        -url: str
+        +create_complete_tailored_resume()
+        +download_and_parse_job_post(url)
+        -_download_url(url)
+        -_extract_html_data()
+        +write_objective()
+        +extract_matched_skills()
+        +rewrite_unedited_experiences()
+        +rewrite_unedited_projects()
+        +rewrite_section(section)
+        -_get_formatted_chain_inputs(chain, section)
+        +dict_to_yaml_string(data)
     }
 
+    class JobPost {
+        -posting: str
+        -extractor_llm: ChatOpenAI
+        -parsed_job: dict
+        +parse_job_post()
+    }
+
+    %% Unified Cache Management Layer
+    class DBCacheManager {
+        -db: Database
+        -job_cache: JobCache
+        -search_cache: SearchCache
+        -resume_cache: ResumeCache
+        +get_cached_search_results(keywords, location, filters, user_id)
+        +save_search_results(keywords, location, filters, job_listings, user_id)
+        +job_exists(url, user_id)
+        +get_job(job_id, user_id)
+        +save_job(job, user_id)
+        +update_job_status(job_id, user_id, status)
+        +get_all_jobs(user_id, status, limit, offset)
+        +delete_job(job_id, user_id)
+        +save_resume(resume, user_id)
+        +get_resume(resume_id, user_id)
+        +get_resume_status(resume_id, user_id)
+        +set_resume_status(resume_id, user_id, status, data, error)
+        +remove_resume_status(resume_id, user_id)
+        +clear_user_cache(user_id)
+        +cleanup_expired_cache()
+        +get_cache_stats()
+        +health_check()
+        +update_job_resume_id(job_id, user_id, resume_id)
+        +get_resumes_for_job(job_id, user_id)
+        +get_all_resumes(user_id, job_id, limit, offset)
+        +delete_resume(resume_id, user_id)
+    }
+
+    %% Cache Layer Components
+    class JobCache {
+        -max_size: int
+        -ttl_seconds: int
+        -max_memory_bytes: int
+        -_cache: OrderedDict[str, CacheEntry]
+        -_url_index: Dict[str, str]
+        -_signature_index: Dict[str, str]
+        -_user_index: Dict[str, Set[str]]
+        +add_job(job, user_id)
+        +get_job(job_id, user_id)
+        +get_job_by_url(url, user_id)
+        +find_similar_job(job, user_id)
+        +get_user_jobs(user_id, limit)
+        +remove_job(job_id, user_id)
+        +clear_user(user_id)
+        +clear_all()
+        +get_stats()
+        -_cleanup_memory(needed_bytes)
+        -_cleanup_expired()
+    }
+
+    class ResumeCache {
+        -ttl_seconds: int
+        -_cache: Dict[str, Dict]
+        -_lock: asyncio.Lock
+        +set_status(resume_id, user_id, status, data, error)
+        +get_status(resume_id, user_id)
+        +remove(resume_id, user_id)
+        +clear_user_cache(user_id)
+        +cleanup_expired()
+        +get_stats()
+    }
+
+    class CacheEntry {
+        +data: Any
+        +created_at: float
+        +last_accessed: float
+        +access_count: int
+        +size_bytes: int
+    }
+
+    %% Database Layer
+    class Database {
+        -db_url: str
+        -pool: asyncpg.Pool
+        -min_pool_size: int
+        -max_pool_size: int
+        +initialize_pool()
+        +close_pool()
+        +get_connection()
+        +initialize_db()
+        +save_job(job, user_id)
+        +get_job(job_id, user_id)
+        +get_all_jobs(user_id, status, limit, offset)
+        +job_exists(url, user_id)
+        +update_job_status_batch(updates)
+        +delete_job(job_id, user_id)
+        +save_resume(resume, user_id)
+        +get_resume(resume_id, user_id)
+        +get_resumes_for_job(job_id, user_id)
+        +get_all_resumes(user_id, job_id, limit, offset)
+        +delete_resume(resume_id, user_id)
+        +save_search_history(keywords, location, filters, job_ids, user_id, search_id)
+        +get_cached_search_results(keywords, location, filters, user_id)
+        +get_job_stats(user_id)
+        +update_job_resume_id(job_id, user_id, resume_id)
+        +health_check()
+        -_row_to_job(row)
+        -_row_to_resume(row)
+    }
+
+    %% Data Models
     class Job {
         +id: str
-        +title: str
-        +company: str
-        +location: str
-        +description: str
-        +url: str
-        +date_found: datetime
+        +job_url: str
         +status: JobStatus
+        +date_found: datetime
         +applied_date: datetime
         +rejected_date: datetime
         +resume_id: str
-        +metadata: dict
+        +metadata: Dict[str, Any]
+        +to_dict()
+        +from_dict(data)
     }
 
     class Resume {
@@ -84,15 +205,8 @@ classDiagram
         +yaml_content: str
         +date_created: datetime
         +uploaded_to_simplify: bool
-    }
-
-    class SearchHistory {
-        +id: str
-        +keywords: str
-        +location: str
-        +filters: dict
-        +date_searched: datetime
-        +job_count: int
+        +to_dict()
+        +from_dict(data)
     }
 
     class JobStatus {
@@ -107,36 +221,114 @@ classDiagram
         DECLINED
     }
 
-    class BrowserDriverManager {
-        -_driver_instance: LinkedInDriver
-        +get_driver()
-        +release_driver()
-        +close_all_drivers()
+    class ResumeGenerationStatus {
+        <<enumeration>>
+        PENDING
+        IN_PROGRESS
+        COMPLETED
+        FAILED
     }
 
-    class Flask {
-        +route()
-        +run()
+    %% API Models for Validation
+    class GenerateResumeRequest {
+        +job_id: str
+        +template: str
+        +customize: bool
+        +resume_data: Dict[str, Any]
     }
 
-    JobTrakSystem --> APIController
-    JobTrakSystem --> BrowserDriverManager
-    JobTrakSystem --> Database
+    class JobStatusUpdateRequest {
+        +status: JobStatusEnum
+    }
 
-    APIController --> JobSearcher
-    APIController --> ResumeGenerator
-    APIController --> SimplifyIntegration
-    APIController --> Database
+    %% LangChain Integration Models
+    class JobDescription {
+        +company: str
+        +job_title: str
+        +job_type: str
+        +location: str
+        +team: str
+        +job_summary: str
+        +salary: str
+        +duties: List[str]
+        +qualifications: List[str]
+        +ats_keywords: List[str]
+        +is_fully_remote: bool
+        +technical_skills: List[str]
+        +non_technical_skills: List[str]
+    }
 
-    JobSearcher --> LinkedInDriver
-    SimplifyIntegration --> LinkedInDriver
+    class ResumeSectionHighlighterOutput {
+        +plan: List[str]
+        +additional_steps: List[str]
+        +work: List[str]
+        +final_answer: List[ResumeSectionHighlight]
+    }
 
-    BrowserDriverManager --> LinkedInDriver
+    class ResumeSkillsMatcherOutput {
+        +plan: List[str]
+        +additional_steps: List[str]
+        +work: List[str]
+        +final_answer: ResumeSkills
+    }
 
-    Database --> Job
-    Database --> Resume
-    Database --> SearchHistory
+    class ResumeSummarizerOutput {
+        +plan: List[str]
+        +additional_steps: List[str]
+        +work: List[str]
+        +final_answer: str
+    }
 
-    Job --> JobStatus
+    %% Dependencies and Core Functions
+    class Dependencies {
+        +get_cache_manager(request)
+        +get_user_id(x_user_id)
+        +get_user_key(x_api_key)
+        +get_optional_user_key(x_api_key)
+    }
 
-    Flask --> APIController
+    %% Application Initialization
+    class DatabaseInitializer {
+        +initialize_app(app, db_url, job_cache_size, search_cache_size)
+        +verify_initialization(app)
+    }
+
+    %% Relationships
+    JobsRouter --> DBCacheManager : uses
+    ResumeRouter --> DBCacheManager : uses
+    ResumeRouter --> ResumeGenerator : creates
+    SimplifyRouter --> USER_SESSIONS : manages
+    SystemRouter --> DBCacheManager : uses
+
+    ResumeGenerator --> DBCacheManager : uses
+    ResumeGenerator --> ResumeImprover : creates
+    ResumeImprover --> JobPost : creates
+    ResumeImprover --> JobDescription : produces
+
+    DBCacheManager --> Database : uses
+    DBCacheManager --> JobCache : uses
+    DBCacheManager --> ResumeCache : uses
+
+    JobCache --> CacheEntry : contains
+    JobCache --> Job : caches
+
+    Database --> Job : persists
+    Database --> Resume : persists
+
+    Job --> JobStatus : has
+    ResumeCache --> ResumeGenerationStatus : tracks
+
+    JobsRouter ..> GenerateResumeRequest : validates
+    JobsRouter ..> JobStatusUpdateRequest : validates
+
+    ResumeImprover --> ResumeSectionHighlighterOutput : produces
+    ResumeImprover --> ResumeSkillsMatcherOutput : produces
+    ResumeImprover --> ResumeSummarizerOutput : produces
+
+    Dependencies --> DBCacheManager : provides
+    DatabaseInitializer --> DBCacheManager : creates
+
+    note for DBCacheManager "Unified cache manager that\ncoordinates between database\nand various cache layers"
+    note for ResumeGenerator "Handles async resume generation\nwith background processing\nand orphan prevention"
+    note for ResumeImprover "AI-powered resume optimization\nusing LangChain and OpenAI"
+    note for JobCache "High-performance in-memory\ncache with LRU eviction\nand memory management"
