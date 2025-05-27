@@ -45,8 +45,8 @@ SECTION_HIGHLIGHTER:
 
 SKILLS_MATCHER:
   system_message: >
-    You are an expert skills analyst specializing in technical and non-technical skill identification and categorization.
-    Your goal is to identify, organize, and dynamically categorize skills from resume content for professional impact
+    You are an expert skills analyst specializing in technical and non-technical skill identification.
+    Your goal is to identify and organize skills from resume content for professional impact
     while strictly following all provided <Steps> and meeting all <Criteria>.
 
   job_posting_template: |
@@ -62,22 +62,17 @@ SKILLS_MATCHER:
 
   instruction_message: |
     <Instruction> 
-    Extract technical and non-technical skills from the <Resume> that are present in the candidate's experience, organize technical skills into logical dynamic subcategories, and present non-technical skills as a simple list without explicitly justifying how they match job requirements.
+    Extract technical and non-technical skills from the <Resume> that are present in the candidate's experience, without explicitly justifying how they match job requirements.
 
   criteria_message: |
     <Criteria> 
     - Each identified skill must be explicitly or implicitly mentioned in the <Resume>
-    - Technical skills must be dynamically categorized based on the actual skills found (e.g., Programming Languages, Databases, Cloud Platforms, DevOps Tools, Frameworks, etc.)
-    - Non-technical skills should be presented as a simple flat list without subcategories
+    - Technical skills must be categorized (programming languages, technologies, frameworks, tools, etc.)
+    - Non-technical skills must be categorized (communication, leadership, problem-solving, etc.)
     - Each skill must be presented in sentence case format
-    - No skill should appear more than once in the final list - remove all duplicates
-    - For technical skills: Present subcategories with individual skills listed under each category
-    - For non-technical skills: Present as a simple list without sub-categorization
-    - Only create technical subcategories that actually contain skills from the resume
+    - No skill should appear more than once in the final list
     - Do NOT include phrases like "which aligns with the job requirement" or "addressing the job posting needs"
     - Focus on presenting the candidate's actual skills objectively without justifying their relevance to a specific job
-    - Subcategory names should be professional and industry-standard (e.g., "Programming Languages" not "Coding Languages")
-    - Do NOT mix formats - either list individual skills OR categorize them, but not both
 
   steps_message: |
     <Steps>
@@ -88,16 +83,11 @@ SKILLS_MATCHER:
     5. Follow all steps systematically and document your <Work> process
     6. Extract all technical skills from the <Resume>
     7. Extract all non-technical skills from the <Resume>
-    8. Analyze the technical skills and group them into logical subcategories (Programming Languages, Databases, Cloud Platforms, DevOps Tools, Web Technologies, Frameworks, Testing Tools, etc.)
-    9. Create a comprehensive list of all unique technical skills (remove duplicates before categorizing)
-    10. Assign each unique technical skill to exactly ONE appropriate subcategory
-    11. Collect all non-technical skills into a simple flat list without subcategorization
-    12. Verify all skills are actually mentioned or demonstrated in the <Resume>
-    13. Perform final duplicate removal across all categories and lists
-    14. Format the output with "Technical Skills:" followed by dynamic subcategories with individual skills listed under each
-    15. Format "Non-Technical Skills:" as a simple flat list without subcategories
-    16. Confirm all <Criteria> are met and make necessary adjustments
-    17. Provide your <Final Answer> with properly formatted skills lists that focus on the candidate's actual experience without explicit job alignment justifications
+    8. Categorize all extracted skills appropriately
+    9. Verify all skills are actually mentioned or demonstrated in the <Resume>
+    10. Remove any duplicate skills or unnecessarily similar entries
+    11. Confirm all <Criteria> are met and make necessary adjustments
+    12. Provide your <Final Answer> with properly formatted and categorized skills lists that focus on the candidate's actual experience without explicit job alignment justifications
 
 OBJECTIVE_WRITER:
   system_message: >
