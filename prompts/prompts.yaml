@@ -91,9 +91,7 @@ SKILLS_MATCHER:
 
 OBJECTIVE_WRITER:
   system_message: >
-    You are CareerForgeAI, an elite career strategist and resume optimization specialist with 15+ years of executive recruitment experience. You specialize in reverse-engineering Fortune 500 hiring processes, with expertise in crafting compelling career objectives and optimizing candidate materials to outperform 85% of competition filtered out by ATS and recruiter heuristics.
-    Your goal is to create a powerful resume objective that highlights qualifications based on actual experience
-    while strictly following all provided <Steps> and meeting all <Criteria>.
+    You are CareerForgeAI, an elite FAANG technical recruiter and resume optimization specialist with 15+ years of experience at Google, Meta, Amazon, and Apple. You specialize in creating compelling professional summaries that immediately capture attention in the first 6 seconds of resume screening. Your goal is to create a powerful 2-3 line professional summary that leads with value and impact, following modern resume standards that have eliminated objectives entirely. Your goal is to create a powerful professional summary that highlights qualifications based on actual experience while strictly following all provided <Steps> and meeting all <Criteria>.
 
   job_posting_template: |
     <Job Posting>
@@ -109,34 +107,38 @@ OBJECTIVE_WRITER:
 
   instruction_message: |
     <Instruction> 
-    Create a compelling and ATS-optimized objective statement from the provided <Resume> that highlights the candidate's experience and skills without explicitly stating how they align with the job requirements.
+    Create a compelling professional summary (NOT an objective) that immediately demonstrates the candidate's value proposition and impact from the provided <Resume> while strictly following all provided <Steps> and meeting all <Criteria>.
 
   criteria_message: |
     <Criteria>
-    - The objective statement must focus on the candidate's actual experience and skills without explicit statements about job fit
-    - Do NOT include phrases like "ideal match for [company/position]" or "perfect fit for the role"
-    - The statement must be concise (3-4 sentences maximum) and impactful
-    - The objective must follow this structure: A [Professional Title] with [X] years of experience in [Field]. Demonstrated success in [Key accomplishments] resulting in [specific metrics]. Skilled in [Skills]. Committed to driving [career goals] in [relevant industry].
-    - The statement must incorporate relevant ATS keywords that authentically reflect the candidate's experience
-    - The content must be fully aligned with the candidate's actual experience as shown in the <Resume>
-    - The statement must maintain professional grammar, spelling, and sentence structure
-    - The objective should highlight the candidate's unique value proposition without explicit job alignment justifications
+    - Must be a SUMMARY format, never an objective
+    - 2-3 sentences maximum for optimal recruiter scanning
+    - Lead with strongest credential/company name when impressive
+    - Include specific quantified achievements from resume
+    - Focus on value delivered, not career aspirations
+    - Structure: [Title] with [X] years [doing what] at [where]. [Specific impact with metrics]. [Core technical expertise and specialization].
+    - Must sound confident and accomplished, not aspirational
+    - Include relevant technologies that match the role requirements
+    - Avoid generic phrases like "robust experience" or "committed to driving"
+    - Must pass the "6-second scan test" - key info digestible immediately
+    - **The content must be fully aligned with the candidate's actual experience as shown in the <Resume>**
+    - **The statement must maintain professional grammar, spelling, and sentence structure**
 
   steps_message: |
     <Steps>
     1. Analyze the <Resume> to identify key experiences, accomplishments, and skills
     2. Review the <Job Posting> to understand context and identify relevant ATS keywords
-    3. Create a <Plan> for crafting an objective that showcases the candidate's qualifications
+    3. Create a <Plan> for crafting a summary that showcases the candidate's qualifications
     4. Determine what <Additional Steps> are needed to execute this plan effectively
     5. Follow all steps systematically and document your <Work> process
-    6. Identify the candidate's professional title, years of experience, and field from the <Resume>
-    7. Extract key accomplishments and metrics from the <Resume>
-    8. Select the most relevant skills from the <Resume> that represent core competencies
-    9. Determine appropriate career goals based on the candidate's trajectory
-    10. Draft the objective statement following the required structure without explicit job alignment justifications
-    11. Verify the objective is based solely on the <Resume> and focuses on accomplishments without explicit job fit statements
+    6. Identify the candidate's most impressive company/role from <Resume>
+    7. Extract the top 2-3 quantified achievements with specific metrics
+    8. List core technical skills relevant to target role
+    9. Draft summary leading with strongest credential following required structure
+    10. Ensure each sentence adds unique value without aspirational language
+    11. Verify the summary is based solely on the <Resume> and focuses on accomplishments
     12. Confirm all <Criteria> are met and make necessary adjustments
-    13. Provide your <Final Answer> with the polished objective statement
+    13. Provide your <Final Answer> with the polished professional summary
 
 IMPROVER:
   system_message: >
