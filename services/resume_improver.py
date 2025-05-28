@@ -166,7 +166,7 @@ class ResumeImprover:
             return None
 
     def extract_matched_skills(self, **chain_kwargs) -> list:
-        """Extract matched skills from the resume and job post with dynamic subcategories."""
+        """Extract matched skills from the resume and job post with LLM handling deduplication."""
         try:
             from prompts import Prompts
             from dataModels.resume import ResumeSkillsMatcherOutput
@@ -178,6 +178,11 @@ class ResumeImprover:
             runnable = chain | llm.with_structured_output(schema=ResumeSkillsMatcherOutput, method="function_calling")
 
             chain_inputs = self._get_formatted_chain_inputs(chain=runnable)
+
+            # Log the inputs to debug
+            logger.debug(f"Skills extraction inputs: {list(chain_inputs.keys())}")
+            logger.debug(f"Existing skills being sent to LLM: {chain_inputs.get('skills')}")
+
             extracted_skills = runnable.invoke(chain_inputs)
 
             if not extracted_skills or not hasattr(extracted_skills, 'dict'):
@@ -185,81 +190,47 @@ class ResumeImprover:
                 return self.skills or []
 
             extracted_skills_dict = extracted_skills.dict().get("final_answer", {})
+            logger.debug(f"LLM returned skills: {extracted_skills_dict}")
+
+            # Build the final skills structure - LLM has already handled deduplication
             result = []
-            logger.debug(f"Extracted skills: {extracted_skills_dict}")
 
-            # Handle technical skills (nested dictionary structure)
+            # Handle technical skills
             technical_skills = extracted_skills_dict.get("technical_skills", {})
-            if technical_skills:
-                if isinstance(technical_skills, dict) and technical_skills:
+            if technical_skills and isinstance(technical_skills, dict):
+                # Convert to subcategories format
+                subcategories = []
+                for category_name, skills_list in technical_skills.items():
+                    if skills_list:  # Only add non-empty categories
+                        subcategories.append({
+                            "name": category_name,
+                            "skills": skills_list
+                        })
+
+                if subcategories:
                     result.append({
                         "category": "Technical",
-                        "subcategories": [
-                            {"name": k, "skills": v} for k, v in technical_skills.items()
-                        ]
-                    })
-                elif isinstance(technical_skills, list) and technical_skills:
-                    result.append({
-                        "category": "Technical",
-                        "skills": technical_skills
+                        "subcategories": subcategories
                     })
 
-            # Handle non-technical skills (simple list structure)
+            # Handle non-technical skills
             non_technical_skills = extracted_skills_dict.get("non_technical_skills", [])
-            if non_technical_skills:
-                if isinstance(non_technical_skills, list):
-                    result.append({
-                        "category": "Non-technical",
-                        "skills": non_technical_skills
-                    })
-                elif isinstance(non_technical_skills, dict) and non_technical_skills:
-                    result.append({
-                        "category": "Non-technical",
-                        "subcategories": [
-                            {"name": k, "skills": v} for k, v in non_technical_skills.items()
-                        ]
-                    })
+            if non_technical_skills and isinstance(non_technical_skills, list):
+                result.append({
+                    "category": "Non-technical",
+                    "skills": non_technical_skills
+                })
 
-            # Safely combine with existing skills
-            try:
-                if result:
-                    existing_skills = self.skills or []
-                    logger.debug(f"Existing skills type: {type(existing_skills)}")
-                    logger.debug(f"Existing skills: {existing_skills}")
-
-                    # If no existing skills, just return the new results
-                    if not existing_skills:
-                        logger.info("No existing skills, returning new results")
-                        return result
-
-                    # Ensure existing_skills is a list of dicts with expected structure
-                    if isinstance(existing_skills, list):
-                        # Validate structure of existing skills
-                        validated_existing = []
-                        for skill_item in existing_skills:
-                            if isinstance(skill_item, dict) and "category" in skill_item:
-                                validated_existing.append(skill_item)
-                            else:
-                                logger.warning(f"Skipping invalid existing skill item: {skill_item}")
-
-                        if validated_existing:
-                            logger.info(f"Combining {len(result)} new skill categories with {len(validated_existing)} existing")
-                            self._combine_skill_lists(result, validated_existing)
-                        else:
-                            logger.info("No valid existing skills to combine")
-                    else:
-                        logger.warning(f"Existing skills is not a list: {type(existing_skills)}")
-
-                    return result
+            logger.info(f"Final skills structure: {len(result)} categories")
+            for category in result:
+                if "subcategories" in category:
+                    logger.info(f"  {category['category']}: {len(category['subcategories'])} subcategories")
+                    for subcat in category['subcategories']:
+                        logger.info(f"    - {subcat['name']}: {len(subcat['skills'])} skills")
                 else:
-                    logger.info("No new skills extracted, returning existing skills")
-                    return self.skills or []
+                    logger.info(f"  {category['category']}: {len(category['skills'])} skills")
 
-            except Exception as combine_error:
-                logger.error(f"Error combining skill lists: {combine_error}")
-                logger.error(f"Combine error traceback: {traceback.format_exc()}")
-                # If combining fails, just return the new results
-                return result if result else (self.skills or [])
+            return result
 
         except Exception as e:
             logger.error(f"Error in extract_matched_skills: {e}")
@@ -327,7 +298,7 @@ class ResumeImprover:
             return section.get("highlights", [])
 
     def _get_formatted_chain_inputs(self, chain, section=None):
-        """Get formatted inputs for chain"""
+        """Get formatted inputs for chain with proper skills formatting"""
         from services.langchain_helpers import chain_formatter
 
         output_dict = {}
@@ -338,7 +309,31 @@ class ResumeImprover:
 
         for key in chain.get_input_schema().schema().get("required", []):
             value = raw_self_data.get(key) or (self.parsed_job.get(key) if self.parsed_job else None)
+
+            # Special handling for skills to ensure LLM gets existing skills properly
+            if key == "skills" and self.skills:
+                # Format existing skills in a readable way for the LLM
+                skills_text = "Existing Skills in Resume:\n"
+                for skill_category in self.skills:
+                    category_name = skill_category.get("category", "Unknown")
+                    skills_text += f"\n{category_name}:\n"
+
+                    if "subcategories" in skill_category:
+                        for subcat in skill_category["subcategories"]:
+                            subcat_name = subcat.get("name", "General")
+                            subcat_skills = subcat.get("skills", [])
+                            skills_text += f"  {subcat_name}: {', '.join(subcat_skills)}\n"
+                    elif "skills" in skill_category:
+                        skills_list = skill_category.get("skills", [])
+                        skills_text += f"  {', '.join(skills_list)}\n"
+
+                value = skills_text
+
             output_dict[key] = chain_formatter(key, value)
+
+            # Debug log for skills specifically
+            if key == "skills":
+                logger.debug(f"Formatted skills input for LLM: {output_dict[key][:200]}...")
 
         return output_dict
 
