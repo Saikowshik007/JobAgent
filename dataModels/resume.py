@@ -43,10 +43,10 @@ class ResumeSkills(BaseModel):
     """Pydantic model that defines grouped skills with dynamic subcategories for technical skills and simple list for non-technical."""
 
     technical_skills: Dict[str, List[str]] = Field(
-        ..., description=Prompts.descriptions["RESUME_SKILLS"]["technical_skills"]
+        description=Prompts.descriptions["RESUME_SKILLS"]["technical_skills"]
     )
     non_technical_skills: List[str] = Field(
-        ..., description=Prompts.descriptions["RESUME_SKILLS"]["non_technical_skills"]
+        description=Prompts.descriptions["RESUME_SKILLS"]["non_technical_skills"]
     )
 
 
@@ -54,17 +54,15 @@ class ResumeSkillsMatcherOutput(BaseModel):
     """Pydantic class that defines a list of skills to be returned by the LLM."""
 
     plan: List[str] = Field(
-        ..., description=Prompts.descriptions["RESUME_SKILLS_MATCHER_OUTPUT"]["plan"]
+        description=Prompts.descriptions["RESUME_SKILLS_MATCHER_OUTPUT"]["plan"]
     )
     additional_steps: List[str] = Field(
-        ...,
         description=Prompts.descriptions["RESUME_SKILLS_MATCHER_OUTPUT"]["additional_steps"],
     )
     work: List[str] = Field(
-        ..., description=Prompts.descriptions["RESUME_SKILLS_MATCHER_OUTPUT"]["work"]
+        description=Prompts.descriptions["RESUME_SKILLS_MATCHER_OUTPUT"]["work"]
     )
     final_answer: ResumeSkills = Field(
-        ...,
         description=Prompts.descriptions["RESUME_SKILLS_MATCHER_OUTPUT"]["final_answer"],
     )
 

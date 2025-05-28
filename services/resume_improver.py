@@ -175,7 +175,7 @@ class ResumeImprover:
 
             chain = ChatPromptTemplate(messages=Prompts.lookup["SKILLS_MATCHER"])
             llm = create_llm(api_key=self.api_key, **self.llm_kwargs)
-            runnable = chain | llm.with_structured_output(schema=ResumeSkillsMatcherOutput)
+            runnable = chain | llm.with_structured_output(schema=ResumeSkillsMatcherOutput, method="function_calling")
 
             chain_inputs = self._get_formatted_chain_inputs(chain=runnable)
             extracted_skills = runnable.invoke(chain_inputs)
@@ -186,6 +186,7 @@ class ResumeImprover:
             extracted_skills = extracted_skills.dict().get("final_answer", {})
             result = []
             logger.debug(f"Extracted skills: {extracted_skills}")
+
             # Handle technical skills (nested dictionary structure)
             if "technical_skills" in extracted_skills:
                 technical = extracted_skills["technical_skills"]
@@ -200,7 +201,8 @@ class ResumeImprover:
                     result.append(
                         dict(category="Technical", skills=technical if isinstance(technical, list) else [])
                     )
-    
+
+            # Handle non-technical skills (simple list structure)
             if "non_technical_skills" in extracted_skills:
                 non_technical = extracted_skills["non_technical_skills"]
                 if isinstance(non_technical, list):  # Expected format: simple list
