@@ -180,8 +180,8 @@ class ResumeImprover:
             chain_inputs = self._get_formatted_chain_inputs(chain=runnable)
 
             # Log the inputs to debug
-            logger.debug(f"Skills extraction inputs: {list(chain_inputs.keys())}")
-            logger.debug(f"Existing skills being sent to LLM: {chain_inputs.get('skills')}")
+            logger.info(f"Skills extraction inputs: {list(chain_inputs.keys())}")
+            logger.info(f"Existing skills being sent to LLM: {chain_inputs.get('skills')}")
 
             extracted_skills = runnable.invoke(chain_inputs)
 
@@ -190,7 +190,7 @@ class ResumeImprover:
                 return self.skills or []
 
             extracted_skills_dict = extracted_skills.dict().get("final_answer", {})
-            logger.debug(f"LLM returned skills: {extracted_skills_dict}")
+            logger.info(f"LLM returned skills: {extracted_skills_dict}")
 
             # Build the final skills structure - LLM has already handled deduplication
             result = []
