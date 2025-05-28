@@ -113,7 +113,6 @@ async def get_jobs(
     except Exception as e:
         logger.error(f"Error getting jobs for user {user_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-    
 @router.get("/status")
 async def get_job_stats(
         cache_manager: DBCacheManager = Depends(get_cache_manager),
@@ -177,7 +176,7 @@ async def get_job_stats(
     except Exception as e:
         logger.error(f"Error getting detailed job stats for user {user_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
+    
 @router.get("/{job_id}")
 async def get_job(
         job_id: str,
