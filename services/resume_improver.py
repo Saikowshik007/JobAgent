@@ -185,7 +185,7 @@ class ResumeImprover:
 
             extracted_skills = extracted_skills.dict().get("final_answer", {})
             result = []
-
+            logger.error(extracted_skills)
             if "technical_skills" in extracted_skills:
                 technical = extracted_skills["technical_skills"]
                 if isinstance(technical, dict):  # new format: subgroups
