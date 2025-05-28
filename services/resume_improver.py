@@ -179,7 +179,7 @@ class ResumeImprover:
 
             chain_inputs = self._get_formatted_chain_inputs(chain=runnable)
             extracted_skills = runnable.invoke(chain_inputs)
-
+            logger.error(extracted_skills)
             if not extracted_skills or not hasattr(extracted_skills, 'dict'):
                 return self.skills or []
 
