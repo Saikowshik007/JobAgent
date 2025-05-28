@@ -113,6 +113,70 @@ async def get_jobs(
     except Exception as e:
         logger.error(f"Error getting jobs for user {user_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+    
+@router.get("/status")
+async def get_job_stats(
+        cache_manager: DBCacheManager = Depends(get_cache_manager),
+        user_id: str = Depends(get_user_id)
+):
+    """Get detailed job statistics including resume information."""
+    try:
+        # Get basic job stats
+        job_stats = await cache_manager.get_job_stats(user_id)
+
+        # Get all jobs to analyze resume relationships
+        all_jobs = await cache_manager.get_all_jobs(user_id)
+
+        # Analyze resume linkage
+        jobs_with_resumes = 0
+        jobs_without_resumes = 0
+        total_job_resume_links = 0
+
+        for job in all_jobs:
+            if job.resume_id:
+                jobs_with_resumes += 1
+                total_job_resume_links += 1
+            else:
+                jobs_without_resumes += 1
+
+        # Get all resumes
+        all_resumes = await cache_manager.get_all_resumes(user_id)
+
+        # Analyze orphaned resumes
+        orphaned_resumes = 0
+        linked_resumes = 0
+
+        for resume in all_resumes:
+            if not resume.job_id:
+                orphaned_resumes += 1
+            else:
+                # Verify the job still exists
+                job = await cache_manager.get_job(resume.job_id, user_id)
+                if job:
+                    linked_resumes += 1
+                else:
+                    orphaned_resumes += 1  # Job was deleted but resume still references it
+
+        return {
+            "user_id": user_id,
+            "job_stats": job_stats,
+            "resume_stats": {
+                "total_resumes": len(all_resumes),
+                "linked_resumes": linked_resumes,
+                "orphaned_resumes": orphaned_resumes,
+                "jobs_with_resumes": jobs_with_resumes,
+                "jobs_without_resumes": jobs_without_resumes,
+                "total_job_resume_links": total_job_resume_links
+            },
+            "health_ratios": {
+                "jobs_with_resumes_ratio": round(jobs_with_resumes / len(all_jobs) * 100, 2) if all_jobs else 0,
+                "orphaned_resume_ratio": round(orphaned_resumes / len(all_resumes) * 100, 2) if all_resumes else 0
+            }
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting detailed job stats for user {user_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/{job_id}")
 async def get_job(
@@ -283,70 +347,6 @@ async def delete_jobs_batch(
         raise
     except Exception as e:
         logger.error(f"Error in batch job deletion for user {user_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@router.get("/status")
-async def get_job_stats(
-        cache_manager: DBCacheManager = Depends(get_cache_manager),
-        user_id: str = Depends(get_user_id)
-):
-    """Get detailed job statistics including resume information."""
-    try:
-        # Get basic job stats
-        job_stats = await cache_manager.get_job_stats(user_id)
-
-        # Get all jobs to analyze resume relationships
-        all_jobs = await cache_manager.get_all_jobs(user_id)
-
-        # Analyze resume linkage
-        jobs_with_resumes = 0
-        jobs_without_resumes = 0
-        total_job_resume_links = 0
-
-        for job in all_jobs:
-            if job.resume_id:
-                jobs_with_resumes += 1
-                total_job_resume_links += 1
-            else:
-                jobs_without_resumes += 1
-
-        # Get all resumes
-        all_resumes = await cache_manager.get_all_resumes(user_id)
-
-        # Analyze orphaned resumes
-        orphaned_resumes = 0
-        linked_resumes = 0
-
-        for resume in all_resumes:
-            if not resume.job_id:
-                orphaned_resumes += 1
-            else:
-                # Verify the job still exists
-                job = await cache_manager.get_job(resume.job_id, user_id)
-                if job:
-                    linked_resumes += 1
-                else:
-                    orphaned_resumes += 1  # Job was deleted but resume still references it
-
-        return {
-            "user_id": user_id,
-            "job_stats": job_stats,
-            "resume_stats": {
-                "total_resumes": len(all_resumes),
-                "linked_resumes": linked_resumes,
-                "orphaned_resumes": orphaned_resumes,
-                "jobs_with_resumes": jobs_with_resumes,
-                "jobs_without_resumes": jobs_without_resumes,
-                "total_job_resume_links": total_job_resume_links
-            },
-            "health_ratios": {
-                "jobs_with_resumes_ratio": round(jobs_with_resumes / len(all_jobs) * 100, 2) if all_jobs else 0,
-                "orphaned_resume_ratio": round(orphaned_resumes / len(all_resumes) * 100, 2) if all_resumes else 0
-            }
-        }
-
-    except Exception as e:
-        logger.error(f"Error getting detailed job stats for user {user_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/{job_id}/resumes")
