@@ -1,8 +1,9 @@
 from pydantic import BaseModel, Field
-from typing import List
+from typing import List, Dict
 from prompts.prompts import Prompts
 
 Prompts.initialize()
+
 
 class ResumeSectionHighlight(BaseModel):
     """Pydantic class that defines each highlight to be returned by the LLM."""
@@ -15,6 +16,7 @@ class ResumeSectionHighlight(BaseModel):
         description=Prompts.descriptions["RESUME_SECTION_HIGHLIGHT"]["relevance"],
         enum=[1, 2, 3, 4, 5],
     )
+
 
 class ResumeSectionHighlighterOutput(BaseModel):
     """Pydantic class that defines a list of highlights to be returned by the LLM."""
@@ -36,15 +38,17 @@ class ResumeSectionHighlighterOutput(BaseModel):
         description=Prompts.descriptions["RESUME_SECTION_HIGHLIGHTER_OUTPUT"]["final_answer"],
     )
 
-class ResumeSkills(BaseModel):
-    """Pydantic class that defines a list of skills to be returned by the LLM."""
 
-    technical_skills: List[str] = Field(
+class ResumeSkills(BaseModel):
+    """Pydantic model that defines grouped skills with dynamic subcategories."""
+
+    technical_skills: Dict[str, List[str]] = Field(
         ..., description=Prompts.descriptions["RESUME_SKILLS"]["technical_skills"]
     )
-    non_technical_skills: List[str] = Field(
+    non_technical_skills: Dict[str, List[str]] = Field(
         ..., description=Prompts.descriptions["RESUME_SKILLS"]["non_technical_skills"]
     )
+
 
 class ResumeSkillsMatcherOutput(BaseModel):
     """Pydantic class that defines a list of skills to be returned by the LLM."""
@@ -64,6 +68,7 @@ class ResumeSkillsMatcherOutput(BaseModel):
         description=Prompts.descriptions["RESUME_SKILLS_MATCHER_OUTPUT"]["final_answer"],
     )
 
+
 class ResumeSummarizerOutput(BaseModel):
     """Pydantic class that defines a list of skills to be returned by the LLM."""
 
@@ -81,6 +86,7 @@ class ResumeSummarizerOutput(BaseModel):
         ...,
         description=Prompts.descriptions["RESUME_OBJECTIVE_OUTPUT"]["final_answer"],
     )
+
 
 class ResumeImprovements(BaseModel):
     """Pydantic class that defines a list of improvements to be returned by the LLM."""
@@ -100,6 +106,7 @@ class ResumeImprovements(BaseModel):
     improvements: List[str] = Field(
         ..., description=Prompts.descriptions["RESUME_IMPROVEMENTS"]["improvements"]
     )
+
 
 class ResumeImproverOutput(BaseModel):
     """Pydantic class that defines a list of improvements to be returned by the LLM."""

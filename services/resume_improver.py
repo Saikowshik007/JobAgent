@@ -166,7 +166,7 @@ class ResumeImprover:
             return None
 
     def extract_matched_skills(self, **chain_kwargs) -> list:
-        """Extract matched skills from the resume and job post."""
+        """Extract matched skills from the resume and job post with dynamic subcategories."""
         try:
             from prompts import Prompts
             from dataModels.resume import ResumeSkillsMatcherOutput
@@ -187,21 +187,38 @@ class ResumeImprover:
             result = []
 
             if "technical_skills" in extracted_skills:
-                result.append(
-                    dict(category="Technical", skills=extracted_skills["technical_skills"])
-                )
-            if "non_technical_skills" in extracted_skills:
-                result.append(
-                    dict(category="Non-technical", skills=extracted_skills["non_technical_skills"])
-                )
+                technical = extracted_skills["technical_skills"]
+                if isinstance(technical, dict):  # new format: subgroups
+                    result.append(
+                        dict(category="Technical", subcategories=[
+                            dict(name=k, skills=v) for k, v in technical.items()
+                        ])
+                    )
+                else:
+                    result.append(
+                        dict(category="Technical", skills=technical)
+                    )
 
-            # Combine with existing skills
+            if "non_technical_skills" in extracted_skills:
+                non_technical = extracted_skills["non_technical_skills"]
+                if isinstance(non_technical, dict):
+                    result.append(
+                        dict(category="Non-technical", subcategories=[
+                            dict(name=k, skills=v) for k, v in non_technical.items()
+                        ])
+                    )
+                else:
+                    result.append(
+                        dict(category="Non-technical", skills=non_technical)
+                    )
+
             self._combine_skill_lists(result, self.skills or [])
             return result
 
         except Exception as e:
             logger.error(f"Error in extract_matched_skills: {e}")
             return self.skills or []
+
 
     def rewrite_unedited_experiences(self, **chain_kwargs) -> list:
         """Rewrite unedited experiences in the resume."""

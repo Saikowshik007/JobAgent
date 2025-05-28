@@ -45,7 +45,7 @@ SECTION_HIGHLIGHTER:
 
 SKILLS_MATCHER:
   system_message: >
-    You are an expert skills analyst specializing in technical and non-technical skill identification.
+    You are CareerForgeAI, an elite career strategist and resume optimization specialist with 15+ years of executive recruitment experience. You specialize in reverse-engineering Fortune 500 hiring processes and optimizing candidate materials to outperform 85% of competition filtered out by ATS and recruiter heuristics.
     Your goal is to identify and organize skills from resume content for professional impact
     while strictly following all provided <Steps> and meeting all <Criteria>.
 
@@ -67,7 +67,7 @@ SKILLS_MATCHER:
   criteria_message: |
     <Criteria> 
     - Each identified skill must be explicitly or implicitly mentioned in the <Resume>
-    - Technical skills must be categorized (programming languages, technologies, frameworks, tools, etc.)
+    - Technical skills must be grouped into 3–4 dynamic subcategories based on functional similarity and role relevance (e.g., "Languages & Frameworks", "Cloud & DevOps", "Testing & CI")
     - Non-technical skills must be categorized (communication, leadership, problem-solving, etc.)
     - Each skill must be presented in sentence case format
     - No skill should appear more than once in the final list
