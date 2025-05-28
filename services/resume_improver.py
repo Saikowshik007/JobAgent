@@ -188,43 +188,42 @@ class ResumeImprover:
             logger.debug(f"Extracted skills: {extracted_skills}")
 
             # Handle technical skills (nested dictionary structure)
-            if "technical_skills" in extracted_skills:
-                technical = extracted_skills["technical_skills"]
-                if isinstance(technical, dict):  # Expected format: subgroups
+            technical_skills = extracted_skills.get("technical_skills", {})
+            if technical_skills:
+                if isinstance(technical_skills, dict) and technical_skills:  # Expected format: subgroups
                     result.append(
                         dict(category="Technical", subcategories=[
-                            dict(name=k, skills=v) for k, v in technical.items()
+                            dict(name=k, skills=v) for k, v in technical_skills.items()
                         ])
                     )
-                else:
+                elif isinstance(technical_skills, list) and technical_skills:
                     # Fallback for unexpected format
                     result.append(
-                        dict(category="Technical", skills=technical if isinstance(technical, list) else [])
+                        dict(category="Technical", skills=technical_skills)
                     )
 
             # Handle non-technical skills (simple list structure)
-            if "non_technical_skills" in extracted_skills:
-                non_technical = extracted_skills["non_technical_skills"]
-                if isinstance(non_technical, list):  # Expected format: simple list
+            non_technical_skills = extracted_skills.get("non_technical_skills", [])
+            if non_technical_skills:
+                if isinstance(non_technical_skills, list):  # Expected format: simple list
                     result.append(
-                        dict(category="Non-technical", skills=non_technical)
+                        dict(category="Non-technical", skills=non_technical_skills)
                     )
-                elif isinstance(non_technical, dict):
+                elif isinstance(non_technical_skills, dict) and non_technical_skills:
                     # Handle if it comes back as dict (fallback)
                     result.append(
                         dict(category="Non-technical", subcategories=[
-                            dict(name=k, skills=v) for k, v in non_technical.items()
+                            dict(name=k, skills=v) for k, v in non_technical_skills.items()
                         ])
-                    )
-                else:
-                    # Fallback for unexpected format
-                    result.append(
-                        dict(category="Non-technical", skills=[])
                     )
 
             # Combine with existing skills if any
-            self._combine_skill_lists(result, self.skills or [])
-            return result
+            if result:
+                self._combine_skill_lists(result, self.skills or [])
+                return result
+            else:
+                logger.warning("No skills extracted from LLM response")
+                return self.skills or []
 
         except Exception as e:
             logger.error(f"Error in extract_matched_skills: {e}")

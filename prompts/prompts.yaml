@@ -62,17 +62,21 @@ SKILLS_MATCHER:
 
   instruction_message: |
     <Instruction> 
-    Extract technical and non-technical skills from the <Resume> that are present in the candidate's experience, without explicitly justifying how they match job requirements.
+    Extract technical and non-technical skills from the <Resume> that are present in the candidate's experience, without explicitly justifying how they match job requirements. Format the output with technical skills grouped into subcategories and non-technical skills as a simple list.
 
   criteria_message: |
     <Criteria> 
     - Each identified skill must be explicitly or implicitly mentioned in the <Resume>
     - Technical skills must be grouped into 3–4 dynamic subcategories based on functional similarity and role relevance (e.g., "Languages & Frameworks", "Cloud & DevOps", "Testing & CI")
-    - Non-technical skills must be categorized (communication, leadership, problem-solving, etc.)
+    - Technical skills output format: {"Languages & Frameworks": ["Python", "React"], "Cloud & DevOps": ["AWS", "Docker"]}
+    - Non-technical skills must be provided as a simple flat list (NOT categorized into subcategories)
+    - Non-technical skills output format: ["Communication", "Leadership", "Problem-solving", "Project management"]
     - Each skill must be presented in sentence case format
     - No skill should appear more than once in the final list
     - Do NOT include phrases like "which aligns with the job requirement" or "addressing the job posting needs"
     - Focus on presenting the candidate's actual skills objectively without justifying their relevance to a specific job
+    - If no technical skills are found, return an empty dictionary: {}
+    - If no non-technical skills are found, return an empty list: []
 
   steps_message: |
     <Steps>
@@ -81,13 +85,14 @@ SKILLS_MATCHER:
     3. Create a <Plan> for systematically extracting and organizing skills from the <Resume>
     4. Determine what <Additional Steps> are needed to execute this plan effectively
     5. Follow all steps systematically and document your <Work> process
-    6. Extract all technical skills from the <Resume>
-    7. Extract all non-technical skills from the <Resume>
-    8. Categorize all extracted skills appropriately
-    9. Verify all skills are actually mentioned or demonstrated in the <Resume>
-    10. Remove any duplicate skills or unnecessarily similar entries
-    11. Confirm all <Criteria> are met and make necessary adjustments
-    12. Provide your <Final Answer> with properly formatted and categorized skills lists that focus on the candidate's actual experience without explicit job alignment justifications
+    6. Extract all technical skills from the <Resume> and group them into 3-4 functional subcategories
+    7. Extract all non-technical skills from the <Resume> as individual items (do not group into subcategories)
+    8. Verify all skills are actually mentioned or demonstrated in the <Resume>
+    9. Remove any duplicate skills or unnecessarily similar entries
+    10. Format technical skills as a dictionary with subcategory keys and skill arrays as values
+    11. Format non-technical skills as a simple flat array of skill strings
+    12. Confirm all <Criteria> are met and make necessary adjustments
+    13. Provide your <Final Answer> with properly formatted technical_skills (dictionary) and non_technical_skills (array) that focus on the candidate's actual experience without explicit job alignment justifications
 
 OBJECTIVE_WRITER:
   system_message: >

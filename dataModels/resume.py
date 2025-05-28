@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import List, Dict
+from typing import List, Dict, Optional
 from prompts.prompts import Prompts
 
 Prompts.initialize()
@@ -42,10 +42,12 @@ class ResumeSectionHighlighterOutput(BaseModel):
 class ResumeSkills(BaseModel):
     """Pydantic model that defines grouped skills with dynamic subcategories for technical skills and simple list for non-technical."""
 
-    technical_skills: Dict[str, List[str]] = Field(
+    technical_skills: Optional[Dict[str, List[str]]] = Field(
+        default_factory=dict,
         description=Prompts.descriptions["RESUME_SKILLS"]["technical_skills"]
     )
-    non_technical_skills: List[str] = Field(
+    non_technical_skills: Optional[List[str]] = Field(
+        default_factory=list,
         description=Prompts.descriptions["RESUME_SKILLS"]["non_technical_skills"]
     )
 
