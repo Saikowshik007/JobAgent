@@ -180,7 +180,7 @@ class ResumeImprover:
             chain_inputs = self._get_formatted_chain_inputs(chain=runnable)
 
             # Log the inputs to debug
-            logger.info(f"Skills extraction inputs: {list(chain_inputs.keys())}")
+            logger.info(f"Skills extraction inputs: {chain_inputs}")
             logger.info(f"Existing skills being sent to LLM: {chain_inputs.get('skills')}")
 
             extracted_skills = runnable.invoke(chain_inputs)
