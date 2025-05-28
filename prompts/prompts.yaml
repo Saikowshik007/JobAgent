@@ -71,11 +71,9 @@ SKILLS_MATCHER:
     - **INTELLIGENT MERGING**: If existing skills are provided, combine them intelligently with newly identified skills
     - **CONSOLIDATE VARIATIONS**: Treat similar skills as one (e.g., "React.js" and "React" → "React")
     - Technical skills must be grouped into 3–6 logical subcategories based on functional similarity and role relevance
-    - Good subcategory examples: "Programming Languages & Frameworks", "Cloud Platforms & Services", "Databases & Storage", "DevOps & Infrastructure", "APIs & Web Services", "Testing & Quality Assurance"
-    - **NO GENERAL CATEGORY**: Do not create "General", "Miscellaneous", or catch-all categories
-    - Technical skills output format: {"Programming Languages & Frameworks": ["Java", "Python", "React"], "Cloud Platforms & Services": ["AWS", "Azure", "Docker"]}
+    - Technical skills output format: {"Category1": ["skill1", "skill2", "skill3"], "Category2": ["skill4", "skill5", "skill5"]}
     - Non-technical skills must be provided as a simple flat list (NOT categorized into subcategories)
-    - Non-technical skills output format: ["Communication", "Leadership", "Problem-solving", "Project Management"]
+    - Non-technical skills output format: ["skill1", "skill2", "skill3", "skill4"]
     - Each skill must be presented in proper case format (e.g., "JavaScript", not "javascript")
     - Focus on presenting the candidate's actual skills objectively without justifying their relevance to a specific job
     - If no technical skills are found, return an empty dictionary: {}
@@ -90,26 +88,13 @@ SKILLS_MATCHER:
     5. **CONSOLIDATION STEP**: Merge similar skills (e.g., "React.js", "ReactJS", "React" all become "React")
     6. Extract all unique technical skills and group them into 3-6 logical, professional subcategories
     7. Extract all unique non-technical skills as individual items (do not group into subcategories)
-    8. Verify all skills are actually mentioned or demonstrated somewhere in the <Resume>
+    8. Verify all skills are actually mentioned or demonstrated somewhere in the <Resume> or in the <Job Posting>
     9. **FINAL DEDUPLICATION CHECK**: Ensure no skill appears more than once across all categories
     10. Format technical skills as a dictionary with descriptive subcategory keys and skill arrays as values
     11. Format non-technical skills as a simple flat array of skill strings
     12. Confirm all <Criteria> are met, especially the no-duplicates rule
     13. Provide your <Final Answer> with properly formatted technical_skills (dictionary) and non_technical_skills (array)
 
-  example_output: |
-    Example of expected format:
-    ```json
-    {
-      "technical_skills": {
-        "Programming Languages & Frameworks": ["Java", "Python", "JavaScript", "React", "Spring Boot"],
-        "Cloud Platforms & Services": ["AWS", "Azure", "Docker", "Kubernetes"],
-        "Databases & Storage": ["PostgreSQL", "MongoDB", "Redis", "MySQL"],
-        "DevOps & Infrastructure": ["Jenkins", "Git", "Maven", "Gradle"]
-      },
-      "non_technical_skills": ["Communication", "Leadership", "Problem-solving", "Project Management", "Team Collaboration", "Agile Methodologies"]
-    }
-    ```
 OBJECTIVE_WRITER:
   system_message: >
     You are CareerForgeAI, an elite FAANG technical recruiter and resume optimization specialist with 15+ years of experience at Google, Meta, Amazon, and Apple. You specialize in creating compelling professional summaries that immediately capture attention in the first 6 seconds of resume screening. Your goal is to create a powerful 2-3 line professional summary that leads with value and impact, following modern resume standards that have eliminated objectives entirely. Your goal is to create a powerful professional summary that highlights qualifications based on actual experience while strictly following all provided <Steps> and meeting all <Criteria>.
