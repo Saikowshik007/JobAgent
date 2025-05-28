@@ -310,30 +310,18 @@ class ResumeImprover:
         for key in chain.get_input_schema().schema().get("required", []):
             value = raw_self_data.get(key) or (self.parsed_job.get(key) if self.parsed_job else None)
 
-            # Special handling for skills to ensure LLM gets existing skills properly
+            # Special handling for skills - pass the raw structure to chain_formatter
+            # Don't pre-format it here since chain_formatter will handle the formatting
             if key == "skills" and self.skills:
-                # Format existing skills in a readable way for the LLM
-                skills_text = "Existing Skills in Resume:\n"
-                for skill_category in self.skills:
-                    category_name = skill_category.get("category", "Unknown")
-                    skills_text += f"\n{category_name}:\n"
-
-                    if "subcategories" in skill_category:
-                        for subcat in skill_category["subcategories"]:
-                            subcat_name = subcat.get("name", "General")
-                            subcat_skills = subcat.get("skills", [])
-                            skills_text += f"  {subcat_name}: {', '.join(subcat_skills)}\n"
-                    elif "skills" in skill_category:
-                        skills_list = skill_category.get("skills", [])
-                        skills_text += f"  {', '.join(skills_list)}\n"
-
-                value = skills_text
+                # Pass the raw skills structure to chain_formatter, not a pre-formatted string
+                value = self.skills
+                logger.debug(f"Passing raw skills structure to chain_formatter: {len(self.skills)} categories")
 
             output_dict[key] = chain_formatter(key, value)
 
             # Debug log for skills specifically
             if key == "skills":
-                logger.debug(f"Formatted skills input for LLM: {output_dict[key][:200]}...")
+                logger.debug(f"After chain_formatter, skills input type: {type(output_dict[key])}")
 
         return output_dict
 
