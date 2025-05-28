@@ -10,7 +10,7 @@ RESUME_SECTION_HIGHLIGHTER_OUTPUT:
 
 RESUME_SKILLS:
   technical_skills: A dictionary where each key is a technical skill subcategory (e.g., "Languages & Frameworks", "Cloud & DevOps") and the value is a list of relevant skills under that group.
-  non_technical_skills: An itemized list of non-technical skills
+  non_technical_skills: An itemized list of non-technical skills (simple list, not nested)
 
 RESUME_SKILLS_MATCHER_OUTPUT:
   plan: itemized <Plan>

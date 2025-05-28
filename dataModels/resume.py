@@ -40,12 +40,12 @@ class ResumeSectionHighlighterOutput(BaseModel):
 
 
 class ResumeSkills(BaseModel):
-    """Pydantic model that defines grouped skills with dynamic subcategories."""
+    """Pydantic model that defines grouped skills with dynamic subcategories for technical skills and simple list for non-technical."""
 
     technical_skills: Dict[str, List[str]] = Field(
         ..., description=Prompts.descriptions["RESUME_SKILLS"]["technical_skills"]
     )
-    non_technical_skills: Dict[str, List[str]] = Field(
+    non_technical_skills: List[str] = Field(
         ..., description=Prompts.descriptions["RESUME_SKILLS"]["non_technical_skills"]
     )
 

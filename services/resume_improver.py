@@ -185,33 +185,42 @@ class ResumeImprover:
 
             extracted_skills = extracted_skills.dict().get("final_answer", {})
             result = []
-            logger.error(extracted_skills)
+            logger.debug(f"Extracted skills: {extracted_skills}")
+            # Handle technical skills (nested dictionary structure)
             if "technical_skills" in extracted_skills:
                 technical = extracted_skills["technical_skills"]
-                if isinstance(technical, dict):  # new format: subgroups
+                if isinstance(technical, dict):  # Expected format: subgroups
                     result.append(
                         dict(category="Technical", subcategories=[
                             dict(name=k, skills=v) for k, v in technical.items()
                         ])
                     )
                 else:
+                    # Fallback for unexpected format
                     result.append(
-                        dict(category="Technical", skills=technical)
+                        dict(category="Technical", skills=technical if isinstance(technical, list) else [])
                     )
-
+    
             if "non_technical_skills" in extracted_skills:
                 non_technical = extracted_skills["non_technical_skills"]
-                if isinstance(non_technical, dict):
+                if isinstance(non_technical, list):  # Expected format: simple list
+                    result.append(
+                        dict(category="Non-technical", skills=non_technical)
+                    )
+                elif isinstance(non_technical, dict):
+                    # Handle if it comes back as dict (fallback)
                     result.append(
                         dict(category="Non-technical", subcategories=[
                             dict(name=k, skills=v) for k, v in non_technical.items()
                         ])
                     )
                 else:
+                    # Fallback for unexpected format
                     result.append(
-                        dict(category="Non-technical", skills=non_technical)
+                        dict(category="Non-technical", skills=[])
                     )
 
+            # Combine with existing skills if any
             self._combine_skill_lists(result, self.skills or [])
             return result
 
