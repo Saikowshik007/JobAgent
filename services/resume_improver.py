@@ -179,54 +179,92 @@ class ResumeImprover:
 
             chain_inputs = self._get_formatted_chain_inputs(chain=runnable)
             extracted_skills = runnable.invoke(chain_inputs)
-            logger.error(extracted_skills)
+
             if not extracted_skills or not hasattr(extracted_skills, 'dict'):
+                logger.warning("No extracted_skills returned from LLM")
                 return self.skills or []
 
-            extracted_skills = extracted_skills.dict().get("final_answer", {})
+            extracted_skills_dict = extracted_skills.dict().get("final_answer", {})
             result = []
-            logger.debug(f"Extracted skills: {extracted_skills}")
+            logger.debug(f"Extracted skills: {extracted_skills_dict}")
 
             # Handle technical skills (nested dictionary structure)
-            technical_skills = extracted_skills.get("technical_skills", {})
+            technical_skills = extracted_skills_dict.get("technical_skills", {})
             if technical_skills:
-                if isinstance(technical_skills, dict) and technical_skills:  # Expected format: subgroups
-                    result.append(
-                        dict(category="Technical", subcategories=[
-                            dict(name=k, skills=v) for k, v in technical_skills.items()
-                        ])
-                    )
+                if isinstance(technical_skills, dict) and technical_skills:
+                    result.append({
+                        "category": "Technical",
+                        "subcategories": [
+                            {"name": k, "skills": v} for k, v in technical_skills.items()
+                        ]
+                    })
                 elif isinstance(technical_skills, list) and technical_skills:
-                    # Fallback for unexpected format
-                    result.append(
-                        dict(category="Technical", skills=technical_skills)
-                    )
+                    result.append({
+                        "category": "Technical",
+                        "skills": technical_skills
+                    })
 
             # Handle non-technical skills (simple list structure)
-            non_technical_skills = extracted_skills.get("non_technical_skills", [])
+            non_technical_skills = extracted_skills_dict.get("non_technical_skills", [])
             if non_technical_skills:
-                if isinstance(non_technical_skills, list):  # Expected format: simple list
-                    result.append(
-                        dict(category="Non-technical", skills=non_technical_skills)
-                    )
+                if isinstance(non_technical_skills, list):
+                    result.append({
+                        "category": "Non-technical",
+                        "skills": non_technical_skills
+                    })
                 elif isinstance(non_technical_skills, dict) and non_technical_skills:
-                    # Handle if it comes back as dict (fallback)
-                    result.append(
-                        dict(category="Non-technical", subcategories=[
-                            dict(name=k, skills=v) for k, v in non_technical_skills.items()
-                        ])
-                    )
+                    result.append({
+                        "category": "Non-technical",
+                        "subcategories": [
+                            {"name": k, "skills": v} for k, v in non_technical_skills.items()
+                        ]
+                    })
 
-            # Combine with existing skills if any
-            if result:
-                self._combine_skill_lists(result, self.skills or [])
-                return result
-            else:
-                logger.warning("No skills extracted from LLM response")
-                return self.skills or []
+            # Safely combine with existing skills
+            try:
+                if result:
+                    existing_skills = self.skills or []
+                    logger.debug(f"Existing skills type: {type(existing_skills)}")
+                    logger.debug(f"Existing skills: {existing_skills}")
+
+                    # If no existing skills, just return the new results
+                    if not existing_skills:
+                        logger.info("No existing skills, returning new results")
+                        return result
+
+                    # Ensure existing_skills is a list of dicts with expected structure
+                    if isinstance(existing_skills, list):
+                        # Validate structure of existing skills
+                        validated_existing = []
+                        for skill_item in existing_skills:
+                            if isinstance(skill_item, dict) and "category" in skill_item:
+                                validated_existing.append(skill_item)
+                            else:
+                                logger.warning(f"Skipping invalid existing skill item: {skill_item}")
+
+                        if validated_existing:
+                            logger.info(f"Combining {len(result)} new skill categories with {len(validated_existing)} existing")
+                            self._combine_skill_lists(result, validated_existing)
+                        else:
+                            logger.info("No valid existing skills to combine")
+                    else:
+                        logger.warning(f"Existing skills is not a list: {type(existing_skills)}")
+
+                    return result
+                else:
+                    logger.info("No new skills extracted, returning existing skills")
+                    return self.skills or []
+
+            except Exception as combine_error:
+                logger.error(f"Error combining skill lists: {combine_error}")
+                logger.error(f"Combine error traceback: {traceback.format_exc()}")
+                # If combining fails, just return the new results
+                return result if result else (self.skills or [])
 
         except Exception as e:
             logger.error(f"Error in extract_matched_skills: {e}")
+            import traceback
+            logger.error(f"Full traceback: {traceback.format_exc()}")
             return self.skills or []
 
 
@@ -328,13 +366,76 @@ class ResumeImprover:
     def _combine_skill_lists(self, l1: list[dict], l2: list[dict]):
         """Combine two lists of skill categories without duplicating lowercase entries."""
         l1_categories_lowercase = {s["category"].lower(): i for i, s in enumerate(l1)}
+
         for s in l2:
-            if s["category"].lower() in l1_categories_lowercase:
-                self._combine_skills_in_category(
-                    l1[l1_categories_lowercase[s["category"].lower()]]["skills"],
-                    s["skills"],
-                )
+            category_lower = s["category"].lower()
+
+            if category_lower in l1_categories_lowercase:
+                # Get the existing category
+                existing_idx = l1_categories_lowercase[category_lower]
+                existing_category = l1[existing_idx]
+
+                # Handle different structures: subcategories vs direct skills
+                if "subcategories" in existing_category and "subcategories" in s:
+                    # Both have subcategories - merge subcategories
+                    existing_subcats = {sub["name"].lower(): sub for sub in existing_category["subcategories"]}
+
+                    for new_subcat in s["subcategories"]:
+                        subcat_name_lower = new_subcat["name"].lower()
+                        if subcat_name_lower in existing_subcats:
+                            # Merge skills within the subcategory
+                            self._combine_skills_in_category(
+                                existing_subcats[subcat_name_lower]["skills"],
+                                new_subcat["skills"]
+                            )
+                        else:
+                            # Add new subcategory
+                            existing_category["subcategories"].append(new_subcat)
+
+                elif "skills" in existing_category and "skills" in s:
+                    # Both have direct skills - merge them
+                    self._combine_skills_in_category(
+                        existing_category["skills"],
+                        s["skills"]
+                    )
+
+                elif "subcategories" in existing_category and "skills" in s:
+                    # Existing has subcategories, new has direct skills
+                    # Convert new skills to a subcategory or handle as needed
+                    if not any(sub["name"].lower() == "general" for sub in existing_category["subcategories"]):
+                        existing_category["subcategories"].append({
+                            "name": "General",
+                            "skills": s["skills"][:]
+                        })
+                    else:
+                        # Find General subcategory and add skills
+                        for sub in existing_category["subcategories"]:
+                            if sub["name"].lower() == "general":
+                                self._combine_skills_in_category(sub["skills"], s["skills"])
+                                break
+
+                elif "skills" in existing_category and "subcategories" in s:
+                    # Existing has direct skills, new has subcategories
+                    # Convert existing to subcategories format
+                    existing_skills = existing_category["skills"][:]
+                    existing_category["subcategories"] = [
+                        {"name": "General", "skills": existing_skills}
+                    ]
+                    del existing_category["skills"]
+
+                    # Now merge the subcategories
+                    existing_subcats = {"general": existing_category["subcategories"][0]}
+                    for new_subcat in s["subcategories"]:
+                        subcat_name_lower = new_subcat["name"].lower()
+                        if subcat_name_lower in existing_subcats:
+                            self._combine_skills_in_category(
+                                existing_subcats[subcat_name_lower]["skills"],
+                                new_subcat["skills"]
+                            )
+                        else:
+                            existing_category["subcategories"].append(new_subcat)
             else:
+                # Add new category
                 l1.append(s)
 
     def dict_to_yaml_string(self, data: dict) -> str:
