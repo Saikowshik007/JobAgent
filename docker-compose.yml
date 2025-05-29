@@ -21,14 +21,14 @@ services:
       - "--log.level=INFO"
       - "--accesslog=true"
     ports:
-      - "8080:8080"  # Traefik dashboard
-      - "80:80"    # Changed from 80:80
+      - "80:80"
       - "443:443"
+      - "8080:8080"  # Traefik dashboard
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./letsencrypt:/letsencrypt
     networks:
-      - jobtrak-data-network
+      - jobtrak-network
     restart: unless-stopped
 
   # FastAPI service
@@ -46,7 +46,7 @@ services:
       - ./logs:/app/logs
     restart: unless-stopped
     networks:
-      - jobtrak-data-network
+      - jobtrak-network
     environment:
       # Application settings
       - PYTHONPATH=/app
@@ -170,7 +170,7 @@ services:
     volumes:
       - redis_data:/data
     networks:
-      - jobtrak-data-network
+      - jobtrak-network
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
@@ -191,7 +191,7 @@ services:
     volumes:
       - pgadmin_data:/var/lib/pgadmin
     networks:
-      - jobtrak-data-network
+      - jobtrak-network
     depends_on:
       postgres:
         condition: service_healthy
@@ -202,7 +202,7 @@ services:
 networks:
   jobtrak-data-network:
     driver: bridge
-    name: jobtrak-data-network
+    name: jobtrak-network
 
 volumes:
   postgres_data:
