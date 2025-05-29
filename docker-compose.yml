@@ -129,7 +129,7 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ./init-scripts:/docker-entrypoint-initdb.d:ro
     networks:
-      - jobtrak-data-network
+      - jobtrak-network
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U jobtrak_user -d jobtrak"]
