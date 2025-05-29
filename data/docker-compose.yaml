@@ -1,124 +1,152 @@
-version: '3.8'
-
 services:
-  # PostgreSQL Database
-  postgres:
-    image: postgres:15-alpine
-    container_name: jobtrak-postgres
-    environment:
-      POSTGRES_DB: jobtrak
-      POSTGRES_USER: jobtrak_user
-      POSTGRES_PASSWORD: jobtrak_secure_password_2024
-      PGDATA: /var/lib/postgresql/data/pgdata
+  # Traefik reverse proxy for DuckDNS
+  traefik:
+    image: traefik:v3.0
+    container_name: jobtrak-traefik
+    command:
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      # Let's Encrypt configuration
+      - "--certificatesresolvers.letsencrypt.acme.tlschallenge=true"
+      - "--certificatesresolvers.letsencrypt.acme.email=askowshik@outlook.com"
+      - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
+      # Redirect HTTP to HTTPS
+      - "--entrypoints.web.http.redirections.entrypoint.to=websecure"
+      - "--entrypoints.web.http.redirections.entrypoint.scheme=https"
+      - "--entrypoints.web.http.redirections.entrypoint.permanent=true"
+      # Logging
+      - "--log.level=INFO"
+      - "--accesslog=true"
     ports:
-      - "5432:5432"  # Expose for external access if needed
+      - "80:80"
+      - "443:443"
+      - "8080:8080"  # Traefik dashboard
     volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - init-scripts:/docker-entrypoint-initdb.d
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./letsencrypt:/letsencrypt
     networks:
-      - jobtrak-data-network
+      - jobtrak-app-network
+      - jobtrak-data-network  # Connect to data services
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U jobtrak_user -d jobtrak"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    command: >
-      postgres
-      -c shared_buffers=256MB
-      -c effective_cache_size=1GB
-      -c maintenance_work_mem=64MB
-      -c checkpoint_completion_target=0.9
-      -c wal_buffers=16MB
-      -c default_statistics_target=100
-      -c random_page_cost=1.1
-      -c effective_io_concurrency=200
-      -c min_wal_size=1GB
-      -c max_wal_size=4GB
-      -c max_connections=100
-      -c log_min_duration_statement=1000
 
-  # Redis Cache
-  redis:
-    image: redis:7-alpine
-    container_name: jobtrak-redis
-    command: >
-      redis-server
-      --appendonly yes
-      --maxmemory 512mb
-      --maxmemory-policy allkeys-lru
-      --save 900 1
-      --save 300 10
-      --save 60 10000
-      --appendfsync everysec
-      --tcp-keepalive 300
-      --timeout 300
+  # Selenium Chrome for web scraping
+  selenium-chrome:
+    image: selenium/standalone-chrome:latest
+    container_name: jobtrak-selenium
     ports:
-      - "6379:6379"  # Expose for external access if needed
+      - "4444:4444"
+      - "7900:7900"  # VNC server for debugging
     volumes:
-      - redis_data:/data
+      - /dev/shm:/dev/shm
+    environment:
+      - SE_VNC_NO_PASSWORD=1
+      - SE_NODE_MAX_SESSIONS=5
+      - SE_NODE_OVERRIDE_MAX_SESSIONS=true
     networks:
-      - jobtrak-data-network
+      - jobtrak-app-network
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 3s
+      test: ["CMD", "curl", "-f", "http://localhost:4444/wd/hub/status"]
+      interval: 30s
+      timeout: 10s
       retries: 3
 
-  # Optional: Redis Commander for Redis management
-  redis-commander:
-    image: rediscommander/redis-commander:latest
-    container_name: jobtrak-redis-commander
-    environment:
-      - REDIS_HOSTS=local:redis:6379
-      - HTTP_USER=admin
-      - HTTP_PASSWORD=admin123
+  # FastAPI application
+  jobtrak-api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: jobtrak-api
     ports:
-      - "8081:8081"
-    networks:
-      - jobtrak-data-network
-    depends_on:
-      redis:
-        condition: service_healthy
-    restart: unless-stopped
-    profiles:
-      - tools  # Only start with --profile tools
-
-  # Optional: pgAdmin for PostgreSQL management
-  pgadmin:
-    image: dpage/pgadmin4:latest
-    container_name: jobtrak-pgadmin
-    environment:
-      PGADMIN_DEFAULT_EMAIL: admin@jobtrak.local
-      PGADMIN_DEFAULT_PASSWORD: admin123
-      PGADMIN_CONFIG_SERVER_MODE: 'False'
-    ports:
-      - "8082:80"
+      - "8000:8000"  # Direct access during development
     volumes:
-      - pgadmin_data:/var/lib/pgadmin
-    networks:
-      - jobtrak-data-network
-    depends_on:
-      postgres:
-        condition: service_healthy
+      - .:/app
+      - ./database:/app/database
+      - ./output:/app/output
+      - ./logs:/app/logs
     restart: unless-stopped
-    profiles:
-      - tools  # Only start with --profile tools
+    networks:
+      - jobtrak-app-network
+      - jobtrak-data-network  # Connect to data services
+    depends_on:
+      selenium-chrome:
+        condition: service_healthy
+    environment:
+      # Application settings
+      - PYTHONPATH=/app
+      - PYTHONUNBUFFERED=1
+      - PYTHONDONTWRITEBYTECODE=1
+      - API_DEBUG=1
+      - HOST_IP=${HOST_IP:-auto-detect}
+      
+      # External services
+      - SELENIUM_REMOTE_URL=http://selenium-chrome:4444/wd/hub
+      - SIMPLIFY_JOBS_API_URL=https://api.simplify.jobs/v2
+      - SIMPLIFY_SITE_KEY=6LcStf4UAAAAAIVZo9JUJ3PntTfRBhvXLKBTGww8
+      
+      # Database configuration (PostgreSQL)
+      - DATABASE_URL=postgresql://jobtrak_user:jobtrak_secure_password_2024@jobtrak-postgres:5432/jobtrak
+      - POSTGRES_HOST=jobtrak-postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=jobtrak
+      - POSTGRES_USER=jobtrak_user
+      - POSTGRES_PASSWORD=jobtrak_secure_password_2024
+      
+      # Redis configuration
+      - REDIS_URL=redis://jobtrak-redis:6379/0
+      - REDIS_HOST=jobtrak-redis
+      - REDIS_PORT=6379
+      - REDIS_DB=0
+      - CACHE_TTL=3600
+      
+      # LinkedIn credentials (consider using Docker secrets in production)
+      - LINKEDIN_EMAIL=saianantula007@outlook.com
+      - LINKEDIN_PASSWORD=Saikowshik@2000
+      
+      # OpenAI configuration
+      - OPENAI_API_KEY=your_openai_api_key
+      - MODEL_PROVIDER=openai
+      - MODEL_NAME=gpt-4.1-mini
+      - MODEL_TEMPERATURE=0.3
+
+    labels:
+      - "traefik.enable=true"
+      
+      # API routing for your DuckDNS domain
+      - "traefik.http.routers.api.rule=Host(`jobtrackai.duckdns.org`) && PathPrefix(`/api`)"
+      - "traefik.http.routers.api.entrypoints=websecure"
+      - "traefik.http.routers.api.tls.certresolver=letsencrypt"
+      - "traefik.http.services.api.loadbalancer.server.port=8000"
+      
+      # Rate limiting
+      - "traefik.http.middlewares.api-ratelimit.ratelimit.average=100"
+      - "traefik.http.middlewares.api-ratelimit.ratelimit.burst=50"
+      - "traefik.http.middlewares.api-ratelimit.ratelimit.period=1m"
+      
+      # HTTPS redirect middleware
+      - "traefik.http.middlewares.https-redirect.redirectscheme.scheme=https"
+      - "traefik.http.middlewares.https-redirect.redirectscheme.permanent=true"
+      
+      # Apply middlewares
+      - "traefik.http.routers.api.middlewares=api-ratelimit"
+      
+      # HTTP to HTTPS redirect
+      - "traefik.http.routers.api-http.rule=Host(`jobtrackai.duckdns.org`) && PathPrefix(`/`)"
+      - "traefik.http.routers.api-http.entrypoints=web"
+      - "traefik.http.routers.api-http.middlewares=https-redirect"
 
 networks:
-  jobtrak-data-network:
+  jobtrak-app-network:
     driver: bridge
+    name: jobtrak-app-network
+  jobtrak-data-network:
+    external: true
     name: jobtrak-data-network
-    external: false
 
 volumes:
-  postgres_data:
+  letsencrypt:
     driver: local
-    name: jobtrak-postgres-data
-  redis_data:
-    driver: local
-    name: jobtrak-redis-data
-  pgadmin_data:
-    driver: local
-    name: jobtrak-pgadmin-data
+    name: jobtrak-letsencrypt
