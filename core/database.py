@@ -5,9 +5,6 @@ import os
 import logging
 import traceback
 from typing import Optional
-
-# Import your config and data modules
-# Adjust these imports based on your actual module structure
 try:
     import config
 except ImportError:
@@ -33,19 +30,6 @@ async def initialize_app(app, db_url: Optional[str] = None, job_cache_size: Opti
                 # Provide a default SQLite database for development
                 db_url = "sqlite:///./jobtrak.db"
                 logger.warning(f"No DATABASE_URL provided, using default: {db_url}")
-
-        if job_cache_size is None:
-            if config:
-                job_cache_size = int(config.get("cache.job_cache_size", 1000))
-            else:
-                job_cache_size = int(os.environ.get('JOB_CACHE_SIZE', 1000))
-
-        if search_cache_size is None:
-            if config:
-                search_cache_size = int(config.get("cache.search_cache_size", 1000))
-            else:
-                search_cache_size = int(os.environ.get('SEARCH_CACHE_SIZE', 1000))
-
         logger.info(f"Configuration: db_url={db_url}, job_cache_size={job_cache_size}, search_cache_size={search_cache_size}")
 
         # Initialize database
@@ -59,24 +43,11 @@ async def initialize_app(app, db_url: Optional[str] = None, job_cache_size: Opti
             logger.error(traceback.format_exc())
             raise
 
-        # Initialize caches
-        try:
-            from data.cache import JobCache, ResumeCache
-            job_cache = JobCache(max_size=job_cache_size)
-            resume_cache = ResumeCache()
-            logger.info(f"✓ Caches initialized - job: {job_cache_size}, search: {search_cache_size}")
-        except Exception as e:
-            logger.error(f"✗ Cache initialization failed: {e}")
-            logger.error(traceback.format_exc())
-            raise
-
         # Initialize unified cache manager
         try:
             from data.dbcache_manager import DBCacheManager
             cache_manager = DBCacheManager(
                 database=db,
-                job_cache=job_cache,
-                resume_cache=resume_cache
             )
             logger.info("✓ Unified cache manager initialized")
         except Exception as e:
@@ -87,8 +58,6 @@ async def initialize_app(app, db_url: Optional[str] = None, job_cache_size: Opti
         # Store in application state
         try:
             app.state.db = db
-            app.state.job_cache = job_cache
-            app.state.resume_cache = resume_cache
             app.state.cache_manager = cache_manager
 
             # Verify the state was set correctly
@@ -132,17 +101,6 @@ async def verify_initialization(app):
 
     if not hasattr(app.state, 'db'):
         issues.append("Database not initialized")
-
-    if not hasattr(app.state, 'cache_manager'):
-        issues.append("Cache manager not initialized")
-    elif app.state.cache_manager is None:
-        issues.append("Cache manager is None")
-
-    if not hasattr(app.state, 'job_cache'):
-        issues.append("Job cache not initialized")
-
-    if not hasattr(app.state, 'resume_cache'):
-        issues.append("Resume cache not initialized")
 
     if issues:
         logger.error(f"Initialization verification failed: {issues}")
