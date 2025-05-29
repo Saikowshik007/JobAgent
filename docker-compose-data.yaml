@@ -12,7 +12,7 @@ services:
       - "5432:5432"  # Expose for external access if needed
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - init-scripts:/docker-entrypoint-initdb.d:ro
+      - ./init-scripts:/docker-entrypoint-initdb.d:ro
     networks:
       - jobtrak-data-network
     restart: unless-stopped
