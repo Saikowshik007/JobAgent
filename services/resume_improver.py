@@ -152,9 +152,8 @@ class ResumeImprover:
             # Generate
             result = chain.invoke(chain_inputs)
 
-            if result and hasattr(result, 'dict'):
-                objective_dict = result.dict()
-                objective = objective_dict.get('final_answer')
+            if result:
+                objective = result.get('final_answer')
                 logger.debug(f"Objective result: {objective}")
                 return objective
 
@@ -185,11 +184,11 @@ class ResumeImprover:
 
             extracted_skills = runnable.invoke(chain_inputs)
 
-            if not extracted_skills or not hasattr(extracted_skills, 'dict'):
+            if not extracted_skills:
                 logger.warning("No extracted_skills returned from LLM")
                 return self.skills or []
 
-            extracted_skills_dict = extracted_skills.dict().get("final_answer", {})
+            extracted_skills_dict = extracted_skills.get("final_answer", {})
             logger.info(f"LLM returned skills: {extracted_skills_dict}")
 
             # Build the final skills structure - LLM has already handled deduplication
@@ -286,8 +285,8 @@ class ResumeImprover:
             chain_inputs = self._get_formatted_chain_inputs(chain=chain, section=section)
             section_revised = chain.invoke(chain_inputs)
 
-            if section_revised and hasattr(section_revised, 'dict'):
-                highlights = section_revised.dict().get("final_answer", [])
+            if section_revised:
+                highlights = section_revised.get("final_answer", [])
                 sorted_highlights = sorted(highlights, key=lambda d: d.get("relevance", 0) * -1)
                 return [s["highlight"] for s in sorted_highlights]
 

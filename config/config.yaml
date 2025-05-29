@@ -36,19 +36,19 @@ model:
 # Project Paths
 paths:
   project: /app
-  resume: /app/resume/resume.yaml
-  data: /app/output/data
-  resources: /app/resources
-  prompts: /app/prompts
-  config: /app/config
+  resume: resume/resume.yaml
+  data: output/data
+  resources: resources
+  prompts: prompts
+  config: config
   output_dir: output
-  background_tasks_log: /app/data/background_tasks/tasks.log
+  background_tasks_log: data/background_tasks/tasks.log
 
 # Default Files
 files:
   default_resume: resume/resume.yaml
-  prompts_yaml: /app/prompts/prompts.yaml
-  descriptions_yaml: /app/prompts/extractor_descriptions.yaml
+  prompts_yaml: prompts/prompts.yaml
+  descriptions_yaml: prompts/extractor_descriptions.yaml
 
 # Application Settings
 settings:

@@ -25,7 +25,7 @@ async def initialize_app(app, db_url: Optional[str] = None, job_cache_size: Opti
         # Get configuration from environment variables if not provided
         if db_url is None:
             if config:
-                db_url = config.get("database.url") or os.environ.get('DATABASE_URL')
+                db_url = config.get("database.path") or os.environ.get('DATABASE_URL')
             else:
                 db_url = os.environ.get('DATABASE_URL')
 

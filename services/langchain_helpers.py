@@ -110,24 +110,42 @@ def chain_formatter(format_type: str, input_data) -> str:
         str: The formatted data as a string.
     """
     logger.debug(f"Formatting chain input of type: {format_type}")
+    logger.debug(f"Input data type: {type(input_data)}, content preview: {str(input_data)[:200] if input_data else 'None'}")
+
     try:
         if format_type == 'experience':
             as_list = format_experiences_for_prompt(input_data)
-            return format_prompt_inputs_as_strings(as_list)
+            formatted = format_prompt_inputs_as_strings(["experience"], experience=as_list)
+            return formatted.get("experience", "")
+
         elif format_type == 'projects':
             as_list = format_projects_for_prompt(input_data)
-            return format_prompt_inputs_as_strings(as_list)
+            formatted = format_prompt_inputs_as_strings(["projects"], projects=as_list)
+            return formatted.get("projects", "")
+
         elif format_type == 'skills':
+            # Don't lose the skills data here!
             as_list = format_skills_for_prompt(input_data)
-            return format_prompt_inputs_as_strings(as_list)
+            formatted = format_prompt_inputs_as_strings(["skills"], skills=as_list)
+            result = formatted.get("skills", "")
+            logger.debug(f"Final formatted skills string: {result}")
+            return result
+
         elif format_type == 'education':
             return format_education_for_resume(input_data)
+
         else:
-            logger.debug(f"No specific formatter for type '{format_type}', returning input as is")
-            return input_data
+            logger.debug(f"No specific formatter for type '{format_type}', returning input as string")
+            # Convert to string for non-specific types
+            if isinstance(input_data, (list, dict)):
+                return str(input_data)
+            return input_data or ""
+
     except Exception as e:
         logger.error(f"Error formatting chain input of type '{format_type}': {str(e)}")
-        raise
+        logger.error(f"Input data: {input_data}")
+        # Return empty string rather than crashing
+        return ""
 
 
 def format_education_for_resume(education_list: list[dict]) -> str:
@@ -156,26 +174,68 @@ def format_skills_for_prompt(input_data) -> list:
     """Format skills for inclusion in a prompt.
 
     Args:
-        skills (list): The list of skills.
+        input_data: The list of skills or skills structure.
 
     Returns:
         list: A formatted list of skills.
     """
-    logger.debug(f"Formatting skills with {len(input_data)} categories")
+    logger.debug(f"Formatting skills input: {type(input_data)} with content: {input_data}")
+
+    # Handle None or empty input
+    if not input_data:
+        logger.warning("No skills data provided to format_skills_for_prompt")
+        return []
+
     try:
         result = []
-        for cat in input_data:
-            curr = ""
-            if cat.get("category", ""):
-                curr += f"{cat['category']}: "
-            if "skills" in cat:
-                curr += "Proficient in "
-                curr += ", ".join(cat["skills"])
-                result.append(curr)
+
+        # Handle different input formats
+        if isinstance(input_data, list):
+            # Standard format: list of categories
+            for cat in input_data:
+                if not isinstance(cat, dict):
+                    logger.warning(f"Unexpected skill category format: {type(cat)}")
+                    continue
+
+                curr = ""
+                if cat.get("category", ""):
+                    curr += f"{cat['category']}: "
+
+                # Handle subcategories format (new structure)
+                if "subcategories" in cat:
+                    skills_list = []
+                    for subcat in cat["subcategories"]:
+                        if isinstance(subcat, dict) and "skills" in subcat:
+                            skills_list.extend(subcat["skills"])
+                    if skills_list:
+                        curr += "Proficient in "
+                        curr += ", ".join(skills_list)
+                        result.append(curr)
+
+                # Handle direct skills format (legacy structure)
+                elif "skills" in cat:
+                    skills_list = cat["skills"]
+                    if skills_list:
+                        curr += "Proficient in "
+                        curr += ", ".join(skills_list)
+                        result.append(curr)
+
+        elif isinstance(input_data, dict):
+            # Handle if input_data is a dictionary directly
+            for category, skills_list in input_data.items():
+                if skills_list:
+                    curr = f"{category}: Proficient in "
+                    curr += ", ".join(skills_list)
+                    result.append(curr)
+
+        logger.debug(f"Formatted skills result: {result}")
         return result
+
     except Exception as e:
         logger.error(f"Error formatting skills: {str(e)}")
-        raise
+        logger.error(f"Input data type: {type(input_data)}, content: {input_data}")
+        # Return empty list rather than crashing
+        return []
 
 
 def get_cumulative_time_from_titles(titles) -> int:
