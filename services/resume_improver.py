@@ -16,7 +16,7 @@ class ResumeImprover:
     Parallel ResumeImprover using asyncio.gather with run_in_executor for true HTTP parallelism.
     """
 
-    def __init__(self, url, api_key, parsed_job=None, llm_kwargs: dict = None, timeout: int = 300):
+    def __init__(self, url, api_key, parsed_job, llm_kwargs: dict = None, timeout: int = 300):
         """Initialize ResumeImprover with the job post URL and optional resume location."""
         super().__init__()
         self.job_post_html_data = None
@@ -319,8 +319,26 @@ class ResumeImprover:
             # Generate
             result = chain.invoke(chain_inputs)
 
+            # Debug logging to understand the response format
+            logger.info(f"Objective result type: {type(result)}")
+            logger.info(f"Objective result content: {result}")
+            logger.info(f"Has final_answer attr: {hasattr(result, 'final_answer')}")
+
             if result:
-                objective = result.get('final_answer')
+                # Handle both Pydantic model and dictionary responses
+                if hasattr(result, 'final_answer'):
+                    # Pydantic model
+                    objective = result.final_answer
+                    logger.info("Using Pydantic model access")
+                elif isinstance(result, dict):
+                    # Dictionary response
+                    objective = result.get('final_answer')
+                    logger.info("Using dictionary access")
+                else:
+                    # Direct string response
+                    objective = result
+                    logger.info("Using direct response")
+
                 logger.debug(f"Objective result: {objective}")
                 return objective
 
@@ -341,6 +359,8 @@ class ResumeImprover:
 
             chain = ChatPromptTemplate(messages=Prompts.lookup["SKILLS_MATCHER"])
             llm = create_llm(api_key=self.api_key, **self.llm_kwargs)
+
+            # Keep using function_calling method since json_mode requires "json" in prompts
             runnable = chain | llm.with_structured_output(schema=ResumeSkillsMatcherOutput, method="function_calling")
 
             chain_inputs = self._get_formatted_chain_inputs(chain=runnable)
@@ -351,18 +371,41 @@ class ResumeImprover:
 
             extracted_skills = runnable.invoke(chain_inputs)
 
+            # Debug logging
+            logger.info(f"Skills result type: {type(extracted_skills)}")
+            logger.info(f"Skills result content: {extracted_skills}")
+            logger.info(f"Has final_answer attr: {hasattr(extracted_skills, 'final_answer')}")
+
             if not extracted_skills:
                 logger.warning("No extracted_skills returned from LLM")
                 return self.skills or []
 
-            extracted_skills_dict = extracted_skills.get("final_answer", {})
+            # Handle both Pydantic model and dictionary responses
+            if hasattr(extracted_skills, 'final_answer'):
+                # Pydantic model
+                extracted_skills_dict = extracted_skills.final_answer
+            elif isinstance(extracted_skills, dict):
+                # Dictionary response
+                extracted_skills_dict = extracted_skills.get("final_answer", {})
+            else:
+                logger.error(f"Unexpected response type: {type(extracted_skills)}")
+                return self.skills or []
+
             logger.info(f"LLM returned skills: {extracted_skills_dict}")
 
             # Build the final skills structure - LLM has already handled deduplication
             result = []
 
-            # Handle technical skills
-            technical_skills = extracted_skills_dict.get("technical_skills", {})
+            # Handle technical skills - support both Pydantic model and dict
+            if hasattr(extracted_skills_dict, 'technical_skills'):
+                # Pydantic model
+                technical_skills = extracted_skills_dict.technical_skills or {}
+            elif isinstance(extracted_skills_dict, dict):
+                # Dictionary
+                technical_skills = extracted_skills_dict.get("technical_skills", {})
+            else:
+                technical_skills = {}
+
             if technical_skills and isinstance(technical_skills, dict):
                 # Convert to subcategories format
                 subcategories = []
@@ -379,8 +422,16 @@ class ResumeImprover:
                         "subcategories": subcategories
                     })
 
-            # Handle non-technical skills
-            non_technical_skills = extracted_skills_dict.get("non_technical_skills", [])
+            # Handle non-technical skills - support both Pydantic model and dict
+            if hasattr(extracted_skills_dict, 'non_technical_skills'):
+                # Pydantic model
+                non_technical_skills = extracted_skills_dict.non_technical_skills or []
+            elif isinstance(extracted_skills_dict, dict):
+                # Dictionary
+                non_technical_skills = extracted_skills_dict.get("non_technical_skills", [])
+            else:
+                non_technical_skills = []
+
             if non_technical_skills and isinstance(non_technical_skills, list):
                 result.append({
                     "category": "Non-technical",
@@ -452,15 +503,30 @@ class ResumeImprover:
             section_revised = chain.invoke(chain_inputs)
 
             if section_revised:
-                highlights = section_revised.get("final_answer", [])
-                sorted_highlights = sorted(highlights, key=lambda d: d.get("relevance", 0) * -1)
-                return [s["highlight"] for s in sorted_highlights]
+                # Handle both Pydantic model and dictionary responses
+                if hasattr(section_revised, 'final_answer'):
+                    # Pydantic model
+                    highlights = section_revised.final_answer or []
+                    sorted_highlights = sorted(highlights, key=lambda d: d.relevance * -1)
+                    return [s.highlight for s in sorted_highlights]
+                elif isinstance(section_revised, dict):
+                    # Dictionary response
+                    highlights = section_revised.get("final_answer", [])
+                    sorted_highlights = sorted(highlights, key=lambda d: d.get("relevance", 0) * -1)
+                    return [s.get("highlight", "") for s in sorted_highlights]
+                else:
+                    logger.error(f"Unexpected response type: {type(section_revised)}")
 
             return section.get("highlights", [])
 
         except Exception as e:
             logger.error(f"Error in rewrite_section: {e}")
             return section.get("highlights", [])
+            highlights = section_revised.final_answer or []
+            sorted_highlights = sorted(highlights, key=lambda d: d.relevance * -1)  # Use .relevance not .get()
+            return [s.highlight for s in sorted_highlights]  # Use .highlight not .get()
+
+        return section.get("highlights", [])
 
     def _get_formatted_chain_inputs(self, chain, section=None):
         """Get formatted inputs for chain with proper skills formatting"""
