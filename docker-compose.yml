@@ -34,28 +34,6 @@ services:
       - jobtrak-data-network  # Connect to data services
     restart: unless-stopped
 
-  # Selenium Chrome for web scraping
-  selenium-chrome:
-    image: selenium/standalone-chrome:latest
-    container_name: jobtrak-selenium
-    ports:
-      - "4444:4444"
-      - "7900:7900"  # VNC server for debugging
-    volumes:
-      - /dev/shm:/dev/shm
-    environment:
-      - SE_VNC_NO_PASSWORD=1
-      - SE_NODE_MAX_SESSIONS=5
-      - SE_NODE_OVERRIDE_MAX_SESSIONS=true
-    networks:
-      - jobtrak-app-network
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:4444/wd/hub/status"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-
   # FastAPI application
   jobtrak-api:
     build:
