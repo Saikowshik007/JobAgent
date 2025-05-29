@@ -11,14 +11,14 @@ class ResumeImprover:
     Same interface, less complexity.
     """
 
-    def __init__(self, url, api_key, resume_location=None, llm_kwargs: dict = None):
+    def __init__(self, url, api_key, parsed_job, llm_kwargs: dict = None):
         """Initialize ResumeImprover with the job post URL and optional resume location."""
         super().__init__()
         self.job_post_html_data = None
         self.job_post_raw = None
         self.resume = None
         self.job_post = None
-        self.parsed_job = None
+        self.parsed_job = parsed_job
         self.llm_kwargs = llm_kwargs or {}
         self.api_key = api_key
         self.url = url
@@ -41,8 +41,8 @@ class ResumeImprover:
             logger.info("=== Creating Complete Tailored Resume ===")
 
             # Step 1: Parse job posting
-            logger.info("Parsing job posting...")
-            self.download_and_parse_job_post()
+            # logger.info("Parsing job posting...")
+            # self.download_and_parse_job_post()
 
             # Step 2: Generate all content
             logger.info("Generating objective...")

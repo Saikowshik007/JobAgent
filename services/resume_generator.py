@@ -172,14 +172,15 @@ class ResumeGenerator:
         """Synchronous resume generation that runs in thread pool."""
         try:
             job_url = job_dict.get('job_url')
+            parsed_job = job_dict.get("metadata")
             if not job_url:
                 raise ValueError("Job URL not found in job data")
 
             # Initialize ResumeImprover - it does ALL the work
             resume_improver = ResumeImprover(
                 url=job_url,
-                api_key=self.api_key,
-                resume_location=None
+                parsed_job=parsed_job,
+                api_key=self.api_key
             )
 
             # Set up resume data if provided
