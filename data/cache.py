@@ -1,299 +1,596 @@
-import asyncio
+import redis
+import json
+import pickle
+import time
 import hashlib
 import logging
-import json
-import time
 from enum import Enum
 from typing import Dict, List, Optional, Any, Set, Tuple
 from datetime import datetime, timedelta
-from collections import OrderedDict
-import threading
-from dataclasses import dataclass
+import asyncio
 
 from dataModels.data_models import Job, Resume
 
 logger = logging.getLogger(__name__)
 
-@dataclass
-class CacheEntry:
-    """ cache entry with metadata."""
-    data: Any
-    created_at: float
-    last_accessed: float
-    access_count: int
-    size_bytes: int
+class ResumeGenerationStatus(Enum):
+    """Resume generation status."""
+    PENDING = "pending"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    FAILED = "failed"
 
-class JobCache:
+class RedisCache:
     """
-    High-performance job cache with memory management and efficient lookup.
+    Unified Redis cache for jobs, resumes, search results, and resume generation status.
+    Uses different key prefixes to organize different types of cached data.
     """
 
-    def __init__(self, max_size=1000, ttl_seconds=3600, max_memory_mb=100):
+    def __init__(self, redis_url="redis://localhost:6379", default_ttl=86400):
         """
-        Initialize job cache.
+        Initialize unified Redis cache.
 
         Args:
-            max_size: Maximum number of entries
-            ttl_seconds: Time-to-live for entries
-            max_memory_mb: Maximum memory usage in MB
+            redis_url: Redis connection URL
+            default_ttl: Default time-to-live in seconds
         """
-        self.max_size = max_size
-        self.ttl_seconds = ttl_seconds
-        self.max_memory_bytes = max_memory_mb * 1024 * 1024
+        self.redis_client = redis.from_url(redis_url, decode_responses=False)
+        self.default_ttl = default_ttl
 
-        # Thread-safe data structures
-        self._lock = threading.RLock()
+        # Key prefixes for different data types
+        self.prefixes = {
+            # Job cache
+            'job': 'job:',
+            'job_url_index': 'job_url:',
+            'job_signature_index': 'job_sig:',
+            'job_user_index': 'job_user:',
 
-        # Main cache storage - LRU ordered
-        self._cache: OrderedDict[str, CacheEntry] = OrderedDict()
+            # Resume cache
+            'resume': 'resume:',
+            'resume_user_index': 'resume_user:',
+            'resume_job_index': 'resume_job:',
 
-        # Efficient lookup indexes
-        self._url_index: Dict[str, str] = {}  # url_key -> cache_key
-        self._signature_index: Dict[str, str] = {}  # signature -> cache_key
-        self._user_index: Dict[str, Set[str]] = {}  # user_id -> set of cache_keys
+            # Search cache
+            'search': 'search:',
+            'search_user_index': 'search_user:',
 
-        # Memory and statistics tracking
-        self._total_memory = 0
-        self._hit_count = 0
-        self._miss_count = 0
-        self._eviction_count = 0
+            # Resume generation status
+            'resume_status': 'resume_status:',
 
-        # Background cleanup
-        self._last_cleanup = time.time()
-        self._cleanup_interval = 300  # 5 minutes
+            # Cache statistics
+            'stats': 'cache_stats'
+        }
+
+        # Statistics tracking
+        self._stats = {
+            'hits': 0,
+            'misses': 0,
+            'evictions': 0
+        }
+
+    # ============= JOB CACHE METHODS =============
 
     def add_job(self, job: Job, user_id: str) -> None:
-        """Add job to cache with memory management."""
-        with self._lock:
-            cache_key = f"{user_id}:{job.id}"
-
-            # Calculate memory size
-            job_size = self._calculate_size(job)
+        """Add job to Redis cache with indexing."""
+        try:
+            job_key = f"{self.prefixes['job']}{user_id}:{job.id}"
 
             # Remove old entry if exists
-            if cache_key in self._cache:
-                self._remove_entry(cache_key)
+            if self.redis_client.exists(job_key):
+                self._remove_job_entry(job.id, user_id)
 
-            # Check memory limits and cleanup if needed
-            if self._total_memory + job_size > self.max_memory_bytes:
-                self._cleanup_memory(job_size)
+            # Serialize job with metadata
+            job_data = {
+                'job': job,
+                'cached_at': time.time(),
+                'access_count': 0,
+                'user_id': user_id
+            }
 
-            # Create cache entry
-            now = time.time()
-            entry = CacheEntry(
-                data=job,
-                created_at=now,
-                last_accessed=now,
-                access_count=0,
-                size_bytes=job_size
-            )
+            pipe = self.redis_client.pipeline()
 
-            # Add to main cache
-            self._cache[cache_key] = entry
-            self._total_memory += job_size
+            # Store main job entry
+            pipe.setex(job_key, self.default_ttl, pickle.dumps(job_data))
 
-            # Update indexes
+            # Update URL index
             if job.job_url:
-                url_key = f"{user_id}:{job.job_url}"
-                self._url_index[url_key] = cache_key
+                url_key = f"{self.prefixes['job_url_index']}{user_id}:{hashlib.md5(job.job_url.encode()).hexdigest()}"
+                pipe.setex(url_key, self.default_ttl, f"{user_id}:{job.id}")
 
+            # Update signature index for duplicate detection
             signature = self._generate_job_signature(job, user_id)
-            self._signature_index[signature] = cache_key
+            sig_key = f"{self.prefixes['job_signature_index']}{signature}"
+            pipe.setex(sig_key, self.default_ttl, f"{user_id}:{job.id}")
 
-            if user_id not in self._user_index:
-                self._user_index[user_id] = set()
-            self._user_index[user_id].add(cache_key)
+            # Update user index (set of job IDs)
+            user_jobs_key = f"{self.prefixes['job_user_index']}{user_id}"
+            pipe.sadd(user_jobs_key, job.id)
+            pipe.expire(user_jobs_key, self.default_ttl)
 
-            # Periodic cleanup
-            if time.time() - self._last_cleanup > self._cleanup_interval:
-                self._cleanup_expired()
+            pipe.execute()
+
+            logger.debug(f"Added job {job.id} to Redis cache for user {user_id}")
+
+        except Exception as e:
+            logger.error(f"Error adding job to Redis cache: {e}")
 
     def get_job(self, job_id: str, user_id: str) -> Optional[Job]:
-        """Get job from cache with efficient lookup."""
-        with self._lock:
-            cache_key = f"{user_id}:{job_id}"
+        """Get job from Redis cache."""
+        try:
+            job_key = f"{self.prefixes['job']}{user_id}:{job_id}"
 
-            if cache_key not in self._cache:
-                self._miss_count += 1
+            serialized_data = self.redis_client.get(job_key)
+            if not serialized_data:
+                self._stats['misses'] += 1
                 return None
 
-            entry = self._cache[cache_key]
-
-            # Check expiration
-            if self._is_expired(entry):
-                self._remove_entry(cache_key)
-                self._miss_count += 1
-                return None
+            job_data = pickle.loads(serialized_data)
 
             # Update access statistics
-            entry.last_accessed = time.time()
-            entry.access_count += 1
-            self._hit_count += 1
+            job_data['access_count'] += 1
+            job_data['last_accessed'] = time.time()
+            self._stats['hits'] += 1
 
-            # Move to end (LRU)
-            self._cache.move_to_end(cache_key)
+            # Update cache entry asynchronously
+            try:
+                self.redis_client.setex(job_key, self.default_ttl, pickle.dumps(job_data))
+            except Exception as e:
+                logger.warning(f"Error updating job access stats: {e}")
 
-            return entry.data
+            return job_data['job']
+
+        except Exception as e:
+            logger.error(f"Error getting job from Redis cache: {e}")
+            self._stats['misses'] += 1
+            return None
 
     def get_job_by_url(self, url: str, user_id: str) -> Optional[Job]:
-        """Get job by URL using efficient index."""
-        with self._lock:
-            url_key = f"{user_id}:{url}"
-            cache_key = self._url_index.get(url_key)
+        """Get job by URL using Redis index."""
+        try:
+            url_hash = hashlib.md5(url.encode()).hexdigest()
+            url_key = f"{self.prefixes['job_url_index']}{user_id}:{url_hash}"
 
-            if not cache_key:
-                self._miss_count += 1
+            job_cache_id = self.redis_client.get(url_key)
+            if not job_cache_id:
+                self._stats['misses'] += 1
                 return None
 
-            # Extract job_id from cache_key
-            job_id = cache_key.split(':', 1)[1]
+            job_cache_id = job_cache_id.decode('utf-8')
+            job_id = job_cache_id.split(':', 1)[1]
             return self.get_job(job_id, user_id)
+
+        except Exception as e:
+            logger.error(f"Error getting job by URL from Redis cache: {e}")
+            self._stats['misses'] += 1
+            return None
 
     def find_similar_job(self, job: Job, user_id: str) -> Optional[Job]:
-        """Find similar job using signature index."""
-        with self._lock:
+        """Find similar job using signature matching."""
+        try:
             signature = self._generate_job_signature(job, user_id)
-            cache_key = self._signature_index.get(signature)
+            sig_key = f"{self.prefixes['job_signature_index']}{signature}"
 
-            if not cache_key:
+            job_cache_id = self.redis_client.get(sig_key)
+            if not job_cache_id:
                 return None
 
-            job_id = cache_key.split(':', 1)[1]
+            job_cache_id = job_cache_id.decode('utf-8')
+            job_id = job_cache_id.split(':', 1)[1]
             return self.get_job(job_id, user_id)
+
+        except Exception as e:
+            logger.error(f"Error finding similar job in Redis cache: {e}")
+            return None
 
     def get_user_jobs(self, user_id: str, limit: int = None) -> List[Job]:
         """Get all jobs for a user."""
-        with self._lock:
-            user_keys = self._user_index.get(user_id, set())
-            jobs = []
+        try:
+            user_jobs_key = f"{self.prefixes['job_user_index']}{user_id}"
+            job_ids = self.redis_client.smembers(user_jobs_key)
 
-            for cache_key in user_keys:
-                if cache_key in self._cache:
-                    entry = self._cache[cache_key]
-                    if not self._is_expired(entry):
-                        jobs.append(entry.data)
-                        if limit and len(jobs) >= limit:
-                            break
+            jobs = []
+            for job_id in job_ids:
+                job_id = job_id.decode('utf-8')
+                job = self.get_job(job_id, user_id)
+                if job:
+                    jobs.append(job)
+                    if limit and len(jobs) >= limit:
+                        break
 
             return jobs
 
+        except Exception as e:
+            logger.error(f"Error getting user jobs from Redis cache: {e}")
+            return []
+
     def remove_job(self, job_id: str, user_id: str) -> None:
-        """Remove job from cache."""
-        with self._lock:
-            cache_key = f"{user_id}:{job_id}"
-            self._remove_entry(cache_key)
+        """Remove job from Redis cache."""
+        self._remove_job_entry(job_id, user_id)
 
-    def clear_user(self, user_id: str) -> None:
-        """Clear all jobs for a user."""
-        with self._lock:
-            user_keys = self._user_index.get(user_id, set()).copy()
-            for cache_key in user_keys:
-                self._remove_entry(cache_key)
+    def _remove_job_entry(self, job_id: str, user_id: str) -> None:
+        """Internal method to remove job and all its indexes."""
+        try:
+            job_key = f"{self.prefixes['job']}{user_id}:{job_id}"
 
-            if user_id in self._user_index:
-                del self._user_index[user_id]
+            # Get job data to clean up indexes
+            serialized_data = self.redis_client.get(job_key)
+            if serialized_data:
+                job_data = pickle.loads(serialized_data)
+                job = job_data['job']
 
-    def clear_all(self) -> None:
-        """Clear entire cache."""
-        with self._lock:
-            self._cache.clear()
-            self._url_index.clear()
-            self._signature_index.clear()
-            self._user_index.clear()
-            self._total_memory = 0
+                pipe = self.redis_client.pipeline()
 
-    def get_stats(self) -> Dict[str, Any]:
-        """Get cache statistics."""
-        with self._lock:
-            total_requests = self._hit_count + self._miss_count
-            hit_rate = self._hit_count / total_requests if total_requests > 0 else 0
+                # Remove main entry
+                pipe.delete(job_key)
 
-            return {
-                "entries": len(self._cache),
-                "memory_mb": round(self._total_memory / (1024 * 1024), 2),
-                "hit_rate": round(hit_rate * 100, 2),
-                "hits": self._hit_count,
-                "misses": self._miss_count,
-                "evictions": self._eviction_count,
-                "users": len(self._user_index)
+                # Remove from URL index
+                if job.job_url:
+                    url_hash = hashlib.md5(job.job_url.encode()).hexdigest()
+                    url_key = f"{self.prefixes['job_url_index']}{user_id}:{url_hash}"
+                    pipe.delete(url_key)
+
+                # Remove from signature index
+                signature = self._generate_job_signature(job, user_id)
+                sig_key = f"{self.prefixes['job_signature_index']}{signature}"
+                pipe.delete(sig_key)
+
+                # Remove from user index
+                user_jobs_key = f"{self.prefixes['job_user_index']}{user_id}"
+                pipe.srem(user_jobs_key, job_id)
+
+                pipe.execute()
+
+                logger.debug(f"Removed job {job_id} from Redis cache for user {user_id}")
+
+        except Exception as e:
+            logger.error(f"Error removing job from Redis cache: {e}")
+
+    # ============= RESUME CACHE METHODS =============
+
+    def add_resume(self, resume: Resume, user_id: str) -> None:
+        """Add resume to Redis cache."""
+        try:
+            resume_key = f"{self.prefixes['resume']}{user_id}:{resume.id}"
+
+            resume_data = {
+                'resume': resume,
+                'cached_at': time.time(),
+                'access_count': 0,
+                'user_id': user_id
             }
 
-    def _remove_entry(self, cache_key: str) -> None:
-        """Remove entry and update all indexes."""
-        if cache_key not in self._cache:
-            return
+            pipe = self.redis_client.pipeline()
 
-        entry = self._cache[cache_key]
-        job = entry.data
-        user_id = cache_key.split(':', 1)[0]
+            # Store main resume entry
+            pipe.setex(resume_key, self.default_ttl, pickle.dumps(resume_data))
 
-        # Remove from main cache
-        del self._cache[cache_key]
-        self._total_memory -= entry.size_bytes
+            # Update user index
+            user_resumes_key = f"{self.prefixes['resume_user_index']}{user_id}"
+            pipe.sadd(user_resumes_key, resume.id)
+            pipe.expire(user_resumes_key, self.default_ttl)
 
-        # Remove from URL index
-        if job.job_url:
-            url_key = f"{user_id}:{job.job_url}"
-            if url_key in self._url_index:
-                del self._url_index[url_key]
+            # Update job index if resume is associated with a job
+            if resume.job_id:
+                job_resumes_key = f"{self.prefixes['resume_job_index']}{user_id}:{resume.job_id}"
+                pipe.sadd(job_resumes_key, resume.id)
+                pipe.expire(job_resumes_key, self.default_ttl)
 
-        # Remove from signature index
-        signature = self._generate_job_signature(job, user_id)
-        if signature in self._signature_index:
-            del self._signature_index[signature]
+            pipe.execute()
 
-        # Remove from user index
-        if user_id in self._user_index:
-            self._user_index[user_id].discard(cache_key)
-            if not self._user_index[user_id]:
-                del self._user_index[user_id]
+            logger.debug(f"Added resume {resume.id} to Redis cache for user {user_id}")
 
-    def _cleanup_memory(self, needed_bytes: int) -> None:
-        """Free memory by evicting LRU entries."""
-        target_memory = self.max_memory_bytes - needed_bytes
+        except Exception as e:
+            logger.error(f"Error adding resume to Redis cache: {e}")
 
-        # Remove expired entries first
-        self._cleanup_expired()
+    def get_resume(self, resume_id: str, user_id: str) -> Optional[Resume]:
+        """Get resume from Redis cache."""
+        try:
+            resume_key = f"{self.prefixes['resume']}{user_id}:{resume_id}"
 
-        # If still need space, remove LRU entries
-        while self._total_memory > target_memory and self._cache:
-            # Get least recently used (first in OrderedDict)
-            lru_key = next(iter(self._cache))
-            self._remove_entry(lru_key)
-            self._eviction_count += 1
+            serialized_data = self.redis_client.get(resume_key)
+            if not serialized_data:
+                self._stats['misses'] += 1
+                return None
 
-    def _cleanup_expired(self) -> None:
-        """Remove expired entries."""
-        now = time.time()
-        expired_keys = []
+            resume_data = pickle.loads(serialized_data)
 
-        for cache_key, entry in self._cache.items():
-            if self._is_expired(entry):
-                expired_keys.append(cache_key)
+            # Update access statistics
+            resume_data['access_count'] += 1
+            resume_data['last_accessed'] = time.time()
+            self._stats['hits'] += 1
 
-        for key in expired_keys:
-            self._remove_entry(key)
+            # Update cache entry
+            try:
+                self.redis_client.setex(resume_key, self.default_ttl, pickle.dumps(resume_data))
+            except Exception as e:
+                logger.warning(f"Error updating resume access stats: {e}")
 
-        self._last_cleanup = now
+            return resume_data['resume']
 
-    def _is_expired(self, entry: CacheEntry) -> bool:
-        """Check if entry is expired."""
-        return time.time() - entry.created_at > self.ttl_seconds
+        except Exception as e:
+            logger.error(f"Error getting resume from Redis cache: {e}")
+            self._stats['misses'] += 1
+            return None
 
-    def _calculate_size(self, job: Job) -> int:
-        """Estimate memory size of job object."""
-        # Simple estimation - in production, use memory_profiler or similar
-        base_size = 200  # Base object overhead
+    def get_user_resumes(self, user_id: str, job_id: Optional[str] = None) -> List[Resume]:
+        """Get all resumes for a user, optionally filtered by job."""
+        try:
+            if job_id:
+                # Get resumes for specific job
+                job_resumes_key = f"{self.prefixes['resume_job_index']}{user_id}:{job_id}"
+                resume_ids = self.redis_client.smembers(job_resumes_key)
+            else:
+                # Get all user resumes
+                user_resumes_key = f"{self.prefixes['resume_user_index']}{user_id}"
+                resume_ids = self.redis_client.smembers(user_resumes_key)
 
-        # Add size for strings
-        if job.job_url:
-            base_size += len(job.job_url.encode('utf-8'))
+            resumes = []
+            for resume_id in resume_ids:
+                resume_id = resume_id.decode('utf-8')
+                resume = self.get_resume(resume_id, user_id)
+                if resume:
+                    resumes.append(resume)
 
-        # Add metadata size
-        if job.metadata:
-            base_size += len(json.dumps(job.metadata).encode('utf-8'))
+            return resumes
 
-        return base_size
+        except Exception as e:
+            logger.error(f"Error getting user resumes from Redis cache: {e}")
+            return []
+
+    def remove_resume(self, resume_id: str, user_id: str) -> None:
+        """Remove resume from Redis cache."""
+        try:
+            resume_key = f"{self.prefixes['resume']}{user_id}:{resume_id}"
+
+            # Get resume data to clean up indexes
+            serialized_data = self.redis_client.get(resume_key)
+            if serialized_data:
+                resume_data = pickle.loads(serialized_data)
+                resume = resume_data['resume']
+
+                pipe = self.redis_client.pipeline()
+
+                # Remove main entry
+                pipe.delete(resume_key)
+
+                # Remove from user index
+                user_resumes_key = f"{self.prefixes['resume_user_index']}{user_id}"
+                pipe.srem(user_resumes_key, resume_id)
+
+                # Remove from job index if applicable
+                if resume.job_id:
+                    job_resumes_key = f"{self.prefixes['resume_job_index']}{user_id}:{resume.job_id}"
+                    pipe.srem(job_resumes_key, resume_id)
+
+                pipe.execute()
+
+                logger.debug(f"Removed resume {resume_id} from Redis cache for user {user_id}")
+
+        except Exception as e:
+            logger.error(f"Error removing resume from Redis cache: {e}")
+
+    # ============= SEARCH CACHE METHODS =============
+
+    def add_search_results(self, keywords: str, location: str, filters: Dict[str, Any],
+                           job_ids: List[str], user_id: str) -> None:
+        """Add search results to Redis cache."""
+        try:
+            search_key = self._generate_search_key(keywords, location, filters, user_id)
+            cache_key = f"{self.prefixes['search']}{search_key}"
+
+            search_data = {
+                'keywords': keywords,
+                'location': location,
+                'filters': filters,
+                'job_ids': job_ids,
+                'user_id': user_id,
+                'cached_at': time.time(),
+                'access_count': 0
+            }
+
+            pipe = self.redis_client.pipeline()
+
+            # Store search results with shorter TTL (searches expire faster)
+            pipe.setex(cache_key, self.default_ttl // 2, pickle.dumps(search_data))
+
+            # Update user search index
+            user_searches_key = f"{self.prefixes['search_user_index']}{user_id}"
+            pipe.sadd(user_searches_key, search_key)
+            pipe.expire(user_searches_key, self.default_ttl // 2)
+
+            pipe.execute()
+
+            logger.debug(f"Added search results to Redis cache for user {user_id}")
+
+        except Exception as e:
+            logger.error(f"Error adding search results to Redis cache: {e}")
+
+    def get_search_results(self, keywords: str, location: str, filters: Dict[str, Any],
+                           user_id: str) -> Optional[List[str]]:
+        """Get search results from Redis cache."""
+        try:
+            search_key = self._generate_search_key(keywords, location, filters, user_id)
+            cache_key = f"{self.prefixes['search']}{search_key}"
+
+            serialized_data = self.redis_client.get(cache_key)
+            if not serialized_data:
+                self._stats['misses'] += 1
+                return None
+
+            search_data = pickle.loads(serialized_data)
+
+            # Update access statistics
+            search_data['access_count'] += 1
+            search_data['last_accessed'] = time.time()
+            self._stats['hits'] += 1
+
+            # Update cache entry
+            try:
+                self.redis_client.setex(cache_key, self.default_ttl // 2, pickle.dumps(search_data))
+            except Exception as e:
+                logger.warning(f"Error updating search access stats: {e}")
+
+            return search_data['job_ids']
+
+        except Exception as e:
+            logger.error(f"Error getting search results from Redis cache: {e}")
+            self._stats['misses'] += 1
+            return None
+
+    # ============= RESUME STATUS CACHE METHODS =============
+
+    async def set_resume_status(self, resume_id: str, user_id: str, status: ResumeGenerationStatus,
+                                data: Optional[Dict] = None, error: Optional[str] = None) -> None:
+        """Set resume generation status in Redis cache."""
+        try:
+            status_key = f"{self.prefixes['resume_status']}{user_id}:{resume_id}"
+
+            status_data = {
+                'status': status,
+                'data': data,
+                'error': error,
+                'updated_at': time.time(),
+                'user_id': user_id,
+                'resume_id': resume_id
+            }
+
+            # Store with shorter TTL for status data
+            self.redis_client.setex(status_key, self.default_ttl // 4, pickle.dumps(status_data))
+
+            logger.debug(f"Set resume status {status} for resume {resume_id} user {user_id}")
+
+        except Exception as e:
+            logger.error(f"Error setting resume status in Redis cache: {e}")
+
+    async def get_resume_status(self, resume_id: str, user_id: str) -> Optional[Dict]:
+        """Get resume generation status from Redis cache."""
+        try:
+            status_key = f"{self.prefixes['resume_status']}{user_id}:{resume_id}"
+
+            serialized_data = self.redis_client.get(status_key)
+            if not serialized_data:
+                return None
+
+            status_data = pickle.loads(serialized_data)
+            return status_data
+
+        except Exception as e:
+            logger.error(f"Error getting resume status from Redis cache: {e}")
+            return None
+
+    async def remove_resume_status(self, resume_id: str, user_id: str) -> None:
+        """Remove resume generation status from Redis cache."""
+        try:
+            status_key = f"{self.prefixes['resume_status']}{user_id}:{resume_id}"
+            self.redis_client.delete(status_key)
+
+        except Exception as e:
+            logger.error(f"Error removing resume status from Redis cache: {e}")
+
+    # ============= CACHE MANAGEMENT METHODS =============
+
+    def clear_user_cache(self, user_id: str) -> None:
+        """Clear all cache data for a user."""
+        try:
+            pipe = self.redis_client.pipeline()
+
+            # Clear user jobs
+            user_jobs_key = f"{self.prefixes['job_user_index']}{user_id}"
+            job_ids = self.redis_client.smembers(user_jobs_key)
+            for job_id in job_ids:
+                job_id = job_id.decode('utf-8')
+                self._remove_job_entry(job_id, user_id)
+
+            # Clear user resumes
+            user_resumes_key = f"{self.prefixes['resume_user_index']}{user_id}"
+            resume_ids = self.redis_client.smembers(user_resumes_key)
+            for resume_id in resume_ids:
+                resume_id = resume_id.decode('utf-8')
+                self.remove_resume(resume_id, user_id)
+
+            # Clear user searches
+            user_searches_key = f"{self.prefixes['search_user_index']}{user_id}"
+            search_keys = self.redis_client.smembers(user_searches_key)
+            for search_key in search_keys:
+                search_key = search_key.decode('utf-8')
+                cache_key = f"{self.prefixes['search']}{search_key}"
+                pipe.delete(cache_key)
+
+            # Clear user indexes
+            pipe.delete(user_jobs_key)
+            pipe.delete(user_resumes_key)
+            pipe.delete(user_searches_key)
+
+            # Clear resume status entries
+            pattern = f"{self.prefixes['resume_status']}{user_id}:*"
+            for key in self.redis_client.scan_iter(match=pattern):
+                pipe.delete(key)
+
+            pipe.execute()
+
+            logger.info(f"Cleared all cache data for user {user_id}")
+
+        except Exception as e:
+            logger.error(f"Error clearing user cache: {e}")
+
+    async def cleanup_expired_cache(self) -> None:
+        """Clean up expired cache entries (Redis handles TTL automatically)."""
+        try:
+            # Redis automatically handles TTL expiration
+            # But we can do additional cleanup for consistency
+            logger.info("Redis TTL handles automatic cleanup")
+
+        except Exception as e:
+            logger.error(f"Error during cache cleanup: {e}")
+
+    def get_cache_stats(self) -> Dict[str, Any]:
+        """Get comprehensive cache statistics."""
+        try:
+            info = self.redis_client.info()
+
+            return {
+                'redis_info': {
+                    'used_memory': info.get('used_memory_human', 'N/A'),
+                    'connected_clients': info.get('connected_clients', 0),
+                    'total_commands_processed': info.get('total_commands_processed', 0),
+                    'keyspace_hits': info.get('keyspace_hits', 0),
+                    'keyspace_misses': info.get('keyspace_misses', 0)
+                },
+                'application_stats': {
+                    'hits': self._stats['hits'],
+                    'misses': self._stats['misses'],
+                    'evictions': self._stats['evictions'],
+                    'hit_rate': (self._stats['hits'] / max(self._stats['hits'] + self._stats['misses'], 1)) * 100
+                },
+                'timestamp': datetime.now().isoformat()
+            }
+
+        except Exception as e:
+            logger.error(f"Error getting cache stats: {e}")
+            return {'error': str(e)}
+
+    async def health_check(self) -> Dict[str, Any]:
+        """Perform health check on Redis cache."""
+        try:
+            # Test Redis connection
+            self.redis_client.ping()
+
+            info = self.redis_client.info()
+
+            return {
+                'status': 'healthy',
+                'redis_version': info.get('redis_version', 'unknown'),
+                'used_memory': info.get('used_memory_human', 'N/A'),
+                'uptime_in_seconds': info.get('uptime_in_seconds', 0)
+            }
+
+        except Exception as e:
+            return {
+                'status': 'unhealthy',
+                'error': str(e)
+            }
+
+    # ============= HELPER METHODS =============
 
     def _generate_job_signature(self, job: Job, user_id: str) -> str:
         """Generate job signature for similarity matching."""
@@ -305,112 +602,11 @@ class JobCache:
         signature = f"{user_id}|{title}|{company}|{location}"
         return hashlib.md5(signature.encode('utf-8')).hexdigest()
 
-class ResumeGenerationStatus(Enum):
-    """Resume generation status."""
-    PENDING = "pending"
-    IN_PROGRESS = "in_progress"
-    COMPLETED = "completed"
-    FAILED = "failed"
+    def _generate_search_key(self, keywords: str, location: str, filters: Dict[str, Any], user_id: str) -> str:
+        """Generate search key for caching search results."""
+        keywords_norm = ' '.join(keywords.lower().split())
+        location_norm = ' '.join(location.lower().split())
+        filters_str = json.dumps(filters, sort_keys=True)
 
-
-class ResumeCache:
-    """High-performance resume generation cache with async support."""
-
-    def __init__(self, ttl_seconds=7200):  # 2 hours default
-        """Initialize resume cache."""
-        self.ttl_seconds = ttl_seconds
-        self._cache: Dict[str, Dict] = {}
-        self._lock = asyncio.Lock()
-
-    async def set_status(self, resume_id: str, user_id: str, status: ResumeGenerationStatus,
-                         data: Optional[Dict] = None, error: Optional[str] = None) -> None:
-        """Set resume generation status."""
-        async with self._lock:
-            cache_key = f"{user_id}:{resume_id}"
-            self._cache[cache_key] = {
-                "status": status,
-                "data": data,
-                "error": error,
-                "updated_at": time.time(),
-                "user_id": user_id,
-                "resume_id": resume_id
-            }
-
-    async def get_status(self, resume_id: str, user_id: str) -> Optional[Dict]:
-        """Get resume generation status."""
-        async with self._lock:
-            cache_key = f"{user_id}:{resume_id}"
-            entry = self._cache.get(cache_key)
-
-            if not entry:
-                return None
-
-            # Check expiration
-            if time.time() - entry["updated_at"] > self.ttl_seconds:
-                del self._cache[cache_key]
-                return None
-
-            return entry.copy()
-
-    async def remove(self, resume_id: str, user_id: str) -> None:
-        """Remove resume from cache."""
-        async with self._lock:
-            cache_key = f"{user_id}:{resume_id}"
-            if cache_key in self._cache:
-                del self._cache[cache_key]
-
-    async def clear_user_cache(self, user_id: str) -> None:
-        """Clear all cache entries for a user."""
-        async with self._lock:
-            keys_to_remove = [k for k in self._cache.keys() if k.startswith(f"{user_id}:")]
-            for key in keys_to_remove:
-                del self._cache[key]
-
-    async def cleanup_expired(self) -> None:
-        """Remove expired entries."""
-        async with self._lock:
-            now = time.time()
-            expired_keys = [
-                k for k, v in self._cache.items()
-                if now - v["updated_at"] > self.ttl_seconds
-            ]
-
-            for key in expired_keys:
-                del self._cache[key]
-
-    def get_stats(self) -> Dict[str, Any]:
-        """Get cache statistics."""
-        return {
-            "entries": len(self._cache),
-            "memory_estimate_kb": len(str(self._cache)) // 1024
-        }
-
-
-class CacheMetrics:
-    """Centralized cache metrics and monitoring."""
-
-    def __init__(self):
-        self.job_cache_stats = {}
-        self.search_cache_stats = {}
-        self.resume_cache_stats = {}
-        self._lock = threading.Lock()
-
-    def update_stats(self, cache_type: str, stats: Dict[str, Any]) -> None:
-        """Update cache statistics."""
-        with self._lock:
-            if cache_type == "job":
-                self.job_cache_stats = stats
-            elif cache_type == "search":
-                self.search_cache_stats = stats
-            elif cache_type == "resume":
-                self.resume_cache_stats = stats
-
-    def get_overall_stats(self) -> Dict[str, Any]:
-        """Get overall cache statistics."""
-        with self._lock:
-            return {
-                "job_cache": self.job_cache_stats,
-                "search_cache": self.search_cache_stats,
-                "resume_cache": self.resume_cache_stats,
-                "timestamp": datetime.now().isoformat()
-            }
+        key_str = f"{user_id}|{keywords_norm}|{location_norm}|{filters_str}"
+        return hashlib.md5(key_str.encode()).hexdigest()

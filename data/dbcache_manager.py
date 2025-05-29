@@ -9,37 +9,27 @@ logger = logging.getLogger(__name__)
 
 class DBCacheManager:
     """
-    Unified cache manager that handles all caching operations including jobs, search results, and resumes.
-    This manager provides a single interface for all database and cache interactions with consistent caching patterns.
+    Unified cache manager that handles all caching operations using Redis.
+    This manager provides a single interface for all database and cache interactions.
     """
 
-    # Thread local storage to ensure thread safety
-    _thread_local = threading.local()
-
-    def __init__(self, database=None, job_cache=None, search_cache=None, resume_cache=None):
+    def __init__(self, database=None, redis_cache=None, redis_url="redis://localhost:6379"):
         """
-        Initialize the unified cache manager with database and cache instances.
+        Initialize the unified cache manager with database and Redis cache.
 
         Args:
             database: Database instance
-            job_cache: JobCache instance
-            search_cache: SearchCache instance (optional)
-            resume_cache: ResumeCache instance (optional, will be created if not provided)
+            redis_cache: RedisCache instance (will be created if not provided)
+            redis_url: Redis connection URL
         """
         self.db = database
-        self.job_cache = job_cache
-        self.search_cache = search_cache
 
-        # Initialize resume cache if not provided
-        if resume_cache is None:
-            from data.cache import ResumeCache
-            self.resume_cache = ResumeCache()
+        # Initialize Redis cache if not provided
+        if redis_cache is None:
+            from data.cache import RedisCache
+            self.cache = RedisCache(redis_url=redis_url)
         else:
-            self.resume_cache = resume_cache
-
-        # Add in-memory resume storage for consistency with job caching
-        self._resume_memory_cache = {}
-        self._resume_cache_lock = threading.RLock()
+            self.cache = redis_cache
 
     # Job Management Methods
     async def get_cached_search_results(self, keywords: str, location: str, filters: Dict[str, Any], user_id: str) -> List[Dict[str, Any]]:
@@ -48,9 +38,9 @@ class DBCacheManager:
         Implementation of the method expected by JobSearcher.
 
         This method follows this process:
-        1. Try to get results from in-memory search cache
+        1. Try to get results from Redis cache
         2. If not found, try to get from database
-        3. If found in database, update in-memory cache
+        3. If found in database, update Redis cache
 
         Args:
             keywords: Search keywords
@@ -62,45 +52,39 @@ class DBCacheManager:
             List of job details dictionaries
         """
         # Skip if no caching is available
-        if not self.search_cache and not self.db:
+        if not self.cache and not self.db:
             return []
 
-        # Generate a search key for consistent identification
-        search_key = self._generate_search_key(keywords, location, filters, user_id)
-
-        # Try in-memory cache first (fastest)
-        if self.search_cache:
-            cache_results = self.search_cache.get_search_results(keywords, location, filters, user_id)
-            if cache_results:
+        # Try Redis cache first (fastest)
+        if self.cache:
+            cached_job_ids = self.cache.get_search_results(keywords, location, filters, user_id)
+            if cached_job_ids:
                 # Get full job details from job cache
                 results = []
-                for job_id in cache_results:
-                    if self.job_cache:
-                        job = self.job_cache.get_job(job_id, user_id)
-                        if job:
-                            results.append(job.to_dict())
+                for job_id in cached_job_ids:
+                    job = self.cache.get_job(job_id, user_id)
+                    if job:
+                        results.append(job.to_dict())
 
                 # If we have all the jobs in the cache, return them
-                if len(results) == len(cache_results):
+                if len(results) == len(cached_job_ids):
                     return results
 
-        # If not in memory cache or incomplete, try database
+        # If not in cache or incomplete, try database
         if self.db:
             try:
                 db_results = await self.db.get_cached_search_results(keywords, location, filters, user_id)
                 if db_results:
-                    # Update in-memory caches with these results
-                    if self.search_cache:
+                    # Update Redis cache with these results
+                    if self.cache:
                         job_ids = [job["id"] for job in db_results if job.get("id")]
-                        self.search_cache.add_search_results(keywords, location, filters, job_ids, user_id)
+                        self.cache.add_search_results(keywords, location, filters, job_ids, user_id)
 
-                    # Add individual jobs to job cache
-                    if self.job_cache:
+                        # Add individual jobs to cache
                         for job_dict in db_results:
-                            # Convert dict to Job object
                             from dataModels.data_models import Job
                             job = Job.from_dict(job_dict)
-                            self.job_cache.add_job(job, user_id)
+                            self.cache.add_job(job, user_id)
 
                     return db_results
             except Exception as e:
@@ -112,7 +96,7 @@ class DBCacheManager:
     async def save_search_results(self, keywords: str, location: str, filters: Dict[str, Any],
                                   job_listings: List[Dict[str, Any]], user_id: str) -> bool:
         """
-        Save search results to both database and in-memory cache.
+        Save search results to both database and Redis cache.
 
         Args:
             keywords: Search keywords
@@ -125,7 +109,7 @@ class DBCacheManager:
             bool: True if successful, False otherwise
         """
         # Skip if no caching is available
-        if not self.search_cache and not self.db:
+        if not self.cache and not self.db:
             return False
 
         # Extract job IDs from listings
@@ -138,7 +122,6 @@ class DBCacheManager:
                 search_id = self._generate_search_key(keywords, location, filters, user_id)
                 # Save individual jobs first to ensure they exist
                 for job_dict in job_listings:
-                    # Convert dict to Job object
                     from dataModels.data_models import Job
                     try:
                         job = Job.from_dict(job_dict)
@@ -153,24 +136,22 @@ class DBCacheManager:
                 logger.error(f"Error saving search history to database for user {user_id}: {e}")
                 success = False
 
-        # Save to in-memory cache
+        # Save to Redis cache
         try:
-            if self.search_cache:
-                self.search_cache.add_search_results(keywords, location, filters, job_ids, user_id)
+            if self.cache:
+                self.cache.add_search_results(keywords, location, filters, job_ids, user_id)
 
-            # Add individual jobs to job cache
-            if self.job_cache:
+                # Add individual jobs to cache
                 for job_dict in job_listings:
-                    # Convert dict to Job object
                     from dataModels.data_models import Job
                     try:
                         job = Job.from_dict(job_dict)
-                        self.job_cache.add_job(job, user_id)
+                        self.cache.add_job(job, user_id)
                     except Exception as e:
                         logger.error(f"Error adding job to cache for user {user_id}: {e}")
                         success = False
         except Exception as e:
-            logger.error(f"Error updating in-memory caches for user {user_id}: {e}")
+            logger.error(f"Error updating Redis cache for user {user_id}: {e}")
             success = False
 
         return success
@@ -186,13 +167,13 @@ class DBCacheManager:
         Returns:
             Job ID if it exists, None otherwise
         """
-        # Try in-memory cache first (fastest)
-        if self.job_cache:
-            job = self.job_cache.get_job_by_url(url, user_id)
+        # Try Redis cache first (fastest)
+        if self.cache:
+            job = self.cache.get_job_by_url(url, user_id)
             if job:
                 return job.id
 
-        # If not in memory cache, try database
+        # If not in cache, try database
         if self.db:
             try:
                 return await self.db.job_exists(url, user_id)
@@ -212,20 +193,20 @@ class DBCacheManager:
         Returns:
             Job dictionary if found, None otherwise
         """
-        # Try in-memory cache first (fastest)
-        if self.job_cache:
-            job = self.job_cache.get_job(job_id, user_id)
+        # Try Redis cache first (fastest)
+        if self.cache:
+            job = self.cache.get_job(job_id, user_id)
             if job:
                 return job.to_dict()
 
-        # If not in memory cache, try database
+        # If not in cache, try database
         if self.db:
             try:
                 job = await self.db.get_job(job_id, user_id)
                 if job:
                     # Update cache with this job
-                    if self.job_cache:
-                        self.job_cache.add_job(job, user_id)
+                    if self.cache:
+                        self.cache.add_job(job, user_id)
                     return job.to_dict()
             except Exception as e:
                 logger.error(f"Error getting job from database for user {user_id}: {e}")
@@ -253,12 +234,12 @@ class DBCacheManager:
                 logger.error(f"Error saving job to database for user {user_id}: {e}")
                 success = False
 
-        # Save to cache
+        # Save to Redis cache
         try:
-            if self.job_cache:
-                self.job_cache.add_job(job, user_id)
+            if self.cache:
+                self.cache.add_job(job, user_id)
         except Exception as e:
-            logger.error(f"Error adding job to cache for user {user_id}: {e}")
+            logger.error(f"Error adding job to Redis cache for user {user_id}: {e}")
             success = False
 
         return success
@@ -286,15 +267,15 @@ class DBCacheManager:
                 logger.error(f"Error updating job status in database for user {user_id}: {e}")
                 success = False
 
-        # Update in cache - get job, update status, and re-add to cache
-        if self.job_cache and success:
+        # Update in Redis cache - get job, update status, and re-add to cache
+        if self.cache and success:
             try:
-                job = self.job_cache.get_job(job_id, user_id)
+                job = self.cache.get_job(job_id, user_id)
                 if job:
                     job.status = status
-                    self.job_cache.add_job(job, user_id)
+                    self.cache.add_job(job, user_id)
             except Exception as e:
-                logger.error(f"Error updating job status in cache for user {user_id}: {e}")
+                logger.error(f"Error updating job status in Redis cache for user {user_id}: {e}")
                 # Don't mark as failure if cache update fails but DB succeeded
 
         return success
@@ -350,21 +331,20 @@ class DBCacheManager:
                 logger.error(f"Error deleting job from database for user {user_id}: {e}")
                 success = False
 
-        # Remove from cache
-        if self.job_cache and success:
+        # Remove from Redis cache
+        if self.cache and success:
             try:
-                self.job_cache.remove_job(job_id, user_id)
+                self.cache.remove_job(job_id, user_id)
             except Exception as e:
-                logger.error(f"Error removing job from cache for user {user_id}: {e}")
+                logger.error(f"Error removing job from Redis cache for user {user_id}: {e}")
                 # Don't mark as failure if cache removal fails but DB succeeded
 
         return success
 
-    # Resume Management Methods - FIXED FOR CONSISTENCY
+    # Resume Management Methods
     async def save_resume(self, resume, user_id: str) -> bool:
         """
-        Save a resume to both database and in-memory cache (consistent with job caching).
-        This method handles both new resumes and updates with proper cache invalidation.
+        Save a resume to both database and Redis cache.
 
         Args:
             resume: Resume object to save
@@ -383,25 +363,21 @@ class DBCacheManager:
                 logger.error(f"Error saving resume to database for user {user_id}: {e}")
                 success = False
 
-        # Update in-memory cache for consistency with job caching
+        # Update Redis cache
         if success:
             try:
-                # For updates, we need to invalidate first to ensure fresh data
-                self._remove_resume_from_cache(resume.id, user_id)
-
-                # Add/update resume in cache
-                self._add_resume_to_cache(resume, user_id)
-
-                logger.info(f"Updated resume {resume.id} in cache for user {user_id}")
+                if self.cache:
+                    self.cache.add_resume(resume, user_id)
+                    logger.info(f"Updated resume {resume.id} in Redis cache for user {user_id}")
             except Exception as e:
-                logger.error(f"Error adding resume to cache for user {user_id}: {e}")
+                logger.error(f"Error adding resume to Redis cache for user {user_id}: {e}")
                 # Don't mark as failure if cache update fails but DB succeeded
 
         return success
 
     async def get_resume(self, resume_id: str, user_id: str):
         """
-        Get a resume by ID from cache or database (consistent with job retrieval).
+        Get a resume by ID from cache or database.
 
         Args:
             resume_id: ID of the resume to retrieve
@@ -410,18 +386,20 @@ class DBCacheManager:
         Returns:
             Resume object if found, None otherwise
         """
-        # Try in-memory cache first (consistent with job caching)
-        cached_resume = self._get_resume_from_cache(resume_id, user_id)
-        if cached_resume:
-            return cached_resume
+        # Try Redis cache first
+        if self.cache:
+            cached_resume = self.cache.get_resume(resume_id, user_id)
+            if cached_resume:
+                return cached_resume
 
         # If not in cache, try database
         if self.db:
             try:
                 resume = await self.db.get_resume(resume_id, user_id)
                 if resume:
-                    # Update cache with this resume (consistent with job caching)
-                    self._add_resume_to_cache(resume, user_id)
+                    # Update cache with this resume
+                    if self.cache:
+                        self.cache.add_resume(resume, user_id)
                     return resume
             except Exception as e:
                 logger.error(f"Error getting resume from database for user {user_id}: {e}")
@@ -430,7 +408,7 @@ class DBCacheManager:
 
     async def update_resume(self, resume, user_id: str) -> bool:
         """
-        Update a resume in both database and cache with proper cache invalidation.
+        Update a resume in both database and cache.
 
         Args:
             resume: Updated Resume object
@@ -449,24 +427,21 @@ class DBCacheManager:
                 logger.error(f"Error updating resume in database for user {user_id}: {e}")
                 success = False
 
-        # Invalidate and update cache
+        # Update Redis cache
         if success:
             try:
-                # Remove old cached version to ensure fresh data
-                self._remove_resume_from_cache(resume.id, user_id)
-
-                # Add updated resume to cache
-                self._add_resume_to_cache(resume, user_id)
-
-                logger.info(f"Updated resume {resume.id} in cache for user {user_id}")
+                if self.cache:
+                    # Redis cache handles upserts automatically
+                    self.cache.add_resume(resume, user_id)
+                    logger.info(f"Updated resume {resume.id} in Redis cache for user {user_id}")
             except Exception as e:
-                logger.error(f"Error updating resume in cache for user {user_id}: {e}")
+                logger.error(f"Error updating resume in Redis cache for user {user_id}: {e}")
                 # Don't mark as failure if cache update fails but DB succeeded
 
         return success
 
     async def delete_resume(self, resume_id: str, user_id: str) -> bool:
-        """Delete a resume from both database and cache (consistent with job deletion)."""
+        """Delete a resume from both database and cache."""
         success = True
 
         # Delete from database first
@@ -477,13 +452,14 @@ class DBCacheManager:
                 logger.error(f"Error deleting resume from database for user {user_id}: {e}")
                 success = False
 
-        # Remove from cache (consistent with job deletion)
+        # Remove from Redis cache
         if success:
             try:
-                self._remove_resume_from_cache(resume_id, user_id)
-                logger.info(f"Removed resume {resume_id} from cache for user {user_id}")
+                if self.cache:
+                    self.cache.remove_resume(resume_id, user_id)
+                    logger.info(f"Removed resume {resume_id} from Redis cache for user {user_id}")
             except Exception as e:
-                logger.error(f"Error removing resume from cache for user {user_id}: {e}")
+                logger.error(f"Error removing resume from Redis cache for user {user_id}: {e}")
                 # Don't mark as failure if cache removal fails but DB succeeded
 
         return success
@@ -494,8 +470,9 @@ class DBCacheManager:
             try:
                 resumes = await self.db.get_resumes_for_job(job_id, user_id)
                 # Cache the retrieved resumes for future use
-                for resume in resumes:
-                    self._add_resume_to_cache(resume, user_id)
+                if self.cache:
+                    for resume in resumes:
+                        self.cache.add_resume(resume, user_id)
                 return resumes
             except Exception as e:
                 logger.error(f"Error getting resumes for job from database for user {user_id}: {e}")
@@ -509,8 +486,9 @@ class DBCacheManager:
             try:
                 resumes = await self.db.get_all_resumes(user_id, job_id, limit, offset)
                 # Cache the retrieved resumes for future use
-                for resume in resumes:
-                    self._add_resume_to_cache(resume, user_id)
+                if self.cache:
+                    for resume in resumes:
+                        self.cache.add_resume(resume, user_id)
                 return resumes
             except Exception as e:
                 logger.error(f"Error getting all resumes from database for user {user_id}: {e}")
@@ -529,40 +507,44 @@ class DBCacheManager:
                 logger.error(f"Error updating job resume_id in database for user {user_id}: {e}")
                 success = False
 
-        # Update in cache - get job, update resume_id, and re-add to cache
-        if self.job_cache and success:
+        # Update in Redis cache - get job, update resume_id, and re-add to cache
+        if self.cache and success:
             try:
-                job = self.job_cache.get_job(job_id, user_id)
+                job = self.cache.get_job(job_id, user_id)
                 if job:
                     job.resume_id = resume_id
-                    self.job_cache.add_job(job, user_id)
-                    logger.info(f"Updated job {job_id} with resume_id {resume_id} in cache")
+                    self.cache.add_job(job, user_id)
+                    logger.info(f"Updated job {job_id} with resume_id {resume_id} in Redis cache")
             except Exception as e:
-                logger.error(f"Error updating job resume_id in cache for user {user_id}: {e}")
+                logger.error(f"Error updating job resume_id in Redis cache for user {user_id}: {e}")
                 # Don't mark as failure if cache update fails but DB succeeded
 
         return success
 
-    # Resume Generation Status Management (now integrated)
+    # Resume Generation Status Management
     async def get_resume_status(self, resume_id: str, user_id: str) -> Optional[Dict]:
-        """Get resume generation status from cache."""
+        """Get resume generation status from Redis cache."""
         try:
-            return await self.resume_cache.get_status(resume_id, user_id)
+            if self.cache:
+                return await self.cache.get_resume_status(resume_id, user_id)
+            return None
         except Exception as e:
             logger.error(f"Error getting resume status for user {user_id}: {e}")
             return None
 
     async def set_resume_status(self, resume_id: str, user_id: str, status, data=None, error=None):
-        """Set resume generation status in cache."""
+        """Set resume generation status in Redis cache."""
         try:
-            await self.resume_cache.set_status(resume_id, user_id, status, data, error)
+            if self.cache:
+                await self.cache.set_resume_status(resume_id, user_id, status, data, error)
         except Exception as e:
             logger.error(f"Error setting resume status for user {user_id}: {e}")
 
     async def remove_resume_status(self, resume_id: str, user_id: str):
-        """Remove resume generation status from cache."""
+        """Remove resume generation status from Redis cache."""
         try:
-            await self.resume_cache.remove(resume_id, user_id)
+            if self.cache:
+                await self.cache.remove_resume_status(resume_id, user_id)
         except Exception as e:
             logger.error(f"Error removing resume status for user {user_id}: {e}")
 
@@ -570,54 +552,33 @@ class DBCacheManager:
     async def clear_user_cache(self, user_id: str):
         """Clear all cache data for a user."""
         try:
-            # Clear job cache
-            if self.job_cache:
-                self.job_cache.clear_user(user_id)
-
-            # Clear search cache
-            if self.search_cache:
-                self.search_cache.clear_user(user_id)
-
-            # Clear resume cache
-            await self.resume_cache.clear_user_cache(user_id)
-
-            # Clear in-memory resume cache
-            self._clear_user_resume_cache(user_id)
-
-            logger.info(f"Cleared all cache data for user {user_id}")
+            if self.cache:
+                self.cache.clear_user_cache(user_id)
+                logger.info(f"Cleared all Redis cache data for user {user_id}")
         except Exception as e:
-            logger.error(f"Error clearing cache for user {user_id}: {e}")
+            logger.error(f"Error clearing Redis cache for user {user_id}: {e}")
 
     async def cleanup_expired_cache(self):
-        """Clean up expired cache entries."""
+        """Clean up expired cache entries (Redis handles TTL automatically)."""
         try:
-            await self.resume_cache.cleanup_expired()
-            self._cleanup_expired_resume_cache()
-            logger.info("Cleaned up expired cache entries")
+            if self.cache:
+                await self.cache.cleanup_expired_cache()
+                logger.info("Redis cache cleanup completed")
         except Exception as e:
-            logger.error(f"Error cleaning up expired cache: {e}")
+            logger.error(f"Error cleaning up Redis cache: {e}")
 
     def get_cache_stats(self) -> Dict[str, Any]:
         """Get comprehensive cache statistics."""
-        stats = {
-            "timestamp": "now",
-            "resume_cache": self.resume_cache.get_stats() if self.resume_cache else {},
-            "resume_memory_cache": self._get_resume_cache_stats(),
-        }
-
-        if self.job_cache:
-            stats["job_cache"] = self.job_cache.get_stats()
-
-        return stats
+        if self.cache:
+            return self.cache.get_cache_stats()
+        return {"error": "No cache available"}
 
     # Database Health Check
     async def health_check(self) -> Dict[str, Any]:
-        """Perform health check on database and caches."""
+        """Perform health check on database and Redis cache."""
         health_info = {
             "database": "unavailable",
-            "job_cache": "available" if self.job_cache else "unavailable",
-            "resume_cache": "available" if self.resume_cache else "unavailable",
-            "resume_memory_cache": "available"
+            "redis_cache": "unavailable"
         }
 
         if self.db:
@@ -626,6 +587,13 @@ class DBCacheManager:
                 health_info["database"] = db_health
             except Exception as e:
                 health_info["database"] = {"status": "error", "error": str(e)}
+
+        if self.cache:
+            try:
+                cache_health = await self.cache.health_check()
+                health_info["redis_cache"] = cache_health
+            except Exception as e:
+                health_info["redis_cache"] = {"status": "error", "error": str(e)}
 
         return health_info
 
@@ -655,98 +623,3 @@ class DBCacheManager:
 
         # Hash for consistent ID
         return hashlib.md5(key_str.encode()).hexdigest()
-
-    # NEW: In-memory Resume Cache Methods for Consistency
-    def _add_resume_to_cache(self, resume, user_id: str):
-        """Add resume to in-memory cache with proper versioning."""
-        import time
-        with self._resume_cache_lock:
-            cache_key = f"{user_id}:{resume.id}"
-            self._resume_memory_cache[cache_key] = {
-                "resume": resume,
-                "cached_at": time.time(),
-                "user_id": user_id,
-                "version": getattr(resume, 'updated_at', time.time())  # Track version for consistency
-            }
-
-    def _get_resume_from_cache(self, resume_id: str, user_id: str):
-        """Get resume from in-memory cache with staleness check."""
-        import time
-        with self._resume_cache_lock:
-            cache_key = f"{user_id}:{resume_id}"
-            entry = self._resume_memory_cache.get(cache_key)
-            if entry:
-                # Simple TTL check (1 hour)
-                if time.time() - entry["cached_at"] < 3600:
-                    return entry["resume"]
-                else:
-                    # Remove expired entry
-                    del self._resume_memory_cache[cache_key]
-                    logger.debug(f"Removed expired resume {resume_id} from cache for user {user_id}")
-            return None
-
-    def _remove_resume_from_cache(self, resume_id: str, user_id: str):
-        """Remove resume from in-memory cache."""
-        with self._resume_cache_lock:
-            cache_key = f"{user_id}:{resume_id}"
-            if cache_key in self._resume_memory_cache:
-                del self._resume_memory_cache[cache_key]
-                logger.debug(f"Invalidated cache for resume {resume_id} for user {user_id}")
-
-    def _invalidate_related_caches(self, resume_id: str, user_id: str):
-        """
-        Invalidate caches that might be affected by resume changes.
-        This includes job caches that reference this resume.
-        """
-        try:
-            # If this resume is associated with jobs, we might need to invalidate job cache entries
-            # that reference this resume_id
-            if self.job_cache:
-                # Get user jobs and check for resume references
-                user_jobs = self.job_cache.get_user_jobs(user_id)
-                for job in user_jobs:
-                    if hasattr(job, 'resume_id') and job.resume_id == resume_id:
-                        # Re-add job to cache to ensure consistency
-                        self.job_cache.add_job(job, user_id)
-
-            logger.debug(f"Invalidated related caches for resume {resume_id} for user {user_id}")
-        except Exception as e:
-            logger.warning(f"Error invalidating related caches for resume {resume_id}: {e}")
-
-    def _clear_user_resume_cache(self, user_id: str):
-        """Clear all resume cache entries for a user."""
-        with self._resume_cache_lock:
-            keys_to_remove = [k for k in self._resume_memory_cache.keys() if k.startswith(f"{user_id}:")]
-            for key in keys_to_remove:
-                del self._resume_memory_cache[key]
-            if keys_to_remove:
-                logger.info(f"Cleared {len(keys_to_remove)} resume cache entries for user {user_id}")
-
-    def _cleanup_expired_resume_cache(self):
-        """Clean up expired resume cache entries."""
-        import time
-        with self._resume_cache_lock:
-            now = time.time()
-            expired_keys = [
-                k for k, v in self._resume_memory_cache.items()
-                if now - v["cached_at"] > 3600  # 1 hour TTL
-            ]
-            for key in expired_keys:
-                del self._resume_memory_cache[key]
-            if expired_keys:
-                logger.debug(f"Cleaned up {len(expired_keys)} expired resume cache entries")
-
-    def _get_resume_cache_stats(self) -> Dict[str, Any]:
-        """Get resume cache statistics."""
-        import time
-        with self._resume_cache_lock:
-            now = time.time()
-            active_entries = sum(1 for v in self._resume_memory_cache.values()
-                                 if now - v["cached_at"] < 3600)
-
-            return {
-                "total_entries": len(self._resume_memory_cache),
-                "active_entries": active_entries,
-                "expired_entries": len(self._resume_memory_cache) - active_entries,
-                "memory_estimate_kb": len(str(self._resume_memory_cache)) // 1024
-            }

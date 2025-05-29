@@ -1,6 +1,24 @@
 version: '3.8'
 
 services:
+  # Redis for caching
+  redis:
+    image: redis:7-alpine
+    container_name: jobtrak-redis
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"  # Keep for debugging, remove in production
+    volumes:
+      - redis_data:/data
+    networks:
+      - jobtrak-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
   # Traefik reverse proxy for DuckDNS
   traefik:
     image: traefik:v3.0
@@ -33,7 +51,7 @@ services:
       - jobtrak-network
     restart: unless-stopped
 
-  # FastAPI service with your existing environment variables
+  # FastAPI service with Redis integration
   jobtrak-api:
     build:
       context: .
@@ -47,6 +65,9 @@ services:
     restart: unless-stopped
     networks:
       - jobtrak-network
+    depends_on:
+      redis:
+        condition: service_healthy
     environment:
       # Your existing environment variables
       - PYTHONPATH=/app
@@ -57,6 +78,12 @@ services:
       - SIMPLIFY_SITE_KEY=6LcStf4UAAAAAIVZo9JUJ3PntTfRBhvXLKBTGww8
       - API_DEBUG=1
       - HOST_IP=${HOST_IP:-auto-detect}
+      # Redis configuration
+      - REDIS_URL=redis://redis:6379/0
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_DB=0
+      - CACHE_TTL=3600
     labels:
       - "traefik.enable=true"
 
@@ -90,6 +117,8 @@ networks:
 
 volumes:
   postgres_data:
+    driver: local
+  redis_data:
     driver: local
   letsencrypt:
     driver: local
