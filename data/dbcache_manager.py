@@ -13,7 +13,7 @@ class DBCacheManager:
     This manager provides a single interface for all database and cache interactions.
     """
 
-    def __init__(self, database=None, redis_cache=None, redis_url="redis://0.0.0.0:6379"):
+    def __init__(self, database=None, redis_cache=None, redis_url="redis://redis:6379"):
         """
         Initialize the unified cache manager with database and Redis cache.
 
