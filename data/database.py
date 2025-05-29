@@ -38,7 +38,7 @@ class Database:
     async def initialize_pool(self):
         """Initialize connection pool with optimized settings."""
         async with self._pool_lock:
-            self.initialize_db()
+            await self.initialize_db()
             if self.pool is None:
                 self.pool = await asyncpg.create_pool(
                     dsn=self.db_url,
