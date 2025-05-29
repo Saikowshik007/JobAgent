@@ -66,9 +66,8 @@ services:
 
 networks:
   jobtrak-data-network:
-    driver: bridge
+    external: true  # This should be external: true
     name: jobtrak-data-network
-    external: false
 
 volumes:
   postgres_data:
