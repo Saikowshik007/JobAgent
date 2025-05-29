@@ -11,8 +11,8 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Docker command paths - check multiple locations
-DOCKER_PATHS=("/usr/bin/docker" "/usr/local/bin/docker" "docker")
-COMPOSE_PATHS=("/usr/bin/docker-compose" "/usr/local/bin/docker-compose" "docker-compose")
+DOCKER_PATHS="/usr/bin/docker /usr/local/bin/docker docker"
+COMPOSE_PATHS="/usr/bin/docker-compose /usr/local/bin/docker-compose docker-compose"
 
 DOCKER_CMD=""
 COMPOSE_CMD=""
@@ -36,7 +36,7 @@ print_error() {
 
 # Function to find Docker command
 find_docker() {
-    for path in "${DOCKER_PATHS[@]}"; do
+    for path in $DOCKER_PATHS; do
         if command -v "$path" &> /dev/null; then
             DOCKER_CMD="$path"
             print_success "Found Docker at: $DOCKER_CMD"
@@ -44,14 +44,14 @@ find_docker() {
         fi
     done
 
-    print_error "Docker not found in any of these locations: ${DOCKER_PATHS[*]}"
+    print_error "Docker not found in any of these locations: $DOCKER_PATHS"
     return 1
 }
 
 # Function to find Docker Compose command
 find_compose() {
     # First try docker-compose as separate command
-    for path in "${COMPOSE_PATHS[@]}"; do
+    for path in $COMPOSE_PATHS; do
         if command -v "$path" &> /dev/null; then
             COMPOSE_CMD="$path"
             print_success "Found Docker Compose at: $COMPOSE_CMD"
