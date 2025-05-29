@@ -200,7 +200,7 @@ services:
       - tools
 
 networks:
-  jobtrak-data-network:
+  jobtrak-network:
     driver: bridge
     name: jobtrak-network
 
