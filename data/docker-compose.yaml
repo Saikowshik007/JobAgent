@@ -1,0 +1,124 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: jobtrak-postgres
+    environment:
+      POSTGRES_DB: jobtrak
+      POSTGRES_USER: jobtrak_user
+      POSTGRES_PASSWORD: jobtrak_secure_password_2024
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - "5432:5432"  # Expose for external access if needed
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-scripts:/docker-entrypoint-initdb.d
+    networks:
+      - jobtrak-data-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U jobtrak_user -d jobtrak"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    command: >
+      postgres
+      -c shared_buffers=256MB
+      -c effective_cache_size=1GB
+      -c maintenance_work_mem=64MB
+      -c checkpoint_completion_target=0.9
+      -c wal_buffers=16MB
+      -c default_statistics_target=100
+      -c random_page_cost=1.1
+      -c effective_io_concurrency=200
+      -c min_wal_size=1GB
+      -c max_wal_size=4GB
+      -c max_connections=100
+      -c log_min_duration_statement=1000
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: jobtrak-redis
+    command: >
+      redis-server
+      --appendonly yes
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+      --save 900 1
+      --save 300 10
+      --save 60 10000
+      --appendfsync everysec
+      --tcp-keepalive 300
+      --timeout 300
+    ports:
+      - "6379:6379"  # Expose for external access if needed
+    volumes:
+      - redis_data:/data
+    networks:
+      - jobtrak-data-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  # Optional: Redis Commander for Redis management
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: jobtrak-redis-commander
+    environment:
+      - REDIS_HOSTS=local:redis:6379
+      - HTTP_USER=admin
+      - HTTP_PASSWORD=admin123
+    ports:
+      - "8081:8081"
+    networks:
+      - jobtrak-data-network
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    profiles:
+      - tools  # Only start with --profile tools
+
+  # Optional: pgAdmin for PostgreSQL management
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: jobtrak-pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@jobtrak.local
+      PGADMIN_DEFAULT_PASSWORD: admin123
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+    ports:
+      - "8082:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    networks:
+      - jobtrak-data-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    profiles:
+      - tools  # Only start with --profile tools
+
+networks:
+  jobtrak-data-network:
+    driver: bridge
+    name: jobtrak-data-network
+    external: false
+
+volumes:
+  postgres_data:
+    driver: local
+    name: jobtrak-postgres-data
+  redis_data:
+    driver: local
+    name: jobtrak-redis-data
+  pgadmin_data:
+    driver: local
+    name: jobtrak-pgadmin-data
