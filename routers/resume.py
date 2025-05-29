@@ -46,6 +46,7 @@ async def generate_resume(
 async def download_resume(
         resume_id: str,
         format: str = Query("yaml", regex="^(yaml)$"),
+        force_refresh: bool = Query(False, description="Force refresh from database"),
         cache_manager: DBCacheManager = Depends(get_cache_manager),
         user_id: str = Depends(get_user_id)
 ):
@@ -54,8 +55,25 @@ async def download_resume(
         # Initialize resume generator with unified cache manager
         resume_generator = ResumeGenerator(cache_manager, user_id, "")
 
-        # Get resume content (checks cache first, then database)
-        yaml_content = await resume_generator.get_resume_content(resume_id)
+        # If force_refresh is True, bypass cache and get directly from database
+        if force_refresh:
+            # Get resume directly from database
+            if cache_manager.db:
+                resume = await cache_manager.db.get_resume(resume_id, user_id)
+                if not resume:
+                    raise ValueError(f"Resume not found with ID: {resume_id} for user: {user_id}")
+
+                # Update cache with fresh data
+                if cache_manager.cache:
+                    cache_manager.cache.add_resume(resume, user_id)
+
+                yaml_content = resume.yaml_content
+            else:
+                # Fallback to cache manager method
+                yaml_content = await resume_generator.get_resume_content(resume_id)
+        else:
+            # Normal flow - uses cache first, then database
+            yaml_content = await resume_generator.get_resume_content(resume_id)
 
         # Return the YAML content directly
         return {
@@ -132,14 +150,14 @@ async def update_resume_yaml(
         if not resume:
             raise HTTPException(status_code=404, detail=f"Resume not found with ID: {resume_id} for user: {user_id}")
 
-        # Update the YAML content
         resume.yaml_content = yaml_content
 
-        # Save the updated resume
         success = await cache_manager.save_resume(resume, user_id)
 
         if not success:
             raise HTTPException(status_code=500, detail="Failed to save updated resume YAML")
+
+        await cache_manager.remove_resume_status(resume_id, user_id)
 
         return {
             "message": "Resume YAML updated successfully",

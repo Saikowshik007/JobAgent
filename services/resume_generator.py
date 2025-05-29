@@ -260,9 +260,20 @@ class ResumeGenerator:
             "job": job_dict
         }
 
-    async def get_resume_content(self, resume_id: str) -> str:
+    async def get_resume_content(self, resume_id: str, force_refresh: bool = False) -> str:
         """Get the resume content."""
-        # First check cache for recently generated resumes
+        # If force_refresh, skip cache entirely
+        if force_refresh:
+            resume = await self.cache_manager.get_resume(resume_id, self.user_id)
+            if not resume:
+                raise ValueError(f"Resume not found with ID: {resume_id} for user: {self.user_id}")
+
+            if not resume.yaml_content:
+                raise ValueError("Resume generation is not complete")
+
+            return resume.yaml_content
+
+        # Normal flow - check cache first
         cache_entry = await self.cache_manager.get_resume_status(resume_id, self.user_id)
 
         if cache_entry and cache_entry["status"] == ResumeGenerationStatus.COMPLETED:
