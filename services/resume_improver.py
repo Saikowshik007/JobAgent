@@ -16,7 +16,7 @@ class ResumeImprover:
     Parallel ResumeImprover using asyncio.gather with run_in_executor for true HTTP parallelism.
     """
 
-    def __init__(self, url, api_key, parsed_job, llm_kwargs: dict = None, timeout: int = 300):
+    def __init__(self, url, api_key, parsed_job= None, llm_kwargs: dict = None, timeout: int = 300):
         """Initialize ResumeImprover with the job post URL and optional resume location."""
         super().__init__()
         self.job_post_html_data = None
