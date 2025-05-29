@@ -3,15 +3,20 @@ from yaml import YAMLError
 from services.langchain_helpers import *
 from dataModels.job_post import JobPost
 from config import config
+import asyncio
+import concurrent.futures
+from datetime import datetime
+import time
+from typing import Dict, List, Optional
 
 logger = config.getLogger("ResumeImprover")
+
 class ResumeImprover:
     """
-    Cleaned ResumeImprover - focused on doing ALL the resume work.
-    Same interface, less complexity.
+    Parallel ResumeImprover using asyncio.gather with run_in_executor for true HTTP parallelism.
     """
 
-    def __init__(self, url, api_key, parsed_job, llm_kwargs: dict = None):
+    def __init__(self, url, api_key, parsed_job, llm_kwargs: dict = None, timeout: int = 300):
         """Initialize ResumeImprover with the job post URL and optional resume location."""
         super().__init__()
         self.job_post_html_data = None
@@ -22,6 +27,7 @@ class ResumeImprover:
         self.llm_kwargs = llm_kwargs or {}
         self.api_key = api_key
         self.url = url
+        self.timeout = timeout
 
         # Resume data fields
         self.basic_info = None
@@ -32,36 +38,49 @@ class ResumeImprover:
         self.objective = None
         self.degrees = None
 
+        # Thread pool for running sync LLM calls
+        self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
+
     def create_complete_tailored_resume(self) -> str:
         """
-        NEW main method: Create complete tailored resume.
+        NEW main method: Create complete tailored resume with parallel processing.
         This is what ResumeGenerator calls - does everything.
         """
         try:
-            logger.info("=== Creating Complete Tailored Resume ===")
+            logger.info("=== Creating Complete Tailored Resume (Parallel) ===")
 
-            # Step 1: Parse job posting
-            # logger.info("Parsing job posting...")
-            # self.download_and_parse_job_post()
+            # Try parallel execution first
+            try:
+                start_time = time.time()
 
-            # Step 2: Generate all content
-            logger.info("Generating objective...")
-            objective = self.write_objective()
-            logger.info(f"Objective generated: {objective is not None}")
+                # Check if we're in an async context
+                try:
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        # We're in an async context, use thread-based approach
+                        results = self._generate_content_parallel_threads()
+                    else:
+                        # No active loop, safe to use asyncio.run
+                        results = asyncio.run(self._generate_content_async_parallel())
+                except RuntimeError:
+                    # No event loop, safe to use asyncio.run
+                    results = asyncio.run(self._generate_content_async_parallel())
 
-            logger.info("Extracting matched skills...")
-            skills = self.extract_matched_skills()
-            logger.info(f"Skills extracted: {len(skills) if skills else 0}")
+                end_time = time.time()
+                logger.info(f"Parallel generation completed in {end_time - start_time:.2f} seconds")
 
-            logger.info("Updating experiences...")
-            experiences = self.rewrite_unedited_experiences()
-            logger.info(f"Experiences updated: {len(experiences) if experiences else 0}")
+            except Exception as parallel_error:
+                logger.warning(f"Parallel execution failed: {parallel_error}, falling back to sequential")
+                # Fallback to sequential execution
+                results = self._generate_content_sequential()
 
-            logger.info("Updating projects...")
-            projects = self.rewrite_unedited_projects()
-            logger.info(f"Projects updated: {len(projects) if projects else 0}")
+            # Extract results
+            objective = results.get('objective')
+            skills = results.get('skills', [])
+            experiences = results.get('experiences', [])
+            projects = results.get('projects', [])
 
-            # Step 3: Create final resume
+            # Step 2: Create final resume
             logger.info("Assembling final resume...")
             final_resume = {
                 'editing': False,
@@ -82,7 +101,7 @@ class ResumeImprover:
             logger.info(f"Final resume objective: {final_resume.get('objective')}")
             logger.info(f"Objective is None: {final_resume.get('objective') is None}")
 
-            # Step 4: Convert to YAML
+            # Step 3: Convert to YAML
             yaml_content = self.dict_to_yaml_string(final_resume)
 
             # Final check
@@ -98,6 +117,154 @@ class ResumeImprover:
             logger.error(f"Complete resume creation failed: {e}")
             raise
 
+    async def _generate_content_async_parallel(self) -> Dict:
+        """Generate all resume content in parallel using asyncio.gather."""
+        # Create async tasks that run in thread pool (this gives true HTTP parallelism)
+        if not hasattr(self, 'executor'):
+            self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
+
+        loop = asyncio.get_event_loop()
+
+        tasks = [
+            loop.run_in_executor(self.executor, self._safe_write_objective),
+            loop.run_in_executor(self.executor, self._safe_extract_matched_skills),
+            loop.run_in_executor(self.executor, self._safe_rewrite_experiences),
+            loop.run_in_executor(self.executor, self._safe_rewrite_projects)
+        ]
+
+        # Wait for all tasks with timeout
+        try:
+            results = await asyncio.wait_for(
+                asyncio.gather(*tasks, return_exceptions=True),
+                timeout=self.timeout
+            )
+        except asyncio.TimeoutError:
+            logger.error(f"Parallel generation timed out after {self.timeout} seconds")
+            # Cancel remaining tasks
+            for task in tasks:
+                task.cancel()
+            # Use default values
+            results = [None, [], [], []]
+
+        # Process results
+        objective, skills, experiences, projects = results
+
+        # Handle exceptions in results
+        if isinstance(objective, Exception):
+            logger.error(f"Objective generation failed: {objective}")
+            objective = None
+        if isinstance(skills, Exception):
+            logger.error(f"Skills extraction failed: {skills}")
+            skills = self.skills or []
+        if isinstance(experiences, Exception):
+            logger.error(f"Experience rewriting failed: {experiences}")
+            experiences = self.experiences or []
+        if isinstance(projects, Exception):
+            logger.error(f"Project rewriting failed: {projects}")
+            projects = self.projects or []
+
+        return {
+            'objective': objective,
+            'skills': skills,
+            'experiences': experiences,
+            'projects': projects
+        }
+
+    def _safe_write_objective(self) -> Optional[str]:
+        """Thread-safe wrapper for write_objective."""
+        try:
+            return self.write_objective()
+        except Exception as e:
+            logger.error(f"Error in parallel objective generation: {e}")
+            return None
+
+    def _safe_extract_matched_skills(self) -> List:
+        """Thread-safe wrapper for extract_matched_skills."""
+        try:
+            return self.extract_matched_skills()
+        except Exception as e:
+            logger.error(f"Error in parallel skills extraction: {e}")
+            return self.skills or []
+
+    def _safe_rewrite_experiences(self) -> List:
+        """Thread-safe wrapper for rewrite_unedited_experiences."""
+        try:
+            return self.rewrite_unedited_experiences()
+        except Exception as e:
+            logger.error(f"Error in parallel experience rewriting: {e}")
+            return self.experiences or []
+
+    def _safe_rewrite_projects(self) -> List:
+        """Thread-safe wrapper for rewrite_unedited_projects."""
+        try:
+            return self.rewrite_unedited_projects()
+        except Exception as e:
+            logger.error(f"Error in parallel project rewriting: {e}")
+            return self.projects or []
+
+    def _generate_content_parallel_threads(self) -> Dict:
+        """Generate content using ThreadPoolExecutor for cases where we're already in async context."""
+        if not hasattr(self, 'executor'):
+            self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+            # Submit all tasks
+            future_to_task = {
+                executor.submit(self._safe_write_objective): 'objective',
+                executor.submit(self._safe_extract_matched_skills): 'skills',
+                executor.submit(self._safe_rewrite_experiences): 'experiences',
+                executor.submit(self._safe_rewrite_projects): 'projects'
+            }
+
+            results = {}
+
+            # Wait for completion with timeout
+            try:
+                for future in concurrent.futures.as_completed(future_to_task, timeout=self.timeout):
+                    task_name = future_to_task[future]
+                    try:
+                        result = future.result()
+                        results[task_name] = result
+                        logger.info(f"✓ {task_name} completed successfully")
+                    except Exception as e:
+                        logger.error(f"✗ {task_name} failed: {e}")
+                        results[task_name] = self._get_default_value(task_name)
+
+            except concurrent.futures.TimeoutError:
+                logger.error(f"Parallel generation timed out after {self.timeout} seconds")
+                # Cancel remaining futures
+                for future in future_to_task:
+                    future.cancel()
+                # Fill in defaults for missing results
+                for task_name in ['objective', 'skills', 'experiences', 'projects']:
+                    if task_name not in results:
+                        results[task_name] = self._get_default_value(task_name)
+                        logger.warning(f"Using default value for {task_name} due to timeout")
+
+        return results
+
+    def _generate_content_sequential(self) -> Dict:
+        """Fallback sequential content generation."""
+        logger.info("Running sequential content generation...")
+
+        return {
+            'objective': self._safe_write_objective(),
+            'skills': self._safe_extract_matched_skills(),
+            'experiences': self._safe_rewrite_experiences(),
+            'projects': self._safe_rewrite_projects()
+        }
+
+    def _get_default_value(self, task_name: str):
+        """Get default value for a task that failed or timed out."""
+        defaults = {
+            'objective': None,
+            'skills': self.skills or [],
+            'experiences': self.experiences or [],
+            'projects': self.projects or []
+        }
+        return defaults.get(task_name)
+
+    # Rest of your existing methods remain unchanged...
     def download_and_parse_job_post(self, url=None):
         """Download and parse the job post from the provided URL."""
         if url:
@@ -236,7 +403,6 @@ class ResumeImprover:
             import traceback
             logger.error(f"Full traceback: {traceback.format_exc()}")
             return self.skills or []
-
 
     def rewrite_unedited_experiences(self, **chain_kwargs) -> list:
         """Rewrite unedited experiences in the resume."""
@@ -431,3 +597,8 @@ class ResumeImprover:
         except YAMLError as e:
             logger.error("Failed to convert dict to YAML string.")
             raise e
+
+    def __del__(self):
+        """Cleanup thread pool on deletion."""
+        if hasattr(self, 'executor'):
+            self.executor.shutdown(wait=False)
