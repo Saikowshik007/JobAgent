@@ -27,7 +27,7 @@ class Database:
         self.db_url = db_url or os.environ.get('DATABASE_URL')
         if not self.db_url:
             raise ValueError("No database URL provided")
-
+        self.initialize_db()
         self.min_pool_size = min_pool_size
         self.max_pool_size = max_pool_size
         self.pool = None
