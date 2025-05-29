@@ -64,9 +64,30 @@ services:
       timeout: 3s
       retries: 3
 
+  # Optional: pgAdmin for PostgreSQL management
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: jobtrak-pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@jobtrak.local
+      PGADMIN_DEFAULT_PASSWORD: admin123
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+    ports:
+      - "8082:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    networks:
+      - jobtrak-data-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    profiles:
+      - tools  # Only start with --profile tools
+
 networks:
   jobtrak-data-network:
-    external: true  # This should be external: true
+    external: false  # CHANGED: Create the network, don't reference external one
     name: jobtrak-data-network
 
 volumes:
@@ -76,3 +97,6 @@ volumes:
   redis_data:
     driver: local
     name: jobtrak-redis-data
+  pgadmin_data:
+    driver: local
+    name: jobtrak-pgadmin-data
