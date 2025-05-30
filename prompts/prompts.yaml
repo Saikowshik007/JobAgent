@@ -16,13 +16,12 @@ SECTION_HIGHLIGHTER:
     {section}
 
   instruction_message: |
-    <Instruction> 
-    Identify the relevant portions from the <Resume> that match the <Job Posting> and transform these relevant portions into compelling highlights focused solely on accomplishments and skills without justifications of fit. Rate the relevance of each highlight to the <Job Posting> on a scale of 1-4.
+      <Instruction> Identify the relevant portions from the <Resume> that match the <Job Posting>, rephrase these relevant portions into highlights, and rate the relevance of each highlight to the <Job Posting> on a scale of 1-5.
 
   criteria_message: |
     <Criteria> 
-    - Each highlight must be based solely on content mentioned in the <Resume>
-    - Each highlight must focus on achievements, skills, and experience WITHOUT explicitly stating how they align with the job posting
+    - Each highlight must be based on what is mentioned in the <Resume>.
+    - In each highlight, include how that experience in the <Resume> demonstrates an ability to perform duties mentioned in the <Job Posting>. WITHOUT explicitly stating how they align with the job posting
     - Do NOT include phrases like "which aligns with the job requirement" or "addressing the job's needs"
     - Each highlight should incorporate action verbs, quantifiable achievements, and concrete examples with success metrics when available
     - Each highlight should incorporate relevant ATS keywords where natural and appropriate
@@ -32,16 +31,14 @@ SECTION_HIGHLIGHTER:
 
   steps_message: |
     <Steps>
-    1. Analyze the <Job Posting> to identify key requirements, responsibilities, and desired qualifications
-    2. Create a <Plan> for extracting relevant experience from the <Resume> that addresses these requirements
-    3. Identify what <Additional Steps> are needed to execute this plan effectively
-    4. Follow all steps systematically and document your <Work> process
+    1. Create a <Plan> for following the <Instruction> while meeting all the <Criteria>.
+    3. Identify what <Additional Steps> are needed to execute this <Plan> effectively
+    4. Follow all steps one by one and show your <Work>.
     5. For each relevant experience in the <Resume>, craft a highlight that presents accomplishments and skills WITHOUT justifying their relevance to the job
     6. Remove any explanatory text that attempts to connect experiences to job requirements
-    7. Rate each highlight on a scale of 1-4 based on its relevance to the job requirements (for your internal assessment only)
     8. Verify all highlights are derived from the <Resume> and not fabricated from the <Job Posting>
     9. Confirm all <Criteria> are met and make necessary adjustments
-    10. Provide your <Final Answer> with the formatted highlights and relevance ratings
+    10. Provide the answer to the <Instruction> with prefix <Final Answer>.
 
 
 SKILLS_MATCHER:
@@ -184,16 +181,13 @@ IMPROVER:
 
   steps_message: |
     <Steps>
-    1. Conduct a comprehensive analysis of both the <Job Posting> and <Resume>
-    2. Create a <Plan> for systematically evaluating and improving the resume
-    3. Determine what <Additional Steps> are needed to execute this plan effectively
-    4. Follow all steps systematically and document your <Work> process
-    5. Check for spelling and grammar errors throughout the entire resume
-    6. Identify critical ATS keywords from the job posting missing from the resume
+    2. Create a <Plan> for systematically evaluating and improving the resume.
+    3. Determine what <Additional Steps> are needed to execute this <Plan> effectively.
+    4. Follow all steps systematically and document your <Work> process.
+    5. Check for spelling and grammar errors throughout the entire resume.
+    6. Identify critical ATS keywords from the job posting missing from the resume.
     7. Identify and flag any statements that explicitly justify how experience aligns with job requirements
     8. Check for redundant or duplicate content across the resume
     9. Assess each section for opportunities to add quantifiable achievements
-    10. Evaluate the resume structure and formatting for optimization
-    11. Organize all improvement suggestions by resume section
     12. Confirm all <Criteria> are met and make necessary adjustments
-    13. Provide your <Final Answer> with comprehensive, actionable improvement recommendations that focus on professional accomplishments without explicit job alignment justifications
+    13. Provide the answer to the <Instruction> with prefix <Final Answer>.
