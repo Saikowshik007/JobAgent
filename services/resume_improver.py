@@ -1,4 +1,6 @@
 import yaml
+from fastapi import requests
+from fp.fp import FreeProxy
 from yaml import YAMLError
 from services.langchain_helpers import *
 from dataModels.job_post import JobPost
@@ -308,7 +310,7 @@ class ResumeImprover:
         logger.debug(f"Using default for {task_name}: {type(default_value)} with {len(default_value) if isinstance(default_value, list) else 'N/A'} items")
         return default_value
 
-    # Rest of your existing methods remain unchanged...
+
     def download_and_parse_job_post(self, url=None):
         """Download and parse the job post from the provided URL."""
         if url:
@@ -319,19 +321,48 @@ class ResumeImprover:
         self.parsed_job = self.job_post.parse_job_post(verbose=False)
 
     def _download_url(self, url=None):
-        """Download the content of the URL and return it as a string."""
+        """Download the content of the URL and return it as a string.
+
+        Args:
+            url (str, optional): The URL to download. Defaults to None.
+
+        Returns:
+            bool: True if download was successful, False otherwise.
+        """
         if url:
             self.url = url
 
-        try:
-            import requests
-            response = requests.get(self.url)
-            response.raise_for_status()
-            self.job_post_html_data = response.text
-            return True
-        except Exception as e:
-            logger.error(f"Failed to download URL {self.url}: {e}")
-            raise
+        max_retries = config.get("settings.max_retries")
+        backoff_factor = config.get("settings.backoff_factor")
+        use_proxy = False
+
+        for attempt in range(max_retries):
+            try:
+                proxies = None
+                if use_proxy:
+                    proxy = FreeProxy(rand=True).get()
+                    proxies = {"http": proxy, "https": proxy}
+
+                response = requests.get(
+                    self.url, headers=config.get("request_headers"), proxies=proxies
+                )
+                response.raise_for_status()
+                self.job_post_html_data = response.text
+                return True
+
+            except requests.RequestException as e:
+                if response.status_code == 429:
+                    config.logger.warning(
+                        f"Rate limit exceeded. Retrying in {backoff_factor * 2 ** attempt} seconds..."
+                    )
+                    time.sleep(backoff_factor * 2**attempt)
+                    use_proxy = True
+                else:
+                    config.logger.error(f"Failed to download URL {self.url}: {e}")
+                    return False
+
+        config.logger.error(f"Exceeded maximum retries for URL {self.url}")
+        return False
 
     def _extract_html_data(self):
         """Extract text content from HTML, removing all HTML tags."""
