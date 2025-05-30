@@ -80,6 +80,8 @@ class ResumeImprover:
             experiences = results.get('experiences', [])
             projects = results.get('projects', [])
 
+            logger.info(results)
+
             # Step 2: Create final resume
             logger.info("Assembling final resume...")
             final_resume = {
@@ -97,19 +99,8 @@ class ResumeImprover:
                 }
             }
 
-            # Debug objective specifically
-            logger.info(f"Final resume objective: {final_resume.get('objective')}")
-            logger.info(f"Objective is None: {final_resume.get('objective') is None}")
-
             # Step 3: Convert to YAML
             yaml_content = self.dict_to_yaml_string(final_resume)
-
-            # Final check
-            if 'objective:' in yaml_content:
-                logger.info("✓ Objective found in final YAML")
-            else:
-                logger.warning("✗ Objective NOT found in final YAML")
-
             logger.info("=== Resume Creation Complete ===")
             return yaml_content
 
@@ -318,12 +309,6 @@ class ResumeImprover:
 
             # Generate
             result = chain.invoke(chain_inputs)
-
-            # Debug logging to understand the response format
-            logger.info(f"Objective result type: {type(result)}")
-            logger.info(f"Objective result content: {result}")
-            logger.info(f"Has final_answer attr: {hasattr(result, 'final_answer')}")
-
             if result:
                 # Handle both Pydantic model and dictionary responses
                 if hasattr(result, 'final_answer'):
@@ -364,17 +349,7 @@ class ResumeImprover:
             runnable = chain | llm.with_structured_output(schema=ResumeSkillsMatcherOutput, method="function_calling")
 
             chain_inputs = self._get_formatted_chain_inputs(chain=runnable)
-
-            # Log the inputs to debug
-            logger.info(f"Skills extraction inputs: {chain_inputs}")
-            logger.info(f"Existing skills being sent to LLM: {chain_inputs.get('skills')}")
-
             extracted_skills = runnable.invoke(chain_inputs)
-
-            # Debug logging
-            logger.info(f"Skills result type: {type(extracted_skills)}")
-            logger.info(f"Skills result content: {extracted_skills}")
-            logger.info(f"Has final_answer attr: {hasattr(extracted_skills, 'final_answer')}")
 
             if not extracted_skills:
                 logger.warning("No extracted_skills returned from LLM")
