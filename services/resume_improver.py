@@ -16,7 +16,7 @@ class ResumeImprover:
     Parallel ResumeImprover using asyncio.gather with run_in_executor for true HTTP parallelism.
     """
 
-    def __init__(self, url, api_key, parsed_job= None, llm_kwargs: dict = None, timeout: int = 300):
+    def __init__(self, url, api_key, parsed_job= None, llm_kwargs: dict = None, timeout: int = 500):
         """Initialize ResumeImprover with the job post URL and optional resume location."""
         super().__init__()
         self.job_post_html_data = None
@@ -58,12 +58,15 @@ class ResumeImprover:
                     loop = asyncio.get_event_loop()
                     if loop.is_running():
                         # We're in an async context, use thread-based approach
+                        logger.info("Using thread-based parallel approach (async context detected)")
                         results = self._generate_content_parallel_threads()
                     else:
                         # No active loop, safe to use asyncio.run
+                        logger.info("Using asyncio-based parallel approach")
                         results = asyncio.run(self._generate_content_async_parallel())
                 except RuntimeError:
                     # No event loop, safe to use asyncio.run
+                    logger.info("Using asyncio-based parallel approach (no existing loop)")
                     results = asyncio.run(self._generate_content_async_parallel())
 
                 end_time = time.time()
@@ -74,20 +77,24 @@ class ResumeImprover:
                 # Fallback to sequential execution
                 results = self._generate_content_sequential()
 
-            # Extract results
+            # Extract results with detailed logging
             objective = results.get('objective')
             skills = results.get('skills', [])
             experiences = results.get('experiences', [])
             projects = results.get('projects', [])
 
-            logger.info(results)
+            logger.info(f"Results summary:")
+            logger.info(f"  - Objective: {'✓' if objective else '✗'}")
+            logger.info(f"  - Skills: {len(skills)} categories")
+            logger.info(f"  - Experiences: {len(experiences)} items")
+            logger.info(f"  - Projects: {len(projects)} items")
 
             # Step 2: Create final resume
             logger.info("Assembling final resume...")
             final_resume = {
                 'editing': False,
                 'basic': self.basic_info or {},
-                'objective': objective,  # KEY LINE FOR DEBUGGING
+                'objective': objective,
                 'education': self.education or [],
                 'experiences': experiences or [],
                 'projects': projects or [],
@@ -116,6 +123,8 @@ class ResumeImprover:
 
         loop = asyncio.get_event_loop()
 
+        logger.info("Starting parallel task execution...")
+
         tasks = [
             loop.run_in_executor(self.executor, self._safe_write_objective),
             loop.run_in_executor(self.executor, self._safe_extract_matched_skills),
@@ -123,80 +132,92 @@ class ResumeImprover:
             loop.run_in_executor(self.executor, self._safe_rewrite_projects)
         ]
 
+        task_names = ['objective', 'skills', 'experiences', 'projects']
+
         # Wait for all tasks with timeout
         try:
             results = await asyncio.wait_for(
                 asyncio.gather(*tasks, return_exceptions=True),
                 timeout=self.timeout
             )
+            logger.info(f"All {len(results)} tasks completed")
         except asyncio.TimeoutError:
             logger.error(f"Parallel generation timed out after {self.timeout} seconds")
             # Cancel remaining tasks
             for task in tasks:
-                task.cancel()
+                if not task.done():
+                    task.cancel()
             # Use default values
             results = [None, [], [], []]
 
-        # Process results
-        objective, skills, experiences, projects = results
+        # Process results with detailed logging
+        processed_results = {}
 
-        # Handle exceptions in results
-        if isinstance(objective, Exception):
-            logger.error(f"Objective generation failed: {objective}")
-            objective = None
-        if isinstance(skills, Exception):
-            logger.error(f"Skills extraction failed: {skills}")
-            skills = self.skills or []
-        if isinstance(experiences, Exception):
-            logger.error(f"Experience rewriting failed: {experiences}")
-            experiences = self.experiences or []
-        if isinstance(projects, Exception):
-            logger.error(f"Project rewriting failed: {projects}")
-            projects = self.projects or []
+        for i, (result, task_name) in enumerate(zip(results, task_names)):
+            if isinstance(result, Exception):
+                logger.error(f"Task '{task_name}' failed with exception: {result}")
+                processed_results[task_name] = self._get_default_value(task_name)
+            else:
+                logger.info(f"Task '{task_name}' completed successfully")
+                processed_results[task_name] = result
 
-        return {
-            'objective': objective,
-            'skills': skills,
-            'experiences': experiences,
-            'projects': projects
-        }
+        return processed_results
 
     def _safe_write_objective(self) -> Optional[str]:
         """Thread-safe wrapper for write_objective."""
         try:
-            return self.write_objective()
+            logger.debug("Starting objective generation...")
+            result = self.write_objective()
+            logger.debug(f"Objective generation result: {result}")
+            return result
         except Exception as e:
             logger.error(f"Error in parallel objective generation: {e}")
+            import traceback
+            logger.error(f"Objective traceback: {traceback.format_exc()}")
             return None
 
     def _safe_extract_matched_skills(self) -> List:
         """Thread-safe wrapper for extract_matched_skills."""
         try:
-            return self.extract_matched_skills()
+            logger.debug("Starting skills extraction...")
+            result = self.extract_matched_skills()
+            logger.debug(f"Skills extraction result: {len(result) if result else 0} categories")
+            return result
         except Exception as e:
             logger.error(f"Error in parallel skills extraction: {e}")
+            import traceback
+            logger.error(f"Skills traceback: {traceback.format_exc()}")
             return self.skills or []
 
     def _safe_rewrite_experiences(self) -> List:
         """Thread-safe wrapper for rewrite_unedited_experiences."""
         try:
-            return self.rewrite_unedited_experiences()
+            logger.debug("Starting experience rewriting...")
+            result = self.rewrite_unedited_experiences()
+            logger.debug(f"Experience rewriting result: {len(result) if result else 0} experiences")
+            return result
         except Exception as e:
             logger.error(f"Error in parallel experience rewriting: {e}")
+            import traceback
+            logger.error(f"Experience traceback: {traceback.format_exc()}")
             return self.experiences or []
 
     def _safe_rewrite_projects(self) -> List:
         """Thread-safe wrapper for rewrite_unedited_projects."""
         try:
-            return self.rewrite_unedited_projects()
+            logger.debug("Starting project rewriting...")
+            result = self.rewrite_unedited_projects()
+            logger.debug(f"Project rewriting result: {len(result) if result else 0} projects")
+            return result
         except Exception as e:
             logger.error(f"Error in parallel project rewriting: {e}")
+            import traceback
+            logger.error(f"Project traceback: {traceback.format_exc()}")
             return self.projects or []
 
     def _generate_content_parallel_threads(self) -> Dict:
         """Generate content using ThreadPoolExecutor for cases where we're already in async context."""
-        if not hasattr(self, 'executor'):
-            self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
+        logger.info("Using ThreadPoolExecutor for parallel generation...")
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
             # Submit all tasks
@@ -208,42 +229,72 @@ class ResumeImprover:
             }
 
             results = {}
+            completed_tasks = 0
+            total_tasks = len(future_to_task)
 
             # Wait for completion with timeout
             try:
                 for future in concurrent.futures.as_completed(future_to_task, timeout=self.timeout):
                     task_name = future_to_task[future]
+                    completed_tasks += 1
+
                     try:
                         result = future.result()
                         results[task_name] = result
-                        logger.info(f"✓ {task_name} completed successfully")
+                        logger.info(f"✓ {task_name} completed successfully ({completed_tasks}/{total_tasks})")
+
+                        # Debug log the result
+                        if task_name == 'experiences':
+                            logger.debug(f"Experiences result: {len(result) if result else 0} items")
+                        elif task_name == 'projects':
+                            logger.debug(f"Projects result: {len(result) if result else 0} items")
+
                     except Exception as e:
-                        logger.error(f"✗ {task_name} failed: {e}")
+                        logger.error(f"✗ {task_name} failed with exception: {e}")
+                        import traceback
+                        logger.error(f"{task_name} traceback: {traceback.format_exc()}")
                         results[task_name] = self._get_default_value(task_name)
 
             except concurrent.futures.TimeoutError:
                 logger.error(f"Parallel generation timed out after {self.timeout} seconds")
+                logger.error(f"Completed {completed_tasks}/{total_tasks} tasks before timeout")
+
                 # Cancel remaining futures
                 for future in future_to_task:
-                    future.cancel()
+                    if not future.done():
+                        future.cancel()
+                        task_name = future_to_task[future]
+                        logger.warning(f"Cancelled task: {task_name}")
+
                 # Fill in defaults for missing results
                 for task_name in ['objective', 'skills', 'experiences', 'projects']:
                     if task_name not in results:
                         results[task_name] = self._get_default_value(task_name)
                         logger.warning(f"Using default value for {task_name} due to timeout")
 
-        return results
+            logger.info(f"Thread-based parallel execution completed: {len(results)}/4 tasks")
+            return results
 
     def _generate_content_sequential(self) -> Dict:
         """Fallback sequential content generation."""
         logger.info("Running sequential content generation...")
 
-        return {
-            'objective': self._safe_write_objective(),
-            'skills': self._safe_extract_matched_skills(),
-            'experiences': self._safe_rewrite_experiences(),
-            'projects': self._safe_rewrite_projects()
-        }
+        results = {}
+
+        logger.info("Sequential: Generating objective...")
+        results['objective'] = self._safe_write_objective()
+
+        logger.info("Sequential: Extracting skills...")
+        results['skills'] = self._safe_extract_matched_skills()
+
+        logger.info("Sequential: Rewriting experiences...")
+        results['experiences'] = self._safe_rewrite_experiences()
+
+        logger.info("Sequential: Rewriting projects...")
+        results['projects'] = self._safe_rewrite_projects()
+
+        logger.info("Sequential content generation completed")
+        return results
 
     def _get_default_value(self, task_name: str):
         """Get default value for a task that failed or timed out."""
@@ -253,7 +304,9 @@ class ResumeImprover:
             'experiences': self.experiences or [],
             'projects': self.projects or []
         }
-        return defaults.get(task_name)
+        default_value = defaults.get(task_name)
+        logger.debug(f"Using default for {task_name}: {type(default_value)} with {len(default_value) if isinstance(default_value, list) else 'N/A'} items")
+        return default_value
 
     # Rest of your existing methods remain unchanged...
     def download_and_parse_job_post(self, url=None):
@@ -434,32 +487,82 @@ class ResumeImprover:
         """Rewrite unedited experiences in the resume."""
         try:
             if not self.experiences:
+                logger.info("No experiences to rewrite")
                 return []
 
+            logger.info(f"Rewriting {len(self.experiences)} experiences...")
             result = []
-            for exp in self.experiences:
+            for i, exp in enumerate(self.experiences):
+                logger.info(f"Processing experience {i+1}: {exp.get('title', 'Unknown')}")
                 exp = dict(exp)
-                exp["highlights"] = self.rewrite_section(section=exp, **chain_kwargs)
+
+                # Log original highlights
+                original_highlights = exp.get("highlights", [])
+                logger.info(f"  Original highlights: {len(original_highlights)} items")
+                for j, highlight in enumerate(original_highlights):
+                    logger.debug(f"    {j+1}: {highlight}")
+
+                # Rewrite section
+                new_highlights = self.rewrite_section(section=exp, **chain_kwargs)
+                logger.info(f"  New highlights: {len(new_highlights) if new_highlights else 0} items")
+
+                if new_highlights:
+                    for j, highlight in enumerate(new_highlights):
+                        logger.debug(f"    NEW {j+1}: {highlight}")
+                    exp["highlights"] = new_highlights
+                else:
+                    logger.warning(f"  No new highlights generated, keeping original")
+                    exp["highlights"] = original_highlights
+
                 result.append(exp)
+
+            logger.info(f"Completed rewriting {len(result)} experiences")
             return result
         except Exception as e:
             logger.error(f"Error in rewrite_unedited_experiences: {e}")
+            import traceback
+            logger.error(f"Experience rewrite traceback: {traceback.format_exc()}")
             return self.experiences or []
 
     def rewrite_unedited_projects(self, **chain_kwargs) -> list:
         """Rewrite unedited projects in the resume."""
         try:
             if not self.projects:
+                logger.info("No projects to rewrite")
                 return []
 
+            logger.info(f"Rewriting {len(self.projects)} projects...")
             result = []
-            for proj in self.projects:
+            for i, proj in enumerate(self.projects):
+                logger.info(f"Processing project {i+1}: {proj.get('name', 'Unknown')}")
                 proj = dict(proj)
-                proj["highlights"] = self.rewrite_section(section=proj, **chain_kwargs)
+
+                # Log original highlights
+                original_highlights = proj.get("highlights", [])
+                logger.info(f"  Original highlights: {len(original_highlights)} items")
+                for j, highlight in enumerate(original_highlights):
+                    logger.debug(f"    {j+1}: {highlight}")
+
+                # Rewrite section
+                new_highlights = self.rewrite_section(section=proj, **chain_kwargs)
+                logger.info(f"  New highlights: {len(new_highlights) if new_highlights else 0} items")
+
+                if new_highlights:
+                    for j, highlight in enumerate(new_highlights):
+                        logger.debug(f"    NEW {j+1}: {highlight}")
+                    proj["highlights"] = new_highlights
+                else:
+                    logger.warning(f"  No new highlights generated, keeping original")
+                    proj["highlights"] = original_highlights
+
                 result.append(proj)
+
+            logger.info(f"Completed rewriting {len(result)} projects")
             return result
         except Exception as e:
             logger.error(f"Error in rewrite_unedited_projects: {e}")
+            import traceback
+            logger.error(f"Project rewrite traceback: {traceback.format_exc()}")
             return self.projects or []
 
     def rewrite_section(self, section, **chain_kwargs) -> list:
@@ -470,38 +573,62 @@ class ResumeImprover:
             from services.langchain_helpers import create_llm
             from langchain.prompts import ChatPromptTemplate
 
+            logger.debug(f"Starting rewrite_section for: {section.get('title') or section.get('name', 'Unknown')}")
+
             prompt = ChatPromptTemplate(messages=Prompts.lookup["SECTION_HIGHLIGHTER"])
             llm = create_llm(api_key=self.api_key, **self.llm_kwargs)
             chain = prompt | llm.with_structured_output(schema=ResumeSectionHighlighterOutput)
 
             chain_inputs = self._get_formatted_chain_inputs(chain=chain, section=section)
+            logger.debug(f"Chain inputs keys: {list(chain_inputs.keys())}")
+
+            # Log some key inputs for debugging
+            if 'section' in chain_inputs:
+                section_info = chain_inputs['section']
+                if isinstance(section_info, str):
+                    logger.debug(f"Section input (first 200 chars): {section_info[:200]}...")
+                else:
+                    logger.debug(f"Section input type: {type(section_info)}")
+
+            logger.debug("Invoking LLM chain...")
             section_revised = chain.invoke(chain_inputs)
+            logger.debug(f"LLM response type: {type(section_revised)}")
+            logger.debug(f"LLM response: {section_revised}")
 
             if section_revised:
                 # Handle both Pydantic model and dictionary responses
                 if hasattr(section_revised, 'final_answer'):
                     # Pydantic model
                     highlights = section_revised.final_answer or []
-                    sorted_highlights = sorted(highlights, key=lambda d: d.relevance * -1)
-                    return [s.highlight for s in sorted_highlights]
+                    logger.info(f"Pydantic model: Got {len(highlights)} highlights")
+                    if highlights:
+                        sorted_highlights = sorted(highlights, key=lambda d: d.relevance * -1)
+                        result = [s.highlight for s in sorted_highlights]
+                        logger.debug(f"Sorted highlights: {result}")
+                        return result
                 elif isinstance(section_revised, dict):
                     # Dictionary response
                     highlights = section_revised.get("final_answer", [])
-                    sorted_highlights = sorted(highlights, key=lambda d: d.get("relevance", 0) * -1)
-                    return [s.get("highlight", "") for s in sorted_highlights]
+                    logger.info(f"Dictionary: Got {len(highlights)} highlights")
+                    if highlights:
+                        sorted_highlights = sorted(highlights, key=lambda d: d.get("relevance", 0) * -1)
+                        result = [s.get("highlight", "") for s in sorted_highlights]
+                        logger.debug(f"Sorted highlights: {result}")
+                        return result
                 else:
                     logger.error(f"Unexpected response type: {type(section_revised)}")
+                    logger.error(f"Response content: {section_revised}")
 
-            return section.get("highlights", [])
+            logger.warning("No valid highlights generated by LLM, returning original")
+            original_highlights = section.get("highlights", [])
+            logger.debug(f"Returning original highlights: {original_highlights}")
+            return original_highlights
 
         except Exception as e:
             logger.error(f"Error in rewrite_section: {e}")
+            import traceback
+            logger.error(f"Rewrite section traceback: {traceback.format_exc()}")
             return section.get("highlights", [])
-            highlights = section_revised.final_answer or []
-            sorted_highlights = sorted(highlights, key=lambda d: d.relevance * -1)  # Use .relevance not .get()
-            return [s.highlight for s in sorted_highlights]  # Use .highlight not .get()
-
-        return section.get("highlights", [])
 
     def _get_formatted_chain_inputs(self, chain, section=None):
         """Get formatted inputs for chain with proper skills formatting"""
