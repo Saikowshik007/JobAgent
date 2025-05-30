@@ -1,5 +1,5 @@
 import yaml
-from fastapi import requests
+import requests
 from fp.fp import FreeProxy
 from yaml import YAMLError
 from services.langchain_helpers import *
