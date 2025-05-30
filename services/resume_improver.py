@@ -1,5 +1,6 @@
 import yaml
 import requests
+from bs4 import BeautifulSoup
 from fp.fp import FreeProxy
 from yaml import YAMLError
 from services.langchain_helpers import *
@@ -18,7 +19,7 @@ class ResumeImprover:
     Parallel ResumeImprover using asyncio.gather with run_in_executor for true HTTP parallelism.
     """
 
-    def __init__(self, url, api_key, parsed_job= None, llm_kwargs: dict = None, timeout: int = 500):
+    def __init__(self, url, api_key, parsed_job=None, llm_kwargs: dict = None, timeout: int = 500):
         """Initialize ResumeImprover with the job post URL and optional resume location."""
         super().__init__()
         self.job_post_html_data = None
@@ -307,9 +308,9 @@ class ResumeImprover:
             'projects': self.projects or []
         }
         default_value = defaults.get(task_name)
-        logger.debug(f"Using default for {task_name}: {type(default_value)} with {len(default_value) if isinstance(default_value, list) else 'N/A'} items")
+        logger.debug(
+            f"Using default for {task_name}: {type(default_value)} with {len(default_value) if isinstance(default_value, list) else 'N/A'} items")
         return default_value
-
 
     def download_and_parse_job_post(self, url=None):
         """Download and parse the job post from the provided URL."""
@@ -319,6 +320,19 @@ class ResumeImprover:
         self._extract_html_data()
         self.job_post = JobPost(self.job_post_raw, self.api_key)
         self.parsed_job = self.job_post.parse_job_post(verbose=False)
+
+    def _extract_html_data(self):
+        """Extract text content from HTML, removing all HTML tags.
+
+        Raises:
+            Exception: If HTML data extraction fails.
+        """
+        try:
+            soup = BeautifulSoup(self.job_post_html_data, "html.parser")
+            self.job_post_raw = soup.get_text(separator=" ", strip=True)
+        except Exception as e:
+            config.logger.error(f"Failed to extract HTML data: {e}")
+            raise
 
     def _download_url(self, url=None):
         """Download the content of the URL and return it as a string.
@@ -344,7 +358,7 @@ class ResumeImprover:
                     proxies = {"http": proxy, "https": proxy}
 
                 response = requests.get(
-                    self.url, headers=config.get("request_headers"), proxies=proxies
+                    self.url, headers=config.get_enhanced_headers(self.url), proxies=proxies
                 )
                 response.raise_for_status()
                 self.job_post_html_data = response.text
@@ -355,7 +369,7 @@ class ResumeImprover:
                     config.logger.warning(
                         f"Rate limit exceeded. Retrying in {backoff_factor * 2 ** attempt} seconds..."
                     )
-                    time.sleep(backoff_factor * 2**attempt)
+                    time.sleep(backoff_factor * 2 ** attempt)
                     use_proxy = True
                 else:
                     config.logger.error(f"Failed to download URL {self.url}: {e}")
@@ -363,16 +377,6 @@ class ResumeImprover:
 
         config.logger.error(f"Exceeded maximum retries for URL {self.url}")
         return False
-
-    def _extract_html_data(self):
-        """Extract text content from HTML, removing all HTML tags."""
-        try:
-            from bs4 import BeautifulSoup
-            soup = BeautifulSoup(self.job_post_html_data, "html.parser")
-            self.job_post_raw = soup.get_text(separator=" ", strip=True)
-        except Exception as e:
-            logger.error(f"Failed to extract HTML data: {e}")
-            raise
 
     def write_objective(self, **chain_kwargs) -> str:
         """Write an objective for the resume."""
@@ -524,14 +528,14 @@ class ResumeImprover:
             logger.info(f"Rewriting {len(self.experiences)} experiences...")
             result = []
             for i, exp in enumerate(self.experiences):
-                logger.info(f"Processing experience {i+1}: {exp.get('title', 'Unknown')}")
+                logger.info(f"Processing experience {i + 1}: {exp.get('title', 'Unknown')}")
                 exp = dict(exp)
 
                 # Log original highlights
                 original_highlights = exp.get("highlights", [])
                 logger.info(f"  Original highlights: {len(original_highlights)} items")
                 for j, highlight in enumerate(original_highlights):
-                    logger.debug(f"    {j+1}: {highlight}")
+                    logger.debug(f"    {j + 1}: {highlight}")
 
                 # Rewrite section
                 new_highlights = self.rewrite_section(section=exp, **chain_kwargs)
@@ -539,7 +543,7 @@ class ResumeImprover:
 
                 if new_highlights:
                     for j, highlight in enumerate(new_highlights):
-                        logger.debug(f"    NEW {j+1}: {highlight}")
+                        logger.debug(f"    NEW {j + 1}: {highlight}")
                     exp["highlights"] = new_highlights
                 else:
                     logger.warning(f"  No new highlights generated, keeping original")
@@ -565,14 +569,14 @@ class ResumeImprover:
             logger.info(f"Rewriting {len(self.projects)} projects...")
             result = []
             for i, proj in enumerate(self.projects):
-                logger.info(f"Processing project {i+1}: {proj.get('name', 'Unknown')}")
+                logger.info(f"Processing project {i + 1}: {proj.get('name', 'Unknown')}")
                 proj = dict(proj)
 
                 # Log original highlights
                 original_highlights = proj.get("highlights", [])
                 logger.info(f"  Original highlights: {len(original_highlights)} items")
                 for j, highlight in enumerate(original_highlights):
-                    logger.debug(f"    {j+1}: {highlight}")
+                    logger.debug(f"    {j + 1}: {highlight}")
 
                 # Rewrite section
                 new_highlights = self.rewrite_section(section=proj, **chain_kwargs)
@@ -580,7 +584,7 @@ class ResumeImprover:
 
                 if new_highlights:
                     for j, highlight in enumerate(new_highlights):
-                        logger.debug(f"    NEW {j+1}: {highlight}")
+                        logger.debug(f"    NEW {j + 1}: {highlight}")
                     proj["highlights"] = new_highlights
                 else:
                     logger.warning(f"  No new highlights generated, keeping original")

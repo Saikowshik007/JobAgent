@@ -1,12 +1,10 @@
 from datetime import datetime
-from typing import List
 from dateutil import parser as dateparser
 from dateutil.relativedelta import relativedelta
 from langchain_openai import ChatOpenAI
 import langchain
 from langchain_community.cache import InMemoryCache
 import config
-import utils
 
 # Set up LLM cache
 langchain.llm_cache = InMemoryCache()

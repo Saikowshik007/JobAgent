@@ -8,10 +8,7 @@ import yaml
 from typing import Any, Dict, List, Optional, Union
 from functools import lru_cache
 import logging
-import os
 from datetime import datetime
-
-import config
 
 
 class ConfigProvider:
@@ -103,12 +100,13 @@ def reload() -> None:
     """Force reload the configuration from the file."""
     ConfigProvider.reload()
 
-def getLogger(name=None):
+
+def getLogger(name: Optional[str] = None, log_level: Optional[str] = None) -> logging.Logger:
     """
     Get a configured logger instance.
 
     Args:
-        name (str, optional): The name for the logger. If None, uses the root logger.
+        name (str, optional): The name for the logger. If None, uses 'jobtrak'.
         log_level (str, optional): The logging level to use. If None, uses the level from config.
             Valid values: 'DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'
 
@@ -116,7 +114,6 @@ def getLogger(name=None):
         logging.Logger: A configured logger instance
     """
     # Use the provided name or default to 'jobtrak'
-    log_level = config.get("api.level")
     logger_name = name if name else 'jobtrak'
     logger = logging.getLogger(logger_name)
 
@@ -124,11 +121,12 @@ def getLogger(name=None):
     if logger.handlers:
         return logger
 
-    # Get log level from config or parameter, default to INFO
+    # Get log level from parameter, config, or default to INFO
     if log_level:
         level = getattr(logging, log_level.upper())
     else:
-        level = getattr(logging, get("logging.level", "INFO"))
+        config_level = get("logging.level", "INFO")
+        level = getattr(logging, config_level.upper())
 
     logger.setLevel(level)
 
@@ -159,3 +157,65 @@ def getLogger(name=None):
     logger.propagate = False
 
     return logger
+
+
+def get_enhanced_headers(url: Optional[str] = None) -> Dict[str, str]:
+    """
+    Get enhanced headers based on the target site.
+
+    Args:
+        url (str, optional): The target URL to get headers for
+
+    Returns:
+        Dict[str, str]: Dictionary of HTTP headers
+    """
+    # Modern base headers that most sites expect
+    base_headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/70.0.3538.102 Safari/537.36 Edge/18.19582',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5',
+        'DNT': '1',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1',
+    }
+
+    # Site-specific header adjustments
+    if url:
+        url_lower = url.lower()
+
+        if 'linkedin.com' in url_lower:
+            base_headers.update({
+                'Referer': 'https://www.linkedin.com/',
+                'Origin': 'https://www.linkedin.com',
+                'Sec-Fetch-Site': 'same-origin',
+                'Sec-Fetch-Mode': 'navigate',
+                'Sec-Fetch-User': '?1',
+            })
+        elif 'indeed.com' in url_lower:
+            base_headers.update({
+                'Referer': 'https://www.indeed.com/',
+                'Origin': 'https://www.indeed.com',
+                'Sec-Fetch-Site': 'same-origin',
+                'Sec-Fetch-Mode': 'navigate',
+            })
+        elif 'glassdoor.com' in url_lower:
+            base_headers.update({
+                'Referer': 'https://www.glassdoor.com/',
+                'Origin': 'https://www.glassdoor.com',
+                'Sec-Fetch-Site': 'same-origin',
+                'Sec-Fetch-Mode': 'navigate',
+            })
+        elif 'myworkdayjobs.com' in url_lower or 'workday' in url_lower:
+            base_headers.update({
+                'Sec-Fetch-Site': 'cross-site',  # Workday often embedded
+                'Sec-Fetch-Mode': 'navigate',
+            })
+        elif 'microsoft.com' in url_lower:
+            base_headers.update({
+                'Referer': 'https://careers.microsoft.com/',
+                'Origin': 'https://careers.microsoft.com',
+                'Sec-Fetch-Site': 'same-origin',
+                'Sec-Fetch-Mode': 'navigate',
+            })
+
+    return base_headers
