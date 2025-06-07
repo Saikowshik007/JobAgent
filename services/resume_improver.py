@@ -638,17 +638,36 @@ class ResumeImprover:
                     logger.info(f"Pydantic model: Got {len(highlights)} highlights")
                     if highlights:
                         sorted_highlights = sorted(highlights, key=lambda d: d.relevance * -1)
-                        result = [s.highlight for s in sorted_highlights]
-                        logger.debug(f"Sorted highlights: {result}")
+
+                        # Determine limit based on section type
+                        section_type = self._determine_section_type(section)
+                        limit = 5 if section_type == 'experience' else 3 if section_type == 'project' else len(sorted_highlights)
+
+                        # Apply limit
+                        limited_highlights = sorted_highlights[:limit]
+                        result = [s.highlight for s in limited_highlights]
+
+                        logger.info(f"Limited to top {limit} highlights for {section_type} section")
+                        logger.debug(f"Final highlights: {result}")
                         return result
+
                 elif isinstance(section_revised, dict):
                     # Dictionary response
                     highlights = section_revised.get("final_answer", [])
                     logger.info(f"Dictionary: Got {len(highlights)} highlights")
                     if highlights:
                         sorted_highlights = sorted(highlights, key=lambda d: d.get("relevance", 0) * -1)
-                        result = [s.get("highlight", "") for s in sorted_highlights]
-                        logger.debug(f"Sorted highlights: {result}")
+
+                        # Determine limit based on section type
+                        section_type = self._determine_section_type(section)
+                        limit = 5 if section_type == 'experience' else 3 if section_type == 'project' else len(sorted_highlights)
+
+                        # Apply limit
+                        limited_highlights = sorted_highlights[:limit]
+                        result = [s.get("highlight", "") for s in limited_highlights]
+
+                        logger.info(f"Limited to top {limit} highlights for {section_type} section")
+                        logger.debug(f"Final highlights: {result}")
                         return result
                 else:
                     logger.error(f"Unexpected response type: {type(section_revised)}")
@@ -664,6 +683,18 @@ class ResumeImprover:
             import traceback
             logger.error(f"Rewrite section traceback: {traceback.format_exc()}")
             return section.get("highlights", [])
+
+    def _determine_section_type(self, section) -> str:
+        """Determine if section is experience or project based on its structure."""
+        # Check for experience indicators
+        if 'titles' in section or 'title' in section or 'company' in section:
+            return 'experience'
+        # Check for project indicators
+        elif 'name' in section:
+            return 'project'
+        else:
+            # Default fallback
+            return 'unknown'
 
     def _get_formatted_chain_inputs(self, chain, section=None):
         """Get formatted inputs for chain with proper skills formatting"""
