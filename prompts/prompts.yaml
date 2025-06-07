@@ -31,14 +31,14 @@ SECTION_HIGHLIGHTER:
 
   steps_message: |
     <Steps>
-    1. Create a <Plan> for following the <Instruction> while meeting all the <Criteria>.
-    3. Identify what <Additional Steps> are needed to execute this <Plan> effectively
-    4. Follow all steps one by one and show your <Work>.
-    5. For each relevant experience in the <Resume>, craft a highlight that presents accomplishments and skills WITHOUT justifying their relevance to the job
-    6. Remove any explanatory text that attempts to connect experiences to job requirements
-    8. Verify all highlights are derived from the <Resume> and not fabricated from the <Job Posting>
-    9. Confirm all <Criteria> are met and make necessary adjustments
-    10. Provide the answer to the <Instruction> with prefix <Final Answer>.
+    - Create a <Plan> for following the <Instruction> while meeting all the <Criteria>.
+    - Identify what <Additional Steps> are needed to execute this <Plan> effectively
+    - Follow all steps one by one and show your <Work>.
+    - For each relevant experience in the <Resume>, craft a highlight that presents accomplishments and skills WITHOUT justifying their relevance to the job
+    - Remove any explanatory text that attempts to connect experiences to job requirements
+    - Verify all highlights are derived from the <Resume> and not fabricated from the <Job Posting>
+    - Confirm all <Criteria> are met and make necessary adjustments
+    - Provide the answer to the <Instruction> with prefix <Final Answer>.
 
 
 SKILLS_MATCHER:
@@ -78,19 +78,19 @@ SKILLS_MATCHER:
 
   steps_message: |
     <Steps>
-    1. Review the <Resume> to identify all technical and non-technical skills present in experiences, projects, and existing skills section
-    2. Reference the <Job Posting> to understand context and identify relevant ATS keywords
-    3. Create a <Plan> for systematically extracting, combining, and organizing skills from all sources
-    4. **DEDUPLICATION STEP**: Identify any duplicate or similar skills across all sources (existing skills + newly identified skills)
-    5. **CONSOLIDATION STEP**: Merge similar skills (e.g., "React.js", "ReactJS", "React" all become "React")
-    6. Extract all unique technical skills and group them into 3-6 logical, professional subcategories
-    7. Extract all unique non-technical skills as individual items (do not group into subcategories)
-    8. Verify all skills are actually mentioned or demonstrated somewhere in the <Resume> or in the <Job Posting>
-    9. **FINAL DEDUPLICATION CHECK**: Ensure no skill appears more than once across all categories
-    10. Format technical skills as a dictionary with descriptive subcategory keys and skill arrays as values
-    11. Format non-technical skills as a simple flat array of skill strings
-    12. Confirm all <Criteria> are met, especially the no-duplicates rule
-    13. Provide your <Final Answer> with properly formatted technical_skills (dictionary) and non_technical_skills (array)
+    - Review the <Resume> to identify all technical and non-technical skills present in experiences, projects, and existing skills section
+    - Reference the <Job Posting> to understand context and identify relevant ATS keywords
+    - Create a <Plan> for systematically extracting, combining, and organizing skills from all sources
+    - **DEDUPLICATION STEP**: Identify any duplicate or similar skills across all sources (existing skills + newly identified skills)
+    - **CONSOLIDATION STEP**: Merge similar skills (e.g., "React.js", "ReactJS", "React" all become "React")
+    - Extract all unique technical skills and group them into 3-6 logical, professional subcategories
+    - Extract all unique non-technical skills as individual items (do not group into subcategories)
+    - Verify all skills are actually mentioned or demonstrated somewhere in the <Resume> or in the <Job Posting>
+    - **FINAL DEDUPLICATION CHECK**: Ensure no skill appears more than once across all categories
+    - Format technical skills as a dictionary with descriptive subcategory keys and skill arrays as values
+    - Format non-technical skills as a simple flat array of skill strings
+    - Confirm all <Criteria> are met, especially the no-duplicates rule
+    - Provide your <Final Answer> with properly formatted technical_skills (dictionary) and non_technical_skills (array)
 
 OBJECTIVE_WRITER:
   system_message: >
@@ -129,19 +129,19 @@ OBJECTIVE_WRITER:
 
   steps_message: |
     <Steps>
-    1. Analyze the <Resume> to identify key experiences, accomplishments, and skills
-    2. Review the <Job Posting> to understand context and identify relevant ATS keywords
-    3. Create a <Plan> for crafting a summary that showcases the candidate's qualifications
-    4. Determine what <Additional Steps> are needed to execute this plan effectively
-    5. Follow all steps systematically and document your <Work> process
-    6. Identify the candidate's most impressive company/role from <Resume>
-    7. Extract the top 2-3 quantified achievements with specific metrics
-    8. List core technical skills relevant to target role
-    9. Draft summary leading with strongest credential following required structure
-    10. Ensure each sentence adds unique value without aspirational language
-    11. Verify the summary is based solely on the <Resume> and focuses on accomplishments
-    12. Confirm all <Criteria> are met and make necessary adjustments
-    13. Provide your <Final Answer> with the polished professional summary
+    - Analyze the <Resume> to identify key experiences, accomplishments, and skills
+    - Review the <Job Posting> to understand context and identify relevant ATS keywords
+    - Create a <Plan> for crafting a summary that showcases the candidate's qualifications
+    - Determine what <Additional Steps> are needed to execute this plan effectively
+    - Follow all steps systematically and document your <Work> process
+    - Identify the candidate's most impressive company/role from <Resume>
+    - Extract the top 2-3 quantified achievements with specific metrics
+    - List core technical skills relevant to target role
+    - Draft summary leading with strongest credential following required structure
+    - Ensure each sentence adds unique value without aspirational language
+    - Verify the summary is based solely on the <Resume> and focuses on accomplishments
+    - Confirm all <Criteria> are met and make necessary adjustments
+    - Provide your <Final Answer> with the polished professional summary
 
 IMPROVER:
   system_message: >
@@ -169,25 +169,18 @@ IMPROVER:
 
   criteria_message: |
     <Criteria>
-    - Identify all spelling and grammar errors with specific correction suggestions
-    - Identify missing ATS keywords from the job posting that should be incorporated naturally
-    - Flag and suggest removal of any content that explicitly justifies how experience aligns with job requirements (e.g., "which aligns with the job's requirement for..." or "addressing the job's needs for...")
-    - Identify redundant or duplicate skills and experiences with consolidation recommendations
-    - Highlight areas where quantifiable achievements or metrics could be added
-    - Suggest structural improvements for better visual organization and readability
-    - For each suggestion, specify the resume section, the issue, and a clear improvement strategy
-    - Include a dedicated section addressing spelling and grammar issues
-    - Ensure recommendations maintain focus on accomplishments and skills without explicit job alignment justifications
+      - Find any spelling or grammar errors in my <Resume>, and include suggestions to fix them.
+      - Find any keywords that may be triggered by ATS screening that are missing from the resume and include suggestions to add them.
+      - Find any resume items that appear like lazy 'copy and paste' items from the job posting and include suggestions to fix them.
+      - Find any duplicate skills or resume experiences and include suggestions to de-duplicate them.
+      - Compile all your suggestions from <Work> into the <Final Answer>.
+      - For each suggestion in the <Final Answer>, include the respective <Resume> section, what needs to be improved, and how to improve it.
+      - In the <Final Answer>, include a section for Spelling and Grammar, including any suggestions for improvements.
 
   steps_message: |
     <Steps>
-    2. Create a <Plan> for systematically evaluating and improving the resume.
-    3. Determine what <Additional Steps> are needed to execute this <Plan> effectively.
-    4. Follow all steps systematically and document your <Work> process.
-    5. Check for spelling and grammar errors throughout the entire resume.
-    6. Identify critical ATS keywords from the job posting missing from the resume.
-    7. Identify and flag any statements that explicitly justify how experience aligns with job requirements
-    8. Check for redundant or duplicate content across the resume
-    9. Assess each section for opportunities to add quantifiable achievements
-    12. Confirm all <Criteria> are met and make necessary adjustments
-    13. Provide the answer to the <Instruction> with prefix <Final Answer>.
+      - Create a <Plan> for following the <Instruction> while meeting all the <Criteria>.
+      - What <Additional Steps> are needed to follow the <Plan>?
+      - Follow all steps one by one and show your <Work>.
+      - Verify that all <Criteria> are met, and update if necessary.
+      - Provide the answer to the <Instruction> with prefix <Final Answer>.
