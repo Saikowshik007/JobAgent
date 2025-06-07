@@ -169,18 +169,25 @@ IMPROVER:
 
   criteria_message: |
     <Criteria>
-      - Find any spelling or grammar errors in my <Resume>, and include suggestions to fix them.
-      - Find any keywords that may be triggered by ATS screening that are missing from the resume and include suggestions to add them.
-      - Find any resume items that appear like lazy 'copy and paste' items from the job posting and include suggestions to fix them.
-      - Find any duplicate skills or resume experiences and include suggestions to de-duplicate them.
-      - Compile all your suggestions from <Work> into the <Final Answer>.
-      - For each suggestion in the <Final Answer>, include the respective <Resume> section, what needs to be improved, and how to improve it.
-      - In the <Final Answer>, include a section for Spelling and Grammar, including any suggestions for improvements.
+    - Identify all spelling and grammar errors with specific correction suggestions
+    - Identify missing ATS keywords from the job posting that should be incorporated naturally
+    - Flag and suggest removal of any content that explicitly justifies how experience aligns with job requirements (e.g., "which aligns with the job's requirement for..." or "addressing the job's needs for...")
+    - Identify redundant or duplicate skills and experiences with consolidation recommendations
+    - Highlight areas where quantifiable achievements or metrics could be added
+    - Suggest structural improvements for better visual organization and readability
+    - For each suggestion, specify the resume section, the issue, and a clear improvement strategy
+    - Include a dedicated section addressing spelling and grammar issues
+    - Ensure recommendations maintain focus on accomplishments and skills without explicit job alignment justifications
 
   steps_message: |
     <Steps>
-      - Create a <Plan> for following the <Instruction> while meeting all the <Criteria>.
-      - What <Additional Steps> are needed to follow the <Plan>?
-      - Follow all steps one by one and show your <Work>.
-      - Verify that all <Criteria> are met, and update if necessary.
-      - Provide the answer to the <Instruction> with prefix <Final Answer>.
+    - Create a <Plan> for systematically evaluating and improving the resume.
+    - Determine what <Additional Steps> are needed to execute this <Plan> effectively.
+    - Follow all steps systematically and document your <Work> process.
+    - Check for spelling and grammar errors throughout the entire resume.
+    - Identify critical ATS keywords from the job posting missing from the resume.
+    - Identify and flag any statements that explicitly justify how experience aligns with job requirements
+    - Check for redundant or duplicate content across the resume
+    - Assess each section for opportunities to add quantifiable achievements
+    - Confirm all <Criteria> are met and make necessary adjustments
+    - Provide the answer to the <Instruction> with prefix <Final Answer>.
