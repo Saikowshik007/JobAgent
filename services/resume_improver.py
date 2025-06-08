@@ -44,13 +44,17 @@ class ResumeImprover:
         # Thread pool for running sync LLM calls
         self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
 
-    def create_complete_tailored_resume(self) -> str:
+    def create_complete_tailored_resume(self, require_objective: bool = True) -> str:
         """
         NEW main method: Create complete tailored resume with parallel processing.
         This is what ResumeGenerator calls - does everything.
+
+        Args:
+            require_objective: Whether to generate an objective section (default: True)
         """
         try:
             logger.info("=== Creating Complete Tailored Resume (Parallel) ===")
+            logger.info(f"Objective generation: {'enabled' if require_objective else 'disabled'}")
 
             # Try parallel execution first
             try:
@@ -62,15 +66,15 @@ class ResumeImprover:
                     if loop.is_running():
                         # We're in an async context, use thread-based approach
                         logger.info("Using thread-based parallel approach (async context detected)")
-                        results = self._generate_content_parallel_threads()
+                        results = self._generate_content_parallel_threads(require_objective=require_objective)
                     else:
                         # No active loop, safe to use asyncio.run
                         logger.info("Using asyncio-based parallel approach")
-                        results = asyncio.run(self._generate_content_async_parallel())
+                        results = asyncio.run(self._generate_content_async_parallel(require_objective=require_objective))
                 except RuntimeError:
                     # No event loop, safe to use asyncio.run
                     logger.info("Using asyncio-based parallel approach (no existing loop)")
-                    results = asyncio.run(self._generate_content_async_parallel())
+                    results = asyncio.run(self._generate_content_async_parallel(require_objective=require_objective))
 
                 end_time = time.time()
                 logger.info(f"Parallel generation completed in {end_time - start_time:.2f} seconds")
@@ -78,7 +82,7 @@ class ResumeImprover:
             except Exception as parallel_error:
                 logger.warning(f"Parallel execution failed: {parallel_error}, falling back to sequential")
                 # Fallback to sequential execution
-                results = self._generate_content_sequential()
+                results = self._generate_content_sequential(require_objective=require_objective)
 
             # Extract results with detailed logging
             objective = results.get('objective')
@@ -105,7 +109,8 @@ class ResumeImprover:
                 'metadata': {
                     'generated_at': datetime.now().isoformat(),
                     'job_url': self.url,
-                    'tailored': True
+                    'tailored': True,
+                    'objective_generated': require_objective
                 }
             }
 
@@ -120,7 +125,7 @@ class ResumeImprover:
             logger.error(f"Complete resume creation failed: {e}")
             raise
 
-    async def _generate_content_async_parallel(self) -> Dict:
+    async def _generate_content_async_parallel(self, require_objective: bool = True) -> Dict:
         """Generate all resume content in parallel using asyncio.gather."""
         # Create async tasks that run in thread pool (this gives true HTTP parallelism)
         if not hasattr(self, 'executor'):
@@ -130,14 +135,21 @@ class ResumeImprover:
 
         logger.info("Starting parallel task execution...")
 
-        tasks = [
-            loop.run_in_executor(self.executor, self._safe_write_objective),
+        tasks = []
+        task_names = []
+
+        # Conditionally add objective task
+        if require_objective:
+            tasks.append(loop.run_in_executor(self.executor, self._safe_write_objective))
+            task_names.append('objective')
+
+        # Always add these tasks
+        tasks.extend([
             loop.run_in_executor(self.executor, self._safe_extract_matched_skills),
             loop.run_in_executor(self.executor, self._safe_rewrite_experiences),
             loop.run_in_executor(self.executor, self._safe_rewrite_projects)
-        ]
-
-        task_names = ['objective', 'skills', 'experiences', 'projects']
+        ])
+        task_names.extend(['skills', 'experiences', 'projects'])
 
         # Wait for all tasks with timeout
         try:
@@ -153,7 +165,7 @@ class ResumeImprover:
                 if not task.done():
                     task.cancel()
             # Use default values
-            results = [None, [], [], []]
+            results = [None] * len(tasks)
 
         # Process results with detailed logging
         processed_results = {}
@@ -165,6 +177,10 @@ class ResumeImprover:
             else:
                 logger.info(f"Task '{task_name}' completed successfully")
                 processed_results[task_name] = result
+
+        # If objective was not requested, set it to empty string
+        if not require_objective:
+            processed_results['objective'] = ""
 
         return processed_results
 
@@ -220,18 +236,24 @@ class ResumeImprover:
             logger.error(f"Project traceback: {traceback.format_exc()}")
             return self.projects or []
 
-    def _generate_content_parallel_threads(self) -> Dict:
+    def _generate_content_parallel_threads(self, require_objective: bool = True) -> Dict:
         """Generate content using ThreadPoolExecutor for cases where we're already in async context."""
         logger.info("Using ThreadPoolExecutor for parallel generation...")
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
-            # Submit all tasks
-            future_to_task = {
-                executor.submit(self._safe_write_objective): 'objective',
+            # Submit tasks conditionally
+            future_to_task = {}
+
+            # Conditionally submit objective task
+            if require_objective:
+                future_to_task[executor.submit(self._safe_write_objective)] = 'objective'
+
+            # Always submit these tasks
+            future_to_task.update({
                 executor.submit(self._safe_extract_matched_skills): 'skills',
                 executor.submit(self._safe_rewrite_experiences): 'experiences',
                 executor.submit(self._safe_rewrite_projects): 'projects'
-            }
+            })
 
             results = {}
             completed_tasks = 0
@@ -272,22 +294,34 @@ class ResumeImprover:
                         logger.warning(f"Cancelled task: {task_name}")
 
                 # Fill in defaults for missing results
-                for task_name in ['objective', 'skills', 'experiences', 'projects']:
+                expected_tasks = ['skills', 'experiences', 'projects']
+                if require_objective:
+                    expected_tasks.append('objective')
+
+                for task_name in expected_tasks:
                     if task_name not in results:
                         results[task_name] = self._get_default_value(task_name)
                         logger.warning(f"Using default value for {task_name} due to timeout")
 
-            logger.info(f"Thread-based parallel execution completed: {len(results)}/4 tasks")
+            # If objective was not requested, set it to empty string
+            if not require_objective:
+                results['objective'] = ""
+
+            logger.info(f"Thread-based parallel execution completed: {len(results)}/{total_tasks} tasks")
             return results
 
-    def _generate_content_sequential(self) -> Dict:
+    def _generate_content_sequential(self, require_objective: bool = True) -> Dict:
         """Fallback sequential content generation."""
         logger.info("Running sequential content generation...")
 
         results = {}
 
-        logger.info("Sequential: Generating objective...")
-        results['objective'] = self._safe_write_objective()
+        if require_objective:
+            logger.info("Sequential: Generating objective...")
+            results['objective'] = self._safe_write_objective()
+        else:
+            logger.info("Sequential: Skipping objective generation...")
+            results['objective'] = ""
 
         logger.info("Sequential: Extracting skills...")
         results['skills'] = self._safe_extract_matched_skills()
@@ -304,7 +338,7 @@ class ResumeImprover:
     def _get_default_value(self, task_name: str):
         """Get default value for a task that failed or timed out."""
         defaults = {
-            'objective': None,
+            'objective': "",
             'skills': self.skills or [],
             'experiences': self.experiences or [],
             'projects': self.projects or []
@@ -875,7 +909,3 @@ class ResumeImprover:
             import traceback
             logger.error(f"Optimization traceback: {traceback.format_exc()}")
             return resume_draft
-
-
-
-

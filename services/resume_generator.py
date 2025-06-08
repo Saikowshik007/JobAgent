@@ -28,7 +28,7 @@ class ResumeGenerator:
 
     async def generate_resume(self, job_id: str, template: str = "standard",
                               customize: bool = True, resume_data: Optional[Dict[str, Any]] = None,
-                              handle_existing: str = "replace") -> Dict[str, Any]:
+                              handle_existing: str = "replace", require_objective: bool = True) -> Dict[str, Any]:
         """
         Generate a tailored resume for a specific job with orphaning prevention.
 
@@ -38,6 +38,7 @@ class ResumeGenerator:
             customize: Whether to customize resume for the job
             resume_data: User's resume data
             handle_existing: How to handle existing resumes - "replace", "keep_both", "error"
+            require_objective: Whether to generate an objective section
         """
         # Get the job from database
         job_dict = await self.cache_manager.get_job(job_id, self.user_id)
@@ -60,7 +61,7 @@ class ResumeGenerator:
 
         # Start background generation (non-blocking)
         asyncio.create_task(self._generate_resume_background(
-            job_dict, resume_id, template, customize, resume_data, existing_resumes, handle_existing
+            job_dict, resume_id, template, customize, resume_data, existing_resumes, handle_existing, require_objective
         ))
 
         return {
@@ -72,14 +73,18 @@ class ResumeGenerator:
             "template": template,
             "existing_resumes_count": len(existing_resumes),
             "handle_existing": handle_existing,
+            "require_objective": require_objective,
             "estimated_completion_seconds": 60
         }
+
     async def _generate_resume_background(self, job_dict: dict, resume_id: str, template: str,
                                           customize: bool, resume_data: Optional[Dict[str, Any]],
-                                          existing_resumes: List = None, handle_existing: str = "replace"):
+                                          existing_resumes: List = None, handle_existing: str = "replace",
+                                          require_objective: bool = True):
         """Background task to generate resume with orphaning prevention."""
         try:
             logger.info(f"Starting resume generation for job {job_dict.get('id')} for user {self.user_id}")
+            logger.info(f"Objective generation: {'enabled' if require_objective else 'disabled'}")
 
             # Update status to in progress
             await self.cache_manager.set_resume_status(
@@ -91,7 +96,7 @@ class ResumeGenerator:
             yaml_content = await loop.run_in_executor(
                 self.thread_pool,
                 self._generate_resume_sync,
-                job_dict, resume_data
+                job_dict, resume_data, require_objective
             )
 
             # Create the resume object
@@ -154,6 +159,7 @@ class ResumeGenerator:
                 resume_id, self.user_id, ResumeGenerationStatus.FAILED,
                 error=str(e)
             )
+
     async def _update_job_with_resume_id(self, job_id: str, resume_id: str):
         """Update the job record with the generated resume ID."""
         try:
@@ -168,7 +174,7 @@ class ResumeGenerator:
         except Exception as e:
             logger.error(f"Error updating job {job_id} with resume_id {resume_id}: {e}")
 
-    def _generate_resume_sync(self, job_dict: dict, resume_data: Optional[Dict[str, Any]]) -> str:
+    def _generate_resume_sync(self, job_dict: dict, resume_data: Optional[Dict[str, Any]], require_objective: bool = True) -> str:
         """Synchronous resume generation that runs in thread pool."""
         try:
             job_url = job_dict.get('job_url')
@@ -191,8 +197,8 @@ class ResumeGenerator:
                 logger.info(f"Using default resume template for job {job_dict.get('id')}")
                 # You'll need to provide default data or handle this case
 
-            # Let ResumeImprover do all the work
-            return resume_improver.create_complete_tailored_resume()
+            # Let ResumeImprover do all the work with objective requirement
+            return resume_improver.create_complete_tailored_resume(require_objective=require_objective)
 
         except Exception as e:
             logger.error(f"Synchronous resume generation failed: {e}")

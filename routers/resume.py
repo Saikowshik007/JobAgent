@@ -31,7 +31,8 @@ async def generate_resume(
             template=request.template or "standard",
             customize=request.customize,
             resume_data=request.resume_data,
-            handle_existing=handle_existing
+            handle_existing=handle_existing,
+            require_objective=request.requireObjective
         )
 
         return resume_info
@@ -268,5 +269,3 @@ async def get_active_resume_generations(
     except Exception as e:
         logger.error(f"Error getting active resume generations for user {user_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
-
