@@ -21,11 +21,20 @@ SECTION_HIGHLIGHTER:
 
   instruction_message: |
     <Instruction> 
-    Transform this experience into 3-4 authentic, compelling achievements that show real impact. Use only believable metrics based on the actual work described. Write in clear, professional language that sounds genuinely human. Keep each bullet concise for one-page optimization.
+    Transform this experience into exactly 4 achievements (for experience sections) or 2 achievements (for project sections) that show real impact. Use only believable metrics based on the actual work described. Write in clear, professional language that sounds genuinely human. Keep each bullet concise for one-page optimization.
 
   criteria_message: |
     <Criteria> 
-    - Create 3-4 achievements that tell an authentic story of real work
+    - Create exactly 4 achievements for experience sections, 2 achievements for project sections
+    - Each bullet should be concise, clear, and credible - aim for one line when possible
+    - Use realistic metrics that make sense for the role and company size
+    - Write in natural, professional language - no buzzwords or AI-speak
+    - Show genuine technical competence and business impact
+    - Include relevant technologies naturally within the achievement context
+    - Make accomplishments specific and verifiable
+    - Sound like something a real engineer would actually do
+    - Avoid any language that sounds inflated or artificial
+    - Optimize for space while maintaining clarity and impact
     - Each bullet should be concise, clear, and credible - aim for one line when possible
     - Use realistic metrics that make sense for the role and company size
     - Write in natural, professional language - no buzzwords or AI-speak
@@ -38,8 +47,9 @@ SECTION_HIGHLIGHTER:
 
   steps_message: |
     <Steps>
-    - Identify the real, substantive work accomplished in this role
+    - Identify the real, substantive work accomplished in this role/project
     - Determine realistic metrics based on company size and role scope
+    - Select the most impactful achievements (4 for experience, 2 for projects)
     - Craft achievements that show both technical skill and business value
     - Write in clear, professional language that sounds human
     - Keep bullets concise while preserving essential details
@@ -164,17 +174,19 @@ COMPREHENSIVE_SUGGESTIONS:
     - Could any experience be better positioned for relevance?
     
     ONE-PAGE OPTIMIZATION:
-    - Does content fit appropriately on one page?
+    - Does content fit appropriately on one page with 4 bullets per experience, 2 per project?
     - Can any verbose language be tightened without losing meaning?
     - Are there redundancies that can be eliminated?
     - Is the most impactful content prioritized?
+    - Are bullet counts appropriate (4 for experience, 2 for projects)?
 
   steps_message: |
     <Steps>
     - Review for authenticity and credibility of all claims
     - Check alignment with job requirements
     - Identify any language that sounds artificial or inflated
-    - Assess one-page fit and suggest conciseness improvements
+    - Verify bullet counts (4 for experience, 2 for projects) for one-page optimization
+    - Assess content fit and suggest conciseness improvements if needed
     - Suggest improvements that strengthen genuine qualifications
     - Ensure professional presentation standards
     - Verify the resume tells a compelling but authentic story
@@ -215,10 +227,11 @@ ALL_SUGGESTIONS_APPLIER:
     - Avoid any artificial or inflated language
     
     ONE-PAGE OPTIMIZATION:
-    - Ensure content fits perfectly on one page
+    - Ensure content fits perfectly on one page with proper bullet limits
     - Apply suggested conciseness improvements
     - Remove redundancies while preserving key content
-    - Prioritize most impactful achievements
+    - Prioritize most impactful achievements within 4/2 bullet limits
+    - Verify bullet counts: 4 for experience sections, 2 for project sections
     
     PROFESSIONAL STANDARDS:
     - Perfect spelling and grammar throughout
@@ -231,9 +244,10 @@ ALL_SUGGESTIONS_APPLIER:
     - Apply language and clarity improvements
     - Enhance job alignment where suggested
     - Implement conciseness improvements for one-page fit
+    - Enforce bullet limits: 4 for experience sections, 2 for project sections
     - Fix all spelling and grammar issues
     - Improve formatting consistency
     - Verify all content remains authentic and credible
     - Ensure final result is professional and interview-ready
     - Confirm achievements are believable and specific
-    - Validate one-page optimization is achieved
+    - Validate one-page optimization with proper bullet counts
