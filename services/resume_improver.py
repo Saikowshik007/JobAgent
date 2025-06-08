@@ -125,7 +125,7 @@ class ResumeImprover:
             # Step 4: Generate improvement suggestions (MANDATORY)
             logger.info("Generating improvement suggestions...")
             improvements = self.suggest_improvements()
-
+            logger.info(improvements)
             # Step 5: Return complete result
             result = {
                 'tailored_resume': yaml_content,
