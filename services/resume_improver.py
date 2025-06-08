@@ -137,15 +137,15 @@ class ResumeImprover:
         initial_yaml = self.dict_to_yaml_string(initial_resume)
 
         # Step 4: Get comprehensive improvement suggestions
-        logger.info("Getting comprehensive improvement and optimization suggestions...")
-        all_suggestions = await self.get_comprehensive_suggestions(initial_yaml)
+        # logger.info("Getting comprehensive improvement and optimization suggestions...")
+        # all_suggestions = await self.get_comprehensive_suggestions(initial_yaml)
 
-        # Step 5: Apply all suggestions at once
-        logger.info("Applying all suggestions to resume...")
-        final_yaml = await self.apply_all_suggestions_to_resume(initial_yaml, all_suggestions)
+        # # Step 5: Apply all suggestions at once
+        # logger.info("Applying all suggestions to resume...")
+        # final_yaml = await self.apply_all_suggestions_to_resume(initial_yaml, all_suggestions)
 
         logger.info("=== Complete Resume Creation with Direct APIs Finished ===")
-        return final_yaml
+        return initial_yaml
 
     async def _generate_content_async_parallel(self, require_objective: bool = True) -> Dict:
         """Generate all resume content in parallel using true async."""
