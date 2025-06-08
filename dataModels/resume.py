@@ -125,18 +125,20 @@ class ResumeImproverOutput(BaseModel):
         ..., description=Prompts.descriptions["RESUME_IMPROVER_OUTPUT"]["final_answer"]
     )
 
+
 class ResumeOnePageOptimizerOutput(BaseModel):
     """Schema for the one-page resume optimizer result."""
 
     plan: List[str] = Field(
-        ..., description="Steps or strategy used to compress and align the resume."
+        ..., description=Prompts.descriptions["ONE_PAGE_OPTIMIZER"]["plan"]
     )
     additional_steps: List[str] = Field(
-        ..., description="Extra actions or logic taken to reduce content effectively."
+        ...,
+        description=Prompts.descriptions["ONE_PAGE_OPTIMIZER"]["additional_steps"],
     )
     work: List[str] = Field(
-        ..., description="Details of content that was rewritten, removed, or reordered."
+        ..., description=Prompts.descriptions["ONE_PAGE_OPTIMIZER"]["work"]
     )
-    final_answer: str = Field(
-        ..., description="Optimized one-page resume content in YAML or plain text."
+    final_answer: List[ResumeImprovements] = Field(
+        ..., description=Prompts.descriptions["ONE_PAGE_OPTIMIZER"]["final_answer"]
     )
