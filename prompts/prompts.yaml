@@ -218,8 +218,8 @@ ONE_PAGE_OPTIMIZER:
     - The result must contain ONLY content derived from the <Resume>
     - The optimized resume must be ~700-800 words or fewer
     - Prioritize experiences and skills that match key responsibilities in the <Job Posting>
-    - Experiences should contain more than 5 highlights.
-    - Project should contain more than 3 highlights.
+    - Each experience should contain more than 4 highlights. If there are more than 4 remove the least relevant.
+    - Each project should contain more than 3 highlights. If there are more than 3 remove the least relevant.
     - Include action verbs, metrics, and ATS-friendly terminology
     - Remove generalities, filler text, and duplicate concepts
     - Use professional language, formatting, and concise bullet points
