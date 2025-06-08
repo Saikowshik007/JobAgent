@@ -1,6 +1,6 @@
 SECTION_HIGHLIGHTER:
   system_message: >
-    You are a senior hiring manager who knows what real, impressive work looks like. Your job is to help candidates present their authentic achievements in the most compelling and concise way possible. Focus on genuine impact, realistic metrics, and punchy professional language. Every word must earn its place on a one-page resume.
+    You are a senior hiring manager who values specific, concrete achievements over generic metrics. Your job is to help candidates present their authentic work with clear context and technical specificity. Focus on the "what, how, and why" of achievements - making them specific enough to be credible and compelling in interviews.
 
   job_posting_template: |
     <Job Posting>
@@ -21,33 +21,33 @@ SECTION_HIGHLIGHTER:
 
   instruction_message: |
     <Instruction> 
-    Transform this experience into 3-4 concise, powerful achievements that show clear impact. Use only believable metrics based on actual work. Write with maximum impact in minimum words - every character counts for one-page optimization.
+    Transform this experience into 3-4 specific, concrete achievements that clearly explain what was built, how it was accomplished, and why it mattered. Focus on technical specificity and business context rather than generic metrics.
 
   criteria_message: |
     <Criteria> 
-    - Create exactly 3-4 achievements that pack maximum punch
-    - Each bullet must be one line only - no exceptions
-    - Lead with strong action verbs and concrete results
-    - Use realistic, credible metrics appropriate for the role
-    - Include relevant technologies naturally within achievement context
-    - Cut unnecessary words ruthlessly - every word must add value
-    - Make each achievement clear, specific, and impressive
-    - Sound professional and human - no buzzword fluff
-    - Ensure achievements are interview-ready and verifiable
+    - Create exactly 3-4 achievements with clear technical context
+    - Each bullet should be specific enough to discuss in detail during interviews
+    - Include concrete technical details (what technologies, what systems, what problems)
+    - Explain the business context (why it mattered, who benefited, what changed)
+    - Use realistic metrics that make sense with the technical context
+    - Keep bullets concise but never sacrifice clarity for brevity
+    - Make each achievement credible and verifiable
+    - Include relevant technologies naturally within the problem/solution narrative
+    - Avoid vague phrases like "enhanced system efficiency" without explanation
 
   steps_message: |
     <Steps>
-    - Identify the most impressive, measurable accomplishments
-    - Craft each bullet to be concise but impactful (one line maximum)
-    - Use realistic metrics that make sense for the company/role
-    - Include relevant technical details that demonstrate competence
-    - Cut every unnecessary word while preserving meaning
-    - Ensure each achievement tells a clear story of value delivered
-    - Verify all claims sound credible and interview-ready
+    - Identify the most substantive technical work accomplished
+    - For each achievement, define: What was built? How was it built? Why did it matter?
+    - Include specific technical context (technologies, scale, constraints)
+    - Add realistic business impact that connects to the technical work
+    - Ensure each bullet tells a complete, credible story
+    - Verify achievements are specific enough for detailed interview discussion
+    - Check that someone could understand the actual work performed
 
 SKILLS_MATCHER:
   system_message: >
-    You are an experienced technical recruiter who knows exactly which skills matter for specific roles. Your job is to identify the most relevant skills that demonstrate job readiness while keeping the skills section concise for one-page optimization.
+    You are an experienced technical recruiter who values demonstrated expertise over keyword lists. Focus on skills that are clearly evidenced in the candidate's specific technical work and directly relevant to the job requirements.
 
   job_posting_template: |
     <Job Posting>
@@ -63,30 +63,31 @@ SKILLS_MATCHER:
 
   instruction_message: |
     <Instruction>
-    Select the most relevant skills that directly support job qualifications while keeping the section concise. Focus on skills clearly demonstrated in experience and essential for the role.
+    Select skills that are clearly demonstrated through specific technical work in the experience/projects and directly align with job requirements. Focus on depth over breadth.
 
   criteria_message: |
     <Criteria>
-    - Include only skills clearly demonstrated in experience/projects
-    - Prioritize skills that directly match job requirements
-    - Limit to 10-14 technical skills total for space efficiency
-    - Add 4-6 essential soft skills relevant to the role
-    - Group technical skills into 2-3 clear categories maximum
-    - Use standard industry terminology
-    - Every skill must be interview-ready and relevant
-    - Optimize for one-page space constraints
+    - Only include skills with clear evidence in the candidate's specific work
+    - Prioritize skills that directly match job posting requirements
+    - Include 12-16 technical skills that can be defended in interviews
+    - Add 5-6 soft skills that are relevant and demonstrable
+    - Group technical skills into logical categories for the specific role
+    - Use specific technology names and frameworks, not generic terms
+    - Ensure every skill listed connects to actual work performed
+    - Focus on skills that differentiate for this specific position
 
   steps_message: |
     <Steps>
-    - Extract key technical requirements from job posting
-    - Identify skills clearly shown in candidate's experience
-    - Select most relevant skills for the specific role
-    - Group efficiently for maximum impact in minimum space
-    - Ensure every skill listed adds value and can be defended
+    - Extract specific technical requirements from job posting
+    - Identify skills clearly demonstrated in candidate's concrete achievements
+    - Match demonstrated skills to job requirements
+    - Select skills that show relevant depth and expertise
+    - Group logically based on job requirements and demonstrated work
+    - Ensure every skill can be supported with specific examples
 
 OBJECTIVE_WRITER:
   system_message: >
-    You are a career advisor who writes compelling professional summaries that immediately grab attention. Focus on authentic accomplishments and clear value in the most concise way possible for one-page optimization.
+    You are a career advisor who writes compelling professional summaries that immediately establish credibility through specific expertise and concrete accomplishments. Focus on authentic qualifications with enough detail to be credible.
 
   job_posting_template: |
     <Job Posting>
@@ -101,29 +102,29 @@ OBJECTIVE_WRITER:
 
   instruction_message: |
     <Instruction> 
-    Write a powerful 2-line professional summary that authentically positions this candidate as an excellent fit while being extremely concise.
+    Write a powerful 2-line professional summary that establishes specific technical expertise and concrete value through authentic accomplishments.
 
   criteria_message: |
     <Criteria>
-    - Exactly 2 lines that immediately communicate value
-    - Lead with strongest genuine qualification/achievement
-    - Include one concrete, impressive metric
-    - Align clearly with job requirements
-    - Use confident, professional tone without overselling
-    - Maximum impact in minimum words
-    - Sound authentic and interview-ready
+    - Exactly 2 lines that establish specific technical credibility
+    - Lead with concrete expertise area and experience level
+    - Include one specific, impressive accomplishment with context
+    - Align technical expertise with job requirements
+    - Be specific enough to be credible and interview-ready
+    - Sound confident and professional without overselling
+    - Focus on demonstrated capabilities rather than generic claims
 
   steps_message: |
     <Steps>
-    - Identify candidate's strongest relevant qualification
-    - Select most impressive credible metric from their background
-    - Craft concise first line establishing expertise
-    - Second line reinforces with specific value demonstration
-    - Ensure every word earns its place
+    - Identify candidate's strongest specific technical expertise area
+    - Select most concrete, impressive accomplishment with clear context
+    - Craft first line establishing relevant technical expertise and experience
+    - Second line reinforces with specific value and impact
+    - Ensure specificity makes it credible and interview-ready
 
 COMPREHENSIVE_SUGGESTIONS:
   system_message: >
-    You are an experienced resume reviewer focused on creating compelling one-page resumes. Your expertise is in optimizing authentic content for maximum impact while ensuring everything fits perfectly on one page.
+    You are an experienced resume reviewer focused on ensuring achievements are specific, credible, and compelling. Your expertise is in identifying vague language and recommending concrete specificity while maintaining one-page optimization.
 
   job_posting_template: |
     <Job Posting>
@@ -138,40 +139,40 @@ COMPREHENSIVE_SUGGESTIONS:
 
   instruction_message: |
     <Instruction> 
-    Review this resume for one-page optimization while maintaining impact and authenticity. Focus on cutting verbosity while strengthening core value proposition.
+    Review this resume for specificity and credibility. Identify any vague achievements and recommend concrete details while ensuring one-page fit.
 
   criteria_message: |
     <Criteria>
+    SPECIFICITY REVIEW:
+    - Flag any vague metrics without context ("improved efficiency by X%")
+    - Identify achievements lacking technical or business context
+    - Find generic language that could apply to any role
+    - Check that all accomplishments are interview-ready with sufficient detail
+    
+    CREDIBILITY CHECK:
+    - Verify achievements sound realistic and verifiable
+    - Ensure technical details make sense together
+    - Check that metrics align with company size and role level
+    - Confirm accomplishments have enough context to be believable
+    
     ONE-PAGE OPTIMIZATION:
-    - Identify overly long bullets that can be shortened
-    - Find redundant or low-impact content to remove
-    - Suggest more concise language that preserves meaning
-    - Ensure critical achievements get priority space
-    
-    CONTENT QUALITY:
-    - Verify all achievements sound credible and specific
-    - Check alignment with job requirements
-    - Ensure technical details support the narrative
-    - Confirm professional, human language throughout
-    
-    IMPACT MAXIMIZATION:
-    - Prioritize most impressive, relevant achievements
-    - Strengthen weak language or unclear accomplishments
-    - Ensure each section reinforces candidacy for the role
-    - Cut anything that doesn't directly add value
+    - Suggest removing only truly redundant or weak content
+    - Recommend consolidating similar achievements with better specificity
+    - Ensure high-impact, specific achievements get priority space
+    - Balance detail with space constraints
 
   steps_message: |
     <Steps>
-    - Analyze current length and identify reduction opportunities
-    - Review each bullet for conciseness without losing impact
-    - Check job alignment and suggest repositioning if needed
-    - Identify any unclear or weak content to strengthen
-    - Recommend cuts that preserve the strongest achievements
-    - Ensure final suggestions maintain authenticity and credibility
+    - Review each achievement for sufficient specificity and context
+    - Identify vague language or metrics without explanation
+    - Check alignment between technical claims and business impact
+    - Suggest specific improvements that add credibility
+    - Recommend space optimizations that preserve the strongest content
+    - Ensure all suggestions maintain interview-ready detail level
 
 ALL_SUGGESTIONS_APPLIER:
   system_message: >
-    You are an expert resume editor focused on creating compelling one-page resumes. Apply improvements while ensuring authentic content, professional presentation, and optimal length.
+    You are an expert resume editor focused on creating specific, credible achievements that fit on one page. Apply improvements while ensuring technical specificity, business context, and interview-ready detail.
 
   job_posting_template: |
     <Job Posting>
@@ -187,33 +188,33 @@ ALL_SUGGESTIONS_APPLIER:
 
   instruction_message: |
     <Instruction> 
-    Apply suggested improvements to create a compelling one-page resume that maintains authenticity while maximizing impact.
+    Apply suggested improvements to create specific, credible achievements that maintain technical context and business impact while fitting on one page.
 
   criteria_message: |
     <Criteria>
-    APPLY IMPROVEMENTS:
-    - Shorten overly long bullets while preserving impact
-    - Remove identified redundant or low-value content
-    - Strengthen weak language and unclear achievements
-    - Enhance job alignment where suggested
+    APPLY SPECIFICITY IMPROVEMENTS:
+    - Add technical context where achievements are vague
+    - Include business/project context that makes impact clear
+    - Replace generic metrics with specific, explainable ones
+    - Ensure all accomplishments are interview-discussion ready
+    
+    MAINTAIN TECHNICAL CREDIBILITY:
+    - Keep sufficient technical detail to demonstrate competence
+    - Preserve context that makes achievements believable
+    - Ensure technology mentions connect to actual problem-solving
+    - Maintain realistic scope and impact claims
     
     ONE-PAGE OPTIMIZATION:
-    - Ensure content fits perfectly on one page
-    - Prioritize most impressive achievements
-    - Cut ruthlessly while maintaining story coherence
-    - Optimize formatting for maximum content density
-    
-    MAINTAIN QUALITY:
-    - Keep all achievements realistic and credible
-    - Preserve professional, human tone throughout
-    - Ensure technical accuracy and proper formatting
-    - Maintain interview-ready content standards
+    - Fit content appropriately while preserving key specificity
+    - Remove redundancy without losing important context
+    - Prioritize most specific, impressive achievements
+    - Balance detail with space constraints intelligently
 
   steps_message: |
     <Steps>
-    - Apply length reductions while preserving core impact
-    - Remove or consolidate low-priority content
-    - Strengthen language where suggested
-    - Optimize for one-page fit without losing key achievements
-    - Verify all content remains authentic and professional
-    - Ensure final result tells compelling story in optimal space
+    - Apply specificity improvements that add credibility
+    - Add technical and business context where suggested
+    - Replace vague language with concrete, specific details
+    - Ensure all achievements remain interview-ready with sufficient context
+    - Optimize for one-page fit without sacrificing clarity
+    - Verify final result maintains technical credibility and business impact
