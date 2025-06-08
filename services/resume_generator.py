@@ -174,7 +174,7 @@ class ResumeGenerator:
         except Exception as e:
             logger.error(f"Error updating job {job_id} with resume_id {resume_id}: {e}")
 
-    def _generate_resume_sync(self, job_dict: dict, resume_data: Optional[Dict[str, Any]], require_objective: bool = True) -> str:
+    def _generate_resume_sync(self, job_dict: dict, resume_data: Optional[Dict[str, Any]], require_objective: bool = False) -> str:
         """Synchronous resume generation that runs in thread pool."""
         try:
             job_url = job_dict.get('job_url')
