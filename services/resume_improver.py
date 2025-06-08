@@ -457,39 +457,43 @@ class ResumeImprover:
 
     # Helper methods (same as before)
     def _build_prompt_from_yaml(self, prompt_name: str, **kwargs) -> Dict[str, str]:
-        """Build prompt from YAML configuration."""
+        """Build prompt from YAML configuration using existing LangChain prompt structure."""
         try:
             from prompts import Prompts
 
-            prompt_config = Prompts.lookup[prompt_name]
+            # Get the list of LangChain message objects
+            prompt_messages = Prompts.lookup[prompt_name]
 
-            # Build system message
-            system_message = prompt_config.get('system_message', '')
+            # Extract system message (first message)
+            system_message = prompt_messages[0].content if prompt_messages else ""
 
-            # Build user message
+            # Process the human message templates
             user_parts = []
 
-            # Add job posting
-            if 'job_posting_template' in prompt_config:
-                job_data = self._get_job_posting_data()
-                job_posting = prompt_config['job_posting_template'].format(**job_data)
-                user_parts.append(job_posting)
+            # Get data for formatting
+            job_data = self._get_job_posting_data()
+            resume_data = self._get_resume_data(**kwargs)
+            all_data = {**job_data, **resume_data, **kwargs}
 
-            # Add resume template
-            if 'resume_template' in prompt_config:
-                resume_data = self._get_resume_data(**kwargs)
-                resume_section = prompt_config['resume_template'].format(**resume_data)
-                user_parts.append(resume_section)
-
-            # Add suggestions template
-            if 'suggestions_template' in prompt_config:
-                template_section = prompt_config['suggestions_template'].format(**kwargs)
-                user_parts.append(template_section)
-
-            # Add instruction, criteria, steps
-            for section in ['instruction_message', 'criteria_message', 'steps_message']:
-                if section in prompt_config:
-                    user_parts.append(prompt_config[section])
+            # Process each message template (skip system message at index 0)
+            for i, message in enumerate(prompt_messages[1:], 1):
+                try:
+                    if hasattr(message, 'prompt') and hasattr(message.prompt, 'template'):
+                        # This is a HumanMessagePromptTemplate - format it
+                        formatted_content = message.prompt.template.format(**all_data)
+                        if formatted_content.strip():  # Only add non-empty content
+                            user_parts.append(formatted_content)
+                    elif hasattr(message, 'content'):
+                        # This is a HumanMessage with static content
+                        if message.content.strip():
+                            user_parts.append(message.content)
+                except Exception as format_error:
+                    logger.warning(f"Failed to format message {i} in {prompt_name}: {format_error}")
+                    # Add the raw template if formatting fails
+                    if hasattr(message, 'prompt') and hasattr(message.prompt, 'template'):
+                        user_parts.append(message.prompt.template)
+                    elif hasattr(message, 'content'):
+                        user_parts.append(message.content)
 
             return {
                 'system': system_message,
@@ -498,6 +502,8 @@ class ResumeImprover:
 
         except Exception as e:
             logger.error(f"Error building prompt for {prompt_name}: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
             return {'system': '', 'user': ''}
 
     def _get_job_posting_data(self) -> Dict[str, str]:
