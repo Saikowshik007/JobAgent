@@ -14,6 +14,7 @@ from typing import Dict, List, Optional
 
 logger = config.getLogger("ResumeImprover")
 
+
 class ResumeImprover:
     """
     Parallel ResumeImprover using asyncio.gather with run_in_executor for true HTTP parallelism.
@@ -44,7 +45,7 @@ class ResumeImprover:
         # Thread pool for running sync LLM calls
         self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
 
-    def create_complete_tailored_resume(self) -> str:
+    def create_complete_tailored_resume(self, include_objective) -> str:
         """
         NEW main method: Create complete tailored resume with parallel processing.
         This is what ResumeGenerator calls - does everything.
@@ -62,15 +63,15 @@ class ResumeImprover:
                     if loop.is_running():
                         # We're in an async context, use thread-based approach
                         logger.info("Using thread-based parallel approach (async context detected)")
-                        results = self._generate_content_parallel_threads()
+                        results = self._generate_content_parallel_threads(include_objective)
                     else:
                         # No active loop, safe to use asyncio.run
                         logger.info("Using asyncio-based parallel approach")
-                        results = asyncio.run(self._generate_content_async_parallel())
+                        results = asyncio.run(self._generate_content_async_parallel(include_objective))
                 except RuntimeError:
                     # No event loop, safe to use asyncio.run
                     logger.info("Using asyncio-based parallel approach (no existing loop)")
-                    results = asyncio.run(self._generate_content_async_parallel())
+                    results = asyncio.run(self._generate_content_async_parallel(include_objective))
 
                 end_time = time.time()
                 logger.info(f"Parallel generation completed in {end_time - start_time:.2f} seconds")
@@ -81,7 +82,7 @@ class ResumeImprover:
                 results = self._generate_content_sequential()
 
             # Extract results with detailed logging
-            objective = results.get('objective')
+            objective = results.get('objective', "")
             skills = results.get('skills', [])
             experiences = results.get('experiences', [])
             projects = results.get('projects', [])
@@ -118,7 +119,7 @@ class ResumeImprover:
             logger.error(f"Complete resume creation failed: {e}")
             raise
 
-    async def _generate_content_async_parallel(self) -> Dict:
+    async def _generate_content_async_parallel(self, include_objective: bool = True) -> Dict:
         """Generate all resume content in parallel using asyncio.gather."""
         # Create async tasks that run in thread pool (this gives true HTTP parallelism)
         if not hasattr(self, 'executor'):
@@ -128,14 +129,21 @@ class ResumeImprover:
 
         logger.info("Starting parallel task execution...")
 
-        tasks = [
-            loop.run_in_executor(self.executor, self._safe_write_objective),
+        tasks = []
+        task_names = []
+
+        # Conditionally add objective task
+        if include_objective:
+            tasks.append(loop.run_in_executor(self.executor, self._safe_write_objective))
+            task_names.append('objective')
+
+        # Always add these tasks
+        tasks.extend([
             loop.run_in_executor(self.executor, self._safe_extract_matched_skills),
             loop.run_in_executor(self.executor, self._safe_rewrite_experiences),
             loop.run_in_executor(self.executor, self._safe_rewrite_projects)
-        ]
-
-        task_names = ['objective', 'skills', 'experiences', 'projects']
+        ])
+        task_names.extend(['skills', 'experiences', 'projects'])
 
         # Wait for all tasks with timeout
         try:
@@ -151,7 +159,11 @@ class ResumeImprover:
                 if not task.done():
                     task.cancel()
             # Use default values
-            results = [None, [], [], []]
+            default_results = []
+            if include_objective:
+                default_results.append(None)
+            default_results.extend([[], [], []])
+            results = default_results
 
         # Process results with detailed logging
         processed_results = {}
@@ -163,6 +175,10 @@ class ResumeImprover:
             else:
                 logger.info(f"Task '{task_name}' completed successfully")
                 processed_results[task_name] = result
+
+        # If objective was not included, set it to None/empty
+        if not include_objective:
+            processed_results['objective'] = None
 
         return processed_results
 
@@ -218,18 +234,22 @@ class ResumeImprover:
             logger.error(f"Project traceback: {traceback.format_exc()}")
             return self.projects or []
 
-    def _generate_content_parallel_threads(self) -> Dict:
+    def _generate_content_parallel_threads(self, include_objective: bool = True) -> Dict:
         """Generate content using ThreadPoolExecutor for cases where we're already in async context."""
         logger.info("Using ThreadPoolExecutor for parallel generation...")
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
-            # Submit all tasks
-            future_to_task = {
-                executor.submit(self._safe_write_objective): 'objective',
+            # Submit tasks conditionally
+            future_to_task = {}
+
+            if include_objective:
+                future_to_task[executor.submit(self._safe_write_objective)] = 'objective'
+
+            future_to_task.update({
                 executor.submit(self._safe_extract_matched_skills): 'skills',
                 executor.submit(self._safe_rewrite_experiences): 'experiences',
                 executor.submit(self._safe_rewrite_projects): 'projects'
-            }
+            })
 
             results = {}
             completed_tasks = 0
@@ -270,22 +290,33 @@ class ResumeImprover:
                         logger.warning(f"Cancelled task: {task_name}")
 
                 # Fill in defaults for missing results
-                for task_name in ['objective', 'skills', 'experiences', 'projects']:
+                expected_tasks = ['skills', 'experiences', 'projects']
+                if include_objective:
+                    expected_tasks.insert(0, 'objective')
+
+                for task_name in expected_tasks:
                     if task_name not in results:
                         results[task_name] = self._get_default_value(task_name)
                         logger.warning(f"Using default value for {task_name} due to timeout")
 
-            logger.info(f"Thread-based parallel execution completed: {len(results)}/4 tasks")
+            # If objective was not included, set it to None
+            if not include_objective:
+                results['objective'] = None
+
+            logger.info(f"Thread-based parallel execution completed: {len(results)}/{total_tasks} tasks")
             return results
 
-    def _generate_content_sequential(self) -> Dict:
+    def _generate_content_sequential(self, include_objective: bool = True) -> Dict:
         """Fallback sequential content generation."""
         logger.info("Running sequential content generation...")
 
         results = {}
 
-        logger.info("Sequential: Generating objective...")
-        results['objective'] = self._safe_write_objective()
+        if include_objective:
+            logger.info("Sequential: Generating objective...")
+            results['objective'] = self._safe_write_objective()
+        else:
+            results['objective'] = None
 
         logger.info("Sequential: Extracting skills...")
         results['skills'] = self._safe_extract_matched_skills()
@@ -641,7 +672,8 @@ class ResumeImprover:
 
                         # Determine limit based on section type
                         section_type = self._determine_section_type(section)
-                        limit = 5 if section_type == 'experience' else 3 if section_type == 'project' else len(sorted_highlights)
+                        limit = 4 if section_type == 'experience' else 2 if section_type == 'project' else len(
+                            sorted_highlights)
 
                         # Apply limit
                         limited_highlights = sorted_highlights[:limit]
@@ -660,7 +692,8 @@ class ResumeImprover:
 
                         # Determine limit based on section type
                         section_type = self._determine_section_type(section)
-                        limit = 5 if section_type == 'experience' else 3 if section_type == 'project' else len(sorted_highlights)
+                        limit = 4 if section_type == 'experience' else 2 if section_type == 'project' else len(
+                            sorted_highlights)
 
                         # Apply limit
                         limited_highlights = sorted_highlights[:limit]

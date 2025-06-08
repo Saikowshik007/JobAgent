@@ -42,6 +42,7 @@ class GenerateResumeRequest(BaseModel):
     template: Optional[str] = Field("standard", description="Resume template to use")
     customize: Optional[bool] = Field(True, description="Whether to customize resume for the job")
     resume_data: Optional[Dict[str, Any]] = Field(None, description="User's resume data in YAML format")
+    include_objective: Optional[bool] = Field(True, description="Whether to include an objective section")
 
 class UploadToSimplifyRequest(BaseModel):
     """Resume upload to Simplify request model."""

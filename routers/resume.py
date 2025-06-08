@@ -19,6 +19,7 @@ async def generate_resume(
         request: GenerateResumeRequest,
         handle_existing: str = Query("replace", regex="^(replace|keep_both|error)$",
                                      description="How to handle existing resumes: replace, keep_both, or error"),
+        include_objective: bool = Query(True, description="Whether to include an objective section"),
         cache_manager: DBCacheManager = Depends(get_cache_manager),
         user_id: str = Depends(get_user_id),
         api_key: str = Depends(get_user_key)
@@ -31,7 +32,8 @@ async def generate_resume(
             template=request.template or "standard",
             customize=request.customize,
             resume_data=request.resume_data,
-            handle_existing=handle_existing
+            handle_existing=handle_existing,
+            include_objective=include_objective
         )
 
         return resume_info
