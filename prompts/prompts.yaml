@@ -208,7 +208,7 @@ ONE_PAGE_OPTIMIZER:
     {resume_draft}
 
   instruction_message: |
-    <Instruction> Your task is to compress and optimize the <Resume> to fit within a single page (~600-800 words max)
+    <Instruction> Your task is to compress and optimize the <Resume> to fit within a single page (~700-800 words max)
     while maximizing alignment with the <Job Posting>. Return the complete optimized resume in YAML format,
     preserving high-impact achievements and ATS keywords. Trim weak or redundant content and ensure
     logical structure.
@@ -216,10 +216,10 @@ ONE_PAGE_OPTIMIZER:
   criteria_message: |
     <Criteria>
     - The result must contain ONLY content derived from the <Resume>
-    - The optimized resume must be ~600-800 words or fewer
+    - The optimized resume must be ~700-800 words or fewer
     - Prioritize experiences and skills that match key responsibilities in the <Job Posting>
-    - Remove the highlights in experiences which are irrelevant and no experience should contain more than 5 highlights.
-    - Remove the highlights in projects which are irrelevant and no project should contain more than 3 highlights.
+    - Experiences should contain more than 5 highlights.
+    - Project should contain more than 3 highlights.
     - Include action verbs, metrics, and ATS-friendly terminology
     - Remove generalities, filler text, and duplicate concepts
     - Use professional language, formatting, and concise bullet points
@@ -230,7 +230,7 @@ ONE_PAGE_OPTIMIZER:
     <Steps>
     - Create a <Plan> for optimizing the resume to fit within one page while retaining maximum job match.
     - List any <Additional Steps> required to execute this plan.
-    - Show your <Work>—describe edits made, sections trimmed, and content reordered.
+    - Show your <Work> describe edits made, sections trimmed, and content reordered.
     - Generate the optimized resume based only on original content.
     - Confirm that all <Criteria> are met.
     - Present your <Final Answer> as the complete optimized resume in valid YAML format.
