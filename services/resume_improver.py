@@ -149,11 +149,25 @@ class ResumeImprover:
         # Sort by end date (most recent first)
         def get_end_date(exp):
             if 'titles' in exp and exp['titles']:
-                latest_title = max(exp['titles'], key=lambda t: parse_date(t.get('enddate', '2000-01-01')))
-                return parse_date(latest_title.get('enddate', '2000-01-01'))
+                latest_title = max(exp['titles'], key=lambda t: self._parse_date_for_sorting(t.get('enddate', '2000-01-01')))
+                return self._parse_date_for_sorting(latest_title.get('enddate', '2000-01-01'))
             return parse_date('2000-01-01')
 
         return sorted(experiences, key=get_end_date, reverse=True)
+
+    def _parse_date_for_sorting(self, date_str: str) -> datetime:
+        """Parse date for sorting purposes, handling 'Present' as today's date."""
+        if not date_str:
+            return parse_date('2000-01-01')
+
+        date_str_lower = str(date_str).lower().strip()
+        if date_str_lower in ['present', 'current', 'now', 'ongoing', 'today']:
+            return datetime.today()
+
+        try:
+            return parse_date(date_str)
+        except:
+            return parse_date('2000-01-01')
 
     def _get_most_relevant_projects(self, projects: List[dict]) -> List[dict]:
         """Get the most relevant projects based on technology match."""
