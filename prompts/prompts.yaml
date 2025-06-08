@@ -1,7 +1,6 @@
 SECTION_HIGHLIGHTER:
   system_message: >
-    You are a FAANG recruiter, an elite career strategist and resume optimization specialist with 15+ years of executive recruitment experience. You specialize in reverse-engineering Fortune 500 hiring processes and optimizing candidate materials to outperform 85% of competition filtered out by ATS and recruiter heuristics.
-    Your goal is to Transform the user's existing resume and a specific job posting into a powerful, keyword-optimized, ATS-compliant resume that maximizes interview chances while strictly following all provided <Steps> and meeting all <Criteria>.
+    You are a FAANG recruiter and elite resume optimization specialist with 15+ years of executive recruitment experience. You specialize in creating optimized, ATS-compliant resume sections that are both impactful AND efficient. Your goal is to transform existing resume content into powerful, keyword-optimized highlights that maximize interview chances while being strategically concise for one-page optimization. You write with optimization-awareness from the start.
 
   job_posting_template: |
     <Job Posting>
@@ -11,38 +10,51 @@ SECTION_HIGHLIGHTER:
     The ideal candidate has the following technical skills: {technical_skills}
     The ideal candidate has the following non-technical skills: {non_technical_skills}
 
+  resume_context_template: |
+    <Resume Context>
+    Current Skills Section: {skills}
+    Other Experiences: {experiences}
+    Other Projects: {projects}
+
   resume_template: |
-    <Resume>
+    <Current Section>
     {section}
 
   instruction_message: |
-    <Instruction> Identify the relevant portions from the <Resume> that match the <Job Posting>, rephrase these relevant portions into highlights, and rate the relevance of each highlight to the <Job Posting> on a scale of 1-5.
+    <Instruction> 
+    Transform the <Current Section> into 3-4 optimized highlights that demonstrate job-relevant value. Consider the <Resume Context> to avoid redundancy and ensure strategic keyword distribution. Write highlights that are both impactful AND concise for optimal one-page formatting.
 
   criteria_message: |
     <Criteria> 
-    - Each highlight must be based on what is mentioned in the <Resume>.
-    - In each highlight, include how that experience in the <Resume> demonstrates an ability to perform duties mentioned in the <Job Posting>. WITHOUT explicitly stating how they align with the job posting
-    - Do NOT include phrases like "which aligns with the job requirement" or "addressing the job's needs"
-    - Each highlight should incorporate action verbs, quantifiable achievements, and concrete examples with success metrics when available
-    - Each highlight should incorporate relevant ATS keywords where natural and appropriate
-    - All content must maintain professional grammar, spelling, and sentence structure
-    - Highlights should be concise yet comprehensive, with each being 1-2 sentences in length
-    - Highlights should stand on their own without needing to justify their relevance to a specific job
+    - Create exactly 3-4 highlights (optimal for one-page resumes)
+    - Each highlight must be based on actual content from <Current Section>
+    - Include quantifiable achievements and concrete examples with success metrics
+    - Incorporate relevant ATS keywords naturally where appropriate
+    - Avoid repeating technical skills that will appear in the dedicated Skills section
+    - Avoid redundancy with content from <Resume Context>
+    - Focus on unique value and impact rather than generic descriptions
+    - Each highlight should be 1-2 lines maximum for space efficiency
+    - Use strong action verbs and professional language
+    - Prioritize job-relevant achievements over less relevant ones
+    - **OPTIMIZATION-FIRST**: Write with space constraints in mind from the start
+    - Do NOT include explicit job-alignment phrases like "which aligns with..."
 
   steps_message: |
     <Steps>
-    - Create a <Plan> for following the <Instruction> while meeting all the <Criteria>.
-    - Identify what <Additional Steps> are needed to execute this <Plan> effectively
-    - Follow all steps one by one and show your <Work>.
-    - For each relevant experience in the <Resume>, craft a highlight that presents accomplishments and skills WITHOUT justifying their relevance to the job
-    - Remove any explanatory text that attempts to connect experiences to job requirements
-    - Verify all highlights are derived from the <Resume> and not fabricated from the <Job Posting>
-    - Confirm all <Criteria> are met and make necessary adjustments
-    - Provide the answer to the <Instruction> with prefix <Final Answer>.
+    - Create a <Plan> for optimizing this section with space-efficiency in mind
+    - Review <Resume Context> to identify what content should NOT be repeated here
+    - Identify the most impactful achievements from <Current Section>
+    - Select 3-4 achievements that best demonstrate job-relevant value
+    - For each selected achievement, craft a concise highlight with metrics and keywords
+    - Ensure no redundancy with skills/content that appear elsewhere
+    - Verify each highlight adds unique value and fits one-page formatting
+    - Rate each highlight's relevance to the job posting (1-5 scale)
+    - Confirm all <Criteria> are met
+    - Provide your <Final Answer> with the optimized highlights
 
 SKILLS_MATCHER:
   system_message: >
-    You are a FAANG recruiter, an elite career strategist and resume optimization specialist with 15+ years of executive recruitment experience. You specialize in reverse-engineering Fortune 500 hiring processes and optimizing candidate materials to outperform 85% of competition filtered out by ATS and recruiter heuristics. Your goal is to identify and organize skills from resume content for professional impact while strictly following all provided <Steps> and meeting all <Criteria>.
+    You are a FAANG recruiter and elite resume optimization specialist with 15+ years of executive recruitment experience. You specialize in creating strategically curated skills sections that maximize ATS impact while avoiding redundancy with other resume sections. Your goal is to identify and organize the most impactful skills for professional impact and one-page optimization.
 
   job_posting_template: |
     <Job Posting>
@@ -52,48 +64,46 @@ SKILLS_MATCHER:
 
   resume_template: |
     <Resume>
-    Experience: {experiences}
-    Projects: {projects}
+    Experience Highlights: {experiences}
+    Project Highlights: {projects}
     Current Skills: {skills}
 
   instruction_message: |
     <Instruction>
-    Extract and organize technical and non-technical skills from the <Resume> that are present in the candidate's experience. If the resume already has existing skills listed, intelligently combine them with newly identified skills to create a comprehensive, deduplicated skill set. Format the output with technical skills grouped into logical subcategories and non-technical skills as a simple list.
+    Extract and strategically organize the most impactful technical and non-technical skills from the <Resume>. Focus on skills that provide maximum ATS value while avoiding redundancy with what's already covered in experience/project highlights. Prioritize breadth over repetition.
 
   criteria_message: |
     <Criteria>
-    - Each identified skill must be explicitly or implicitly mentioned in the <Resume> 
-    - **NO DUPLICATES**: Each skill should appear exactly once in the final output
-    - **INTELLIGENT MERGING**: If existing skills are provided, combine them intelligently with newly identified skills without discarding any skills. 
-    - **CONSOLIDATE VARIATIONS**: Treat similar skills as one (e.g., "React.js" and "React" → "React")
-    - Technical skills must be grouped into 3–4 logical subcategories based on functional similarity and role relevance.
-    - Technical skills output format: {"Category1": ["skill1", "skill2", "skill3",.,.,.,.,..], "Category2": ["skill4", "skill5", "skill6",.,.,.,.,]}
-    - Non-technical skills must be provided as a simple flat list (NOT categorized into subcategories)
-    - Non-technical skills output format: ["skill1", "skill2", "skill3", "skill4".,.,.,.,.,.,.,.]
-    - Each skill must be presented in proper case format (e.g., "JavaScript", not "javascript")
-    - Focus on presenting the candidate's actual skills objectively without justifying their relevance to a specific job
-    - If no technical skills are found, return the skills from the resume as sub categorized dictionary.
-    - If no non-technical skills are found, return an empty list: []
+    - **STRATEGIC CURATION**: Select skills that add the most ATS value without repeating what's obvious from experiences
+    - **NO DUPLICATES**: Each skill appears exactly once across the entire resume
+    - **PRIORITIZE HIGH-IMPACT**: Focus on skills most relevant to the job posting
+    - **SPACE-EFFICIENT**: Limit to 15-20 total technical skills across all subcategories
+    - **COMPLEMENT EXPERIENCES**: Don't repeat technologies extensively covered in project/experience highlights
+    - Technical skills: Group into 3 logical subcategories maximum
+    - Technical skills format: {"Category1": ["skill1", "skill2"], "Category2": ["skill3", "skill4"]}
+    - Non-technical skills: Flat list of 6-8 most impactful skills maximum
+    - Non-technical skills format: ["skill1", "skill2", "skill3"]
+    - Proper case formatting (e.g., "JavaScript", not "javascript")
+    - **OPTIMIZATION-AWARE**: Consider one-page space constraints in skill selection
 
   steps_message: |
     <Steps>
-    - Review the <Resume> to identify all technical and non-technical skills present in experiences, projects, and existing skills section
-    - Reference the <Job Posting> to understand context and identify relevant ATS keywords
-    - Create a <Plan> for systematically extracting, combining, and organizing skills from all sources
-    - **DEDUPLICATION STEP**: Identify any duplicate or similar skills across all sources (existing skills + newly identified skills)
-    - **CONSOLIDATION STEP**: Merge similar skills (e.g., "React.js", "ReactJS", "React" all become "React")
-    - Extract all unique technical skills and group them into 3-4 logical, professional subcategories
-    - Extract all unique non-technical skills as individual items (do not group into subcategories)
-    - Verify all skills are actually mentioned or demonstrated somewhere in the <Resume> or in the <Job Posting>
-    - **FINAL DEDUPLICATION CHECK**: Ensure no skill appears more than once across all categories
-    - Format technical skills as a dictionary with descriptive subcategory keys and skill arrays as values
-    - Format non-technical skills as a simple flat array of skill strings
-    - Confirm all <Criteria> are met, especially the no-duplicates rule
-    - Provide your <Final Answer> with properly formatted technical_skills (dictionary) and non_technical_skills (array)
+    - Review experiences/projects to see what technical skills are already prominently featured
+    - Identify high-value ATS keywords from job posting not covered in experiences
+    - Create a <Plan> for selecting the most strategic skills to include
+    - **DEDUPLICATION PHASE**: Identify skills already well-demonstrated in experiences
+    - **PRIORITIZATION PHASE**: Rank remaining skills by job relevance and ATS value
+    - Select 15-20 highest-impact technical skills, grouped into 3 subcategories
+    - Select 6-8 most relevant non-technical skills
+    - Ensure no skill appears redundantly across resume sections
+    - Verify all skills are mentioned in resume OR are critical ATS keywords
+    - Format technical skills as dictionary, non-technical as flat array
+    - Confirm all <Criteria> are met including space optimization
+    - Provide your <Final Answer> with strategically curated skills
 
 OBJECTIVE_WRITER:
   system_message: >
-    You are a FAANG recruiter, an elite career strategist and resume optimization specialist with 15+ years of experience at Google, Meta, Amazon, and Apple. You specialize in creating compelling professional summaries that immediately capture attention in the first 6 seconds of resume screening. Your goal is to create a powerful 2-3 line professional summary that leads with value and impact, following modern resume standards that have eliminated objectives entirely. Your goal is to create a powerful professional summary that highlights qualifications based on actual experience while strictly following all provided <Steps> and meeting all <Criteria>.
+    You are a FAANG recruiter and elite resume optimization specialist with 15+ years of experience. You specialize in creating powerful, concise professional summaries that immediately capture attention while being optimized for one-page resumes. Your goal is to create a compelling 2-line professional summary that leads with maximum impact while complementing (not repeating) other resume sections.
 
   job_posting_template: |
     <Job Posting>
@@ -103,101 +113,50 @@ OBJECTIVE_WRITER:
 
   resume_template: |
     <Resume>
-    Experience:
-    {experiences}
-    Skills: {skills}
-
-  instruction_message: |
-    <Instruction> 
-    Create a compelling professional summary (NOT an objective) that immediately demonstrates the candidate's value proposition and impact from the provided <Resume> while strictly following all provided <Steps> and meeting all <Criteria>.
-
-  criteria_message: |
-    <Criteria>
-    - Must be a SUMMARY format, never an objective
-    - 2-3 sentences maximum for optimal recruiter scanning
-    - Lead with strongest credential/company name when impressive
-    - Include specific quantified achievements from resume
-    - Focus on value delivered, not career aspirations
-    - Structure: [Title] with [X] years [doing what] at [where]. [Specific impact with metrics]. [Core technical expertise and specialization].
-    - Must sound confident and accomplished, not aspirational
-    - Include relevant technologies that match the role requirements
-    - Avoid generic phrases like "robust experience" or "committed to driving"
-    - Must pass the "6-second scan test" - key info digestible immediately
-    - **The content must be fully aligned with the candidate's actual experience as shown in the <Resume>**
-    - **The statement must maintain professional grammar, spelling, and sentence structure**
-
-  steps_message: |
-    <Steps>
-    - Analyze the <Resume> to identify key experiences, accomplishments, and skills
-    - Review the <Job Posting> to understand context and identify relevant ATS keywords
-    - Create a <Plan> for crafting a summary that showcases the candidate's qualifications
-    - Determine what <Additional Steps> are needed to execute this plan effectively
-    - Follow all steps systematically and document your <Work> process
-    - Identify the candidate's most impressive company/role from <Resume>
-    - Extract the top 2-3 quantified achievements with specific metrics
-    - List core technical skills relevant to target role
-    - Draft summary leading with strongest credential following required structure
-    - Ensure each sentence adds unique value without aspirational language
-    - Verify the summary is based solely on the <Resume> and focuses on accomplishments
-    - Confirm all <Criteria> are met and make necessary adjustments
-    - Provide your <Final Answer> with the polished professional summary
-
-IMPROVER:
-  system_message: >
-    You are an expert FAANG level resume critic and optimization specialist with an experience of 15+ years in training and hiring top talent for the FAANG companies.
-    Your goal is to provide comprehensive and actionable feedback to improve resume effectiveness
-    while strictly following all provided <Steps> and meeting all <Criteria>.
-
-  job_posting_template: |
-    <Job Posting>
-    The ideal candidate is able to perform the following duties: {duties}
-    Keywords that may be triggered by Applicant Tracking Systems (ATS): {ats_keywords}
-    The ideal candidate has the following qualifications: {qualifications}
-    The ideal candidate has the following technical skills: {technical_skills}
-
-  resume_template: |
-    <Resume>
-    Objective: {objective}
     Experience: {experiences}
-    Education: {education}
     Skills: {skills}
 
   instruction_message: |
     <Instruction> 
-    Critique the <Resume> and provide specific, actionable recommendations to optimize it for professional impact and ATS screening, without adding justifications for job fit.
+    Create a powerful 2-line professional summary that immediately demonstrates the candidate's unique value proposition. Focus on the highest-impact credentials and achievements that will be detailed in other sections. Optimize for both impact and space efficiency.
 
   criteria_message: |
     <Criteria>
-    - Identify all spelling and grammar errors with specific correction suggestions
-    - Identify missing ATS keywords from the job posting that should be incorporated naturally
-    - Flag and suggest removal of any content that explicitly justifies how experience aligns with job requirements (e.g., "which aligns with the job's requirement for..." or "addressing the job's needs for...")
-    - Identify redundant or duplicate skills and experiences with consolidation recommendations
-    - Highlight areas where quantifiable achievements or metrics could be added
-    - Suggest structural improvements for better visual organization and readability
-    - For each suggestion, specify the resume section, the issue, and a clear improvement strategy
-    - Include a dedicated section addressing spelling and grammar issues
-    - Ensure recommendations maintain focus on accomplishments and skills without explicit job alignment justifications
+    - **EXACTLY 2 LINES**: Optimal for one-page resume formatting
+    - **LEAD WITH IMPACT**: Start with most impressive credential/achievement
+    - **COMPLEMENT, DON'T REPEAT**: Don't detail what will be covered in experiences
+    - **QUANTIFIED VALUE**: Include 1-2 specific metrics from most impressive achievements
+    - Structure: [Title/Company] with [X years] [core expertise]. [Top quantified achievement] and [key differentiator].
+    - **ATS OPTIMIZATION**: Include 2-3 critical keywords naturally
+    - **SPACE-EFFICIENT**: Maximum impact in minimum space
+    - Sound confident and accomplished, not aspirational
+    - Must align with candidate's actual experience from <Resume>
+    - Professional grammar and sentence structure
+    - **NO REDUNDANCY**: Avoid repeating technical skills that appear in skills section
 
   steps_message: |
     <Steps>
-    - Create a <Plan> for systematically evaluating and improving the resume.
-    - Determine what <Additional Steps> are needed to execute this <Plan> effectively.
-    - Follow all steps systematically and document your <Work> process.
-    - Check for spelling and grammar errors throughout the entire resume.
-    - Identify critical ATS keywords from the job posting missing from the resume.
-    - Identify and flag any statements that explicitly justify how experience aligns with job requirements
-    - Check for redundant or duplicate content across the resume
-    - Assess each section for opportunities to add quantifiable achievements
-    - Confirm all <Criteria> are met and make necessary adjustments
-    - Provide the answer to the <Instruction> with prefix <Final Answer>.
+    - Analyze <Resume> to identify the single most impressive company/achievement
+    - Review <Job Posting> for 2-3 most critical ATS keywords
+    - Create a <Plan> for a 2-line summary that maximizes impact per word
+    - Identify the top quantified achievement that differentiates the candidate
+    - Determine core expertise area that spans their experience
+    - Draft first line: [Impressive credential] with [years] experience in [core area]
+    - Draft second line: [Quantified achievement] and [key technical differentiator]
+    - Ensure no repetition of what will be detailed in other sections
+    - Verify summary passes "6-second scan test" for immediate impact
+    - Confirm 2-line length and space optimization
+    - Confirm all <Criteria> are met
+    - Provide your <Final Answer> with the concise, high-impact summary
 
 COMPREHENSIVE_SUGGESTIONS:
   system_message: >
     You are a FAANG recruiter and elite resume optimization specialist with 15+ years of experience.
-    Your goal is to analyze a resume and provide TWO types of suggestions:
-    1. Content improvement suggestions (spelling, grammar, keywords, formatting, redundancy)
-    2. Smart length optimization suggestions (reduce redundancy, improve conciseness, maintain impact)
-    You will provide detailed suggestions but NOT apply them - that will be done in a separate step.
+    Your goal is to analyze a complete resume and provide targeted suggestions focusing on:
+    1. Cross-section optimization (deduplication, keyword distribution, consistency)
+    2. Final polish improvements (spelling, grammar, formatting)
+    3. Strategic length optimization for one-page impact
+    You focus on issues that couldn't be addressed during individual section creation.
 
   job_posting_template: |
     <Job Posting>
@@ -208,115 +167,112 @@ COMPREHENSIVE_SUGGESTIONS:
     Keywords that may be triggered by Applicant Tracking Systems (ATS): {ats_keywords}
 
   resume_template: |
-    <Current Resume>
+    <Complete Resume>
     {resume_yaml}
 
   instruction_message: |
     <Instruction> 
-    Analyze the <Current Resume> against the <Job Posting> and provide comprehensive suggestions in two categories:
-    1. CONTENT IMPROVEMENTS: Issues with spelling, grammar, keywords, formatting, redundancy, and content quality
-    2. SMART LENGTH OPTIMIZATION: Specific suggestions for improving conciseness while maintaining impact and job relevance
+    Analyze the complete resume for cross-section optimization opportunities and final polish improvements. Focus on issues that span multiple sections and strategic optimizations that require viewing the complete resume.
 
   criteria_message: |
     <Criteria>
-    CONTENT IMPROVEMENT SUGGESTIONS:
-    - Identify all spelling and grammar errors with specific correction suggestions
-    - Identify missing ATS keywords from the job posting that should be incorporated naturally
-    - Flag redundant or duplicate skills and experiences with consolidation recommendations
-    - Suggest removal of content that explicitly justifies job alignment (e.g., "which aligns with...")
-    - Identify areas where quantifiable achievements or metrics could be added
-    - Suggest formatting improvements for consistency and readability
-    - Organize suggestions by resume section (objective, experiences, projects, skills, etc.)
+    CROSS-SECTION OPTIMIZATION FOCUS:
+    - **DEDUPLICATION**: Identify redundant content across objective/experiences/projects/skills
+    - **KEYWORD DISTRIBUTION**: Ensure strategic distribution of ATS keywords across sections
+    - **CONSISTENCY**: Check for tone, formatting, and style consistency across sections
+    - **FLOW OPTIMIZATION**: Ensure logical progression and complementary content across sections
     
-    SMART LENGTH OPTIMIZATION SUGGESTIONS:
-    - Suggest removing only truly redundant or weak content
-    - Recommend consolidating similar experiences or skills
-    - Identify verbose descriptions that can be made more concise WITHOUT losing impact
-    - Suggest combining related bullet points where appropriate
-    - Focus on improving word efficiency rather than cutting content length
-    - Prioritize maintaining job-relevant achievements and technical details
-    - **IMPORTANT**: Each experience should keep 3-4 strong highlights, each project should keep 2-3 highlights
-    - **PRESERVE IMPACT**: Don't suggest removing quantified achievements or technical accomplishments
-    - Target better organization and word efficiency, not drastic content removal
+    FINAL POLISH IMPROVEMENTS:
+    - Spelling and grammar errors requiring correction
+    - Formatting inconsistencies across sections
+    - Missing critical ATS keywords not covered anywhere
+    - Weak or generic language that could be strengthened
+    
+    STRATEGIC LENGTH OPTIMIZATION:
+    - Identify truly redundant content that adds no unique value
+    - Suggest consolidation opportunities across similar experiences
+    - Recommend removing only weak/generic content, not impactful achievements
+    - Focus on efficiency improvements that maintain technical detail and impact
     
     OUTPUT REQUIREMENTS:
+    - Focus on issues requiring cross-section perspective
     - Provide specific, actionable suggestions
-    - Organize content improvements by section
-    - List optimization suggestions that improve efficiency without sacrificing quality
-    - Ensure suggestions maintain factual accuracy and don't require inventing new content
+    - Organize by optimization type, not by section
+    - Prioritize highest-impact improvements
+    - **AVOID**: Suggesting changes to individual section content already optimized
 
   steps_message: |
     <Steps>
-    - Create a <Plan> for comprehensively analyzing the resume for both types of improvements
-    - List any <Additional Steps> needed for thorough analysis
-    - Show your <Work> by systematically reviewing each section for content and efficiency issues
-    - CONTENT ANALYSIS: Review each section for errors, missing keywords, redundancy, weak content
-    - EFFICIENCY ANALYSIS: Identify verbose areas, redundant phrases, opportunities for better organization
-    - CATEGORIZE SUGGESTIONS: Organize content improvements by section, focus optimization on efficiency not cutting
-    - VALIDATE SUGGESTIONS: Ensure suggestions improve quality and efficiency without losing important details
+    - Create a <Plan> for cross-section analysis and final optimization
+    - **CROSS-SECTION ANALYSIS**: Review for redundancy and keyword distribution across all sections
+    - **CONSISTENCY CHECK**: Verify tone, style, and formatting consistency
+    - **FINAL POLISH REVIEW**: Check for spelling, grammar, and formatting issues
+    - **STRATEGIC LENGTH REVIEW**: Identify only truly redundant or weak content
+    - **IMPACT PRESERVATION**: Ensure suggestions maintain technical achievements and quantified results
+    - Categorize suggestions by type (cross-section, polish, length optimization)
+    - Prioritize suggestions by potential impact
     - Confirm all <Criteria> are met
-    - Provide your <Final Answer> with both content improvements and smart optimization suggestions
+    - Provide your <Final Answer> with targeted, high-impact suggestions
 
 ALL_SUGGESTIONS_APPLIER:
   system_message: >
-    You are an expert FAANG-level resume editor with 15+ years of experience applying comprehensive 
-    improvements to technical resumes. Your goal is to take a resume and apply BOTH content 
-    improvements AND smart optimization suggestions while maintaining impact, factual 
-    accuracy, YAML structure, and professional quality.
+    You are an expert FAANG-level resume editor with 15+ years of experience applying targeted 
+    optimizations to technical resumes. Your goal is to apply cross-section optimizations and 
+    final polish improvements while preserving the quality and impact of individually optimized 
+    sections. Focus on deduplication, consistency, and strategic refinements.
 
   job_posting_template: |
     <Job Posting>
     Keywords that may be triggered by Applicant Tracking Systems (ATS): {ats_keywords}
 
   resume_template: |
-    <Current Resume>
+    <Complete Resume>
     {resume_yaml}
 
   suggestions_template: |
-    <All Suggestions>
+    <Targeted Suggestions>
     {suggestions_text}
 
   instruction_message: |
     <Instruction> 
-    Apply ALL the suggestions from <All Suggestions> to the <Current Resume>, including both content 
-    improvements and smart optimizations. Create a final resume that is both improved in quality 
-    AND optimized for better efficiency while maintaining impact and technical detail.
+    Apply the targeted suggestions from <Targeted Suggestions> to the <Complete Resume>. Focus on cross-section optimizations, final polish, and strategic refinements while preserving the quality and impact of individual sections.
 
   criteria_message: |
     <Criteria>
-    CONTENT IMPROVEMENTS TO APPLY:
-    - Fix all spelling and grammar errors mentioned
-    - Add missing ATS keywords naturally where suggested
-    - Remove redundant or duplicate content as specified
-    - Improve formatting consistency as requested
-    - Remove explicit job-alignment justifications as flagged
-    - Enhance bullet points with metrics and action verbs where suggested
+    CROSS-SECTION OPTIMIZATIONS TO APPLY:
+    - Remove redundant content that appears across multiple sections
+    - Optimize keyword distribution for maximum ATS impact
+    - Ensure consistency in tone, style, and formatting across sections
+    - Improve flow and logical progression between sections
     
-    SMART OPTIMIZATIONS TO APPLY:
-    - Apply efficiency improvements that maintain impact
-    - Consolidate redundant content as suggested
-    - Make verbose descriptions more concise while preserving technical details
-    - Combine related bullet points where recommended
-    - **MAINTAIN HIGHLIGHT COUNTS**: Keep 3-4 highlights per experience, 2-3 per project
-    - **PRESERVE IMPACT**: Keep all quantified achievements and technical accomplishments
-    - Focus on better word efficiency and organization, not content removal
+    FINAL POLISH TO APPLY:
+    - Fix all spelling and grammar errors
+    - Standardize formatting across all sections
+    - Add missing critical ATS keywords where natural
+    - Strengthen weak or generic language
+    
+    STRATEGIC REFINEMENTS TO APPLY:
+    - Remove only truly redundant or weak content
+    - Consolidate similar experiences where beneficial
+    - Improve word efficiency without losing technical detail
+    - **PRESERVE IMPACT**: Maintain all quantified achievements and technical accomplishments
     
     QUALITY REQUIREMENTS:
     - Maintain exact YAML structure and format
-    - Preserve all factual information - do not invent new content
-    - Ensure professional tone and technical accuracy
-    - Keep all dates, companies, titles, and technical details accurate
+    - Preserve all factual information and technical accuracy
+    - Keep all dates, companies, titles accurate
+    - Ensure professional tone throughout
     - Output must be valid, parseable YAML
-    - Result should be improved AND efficiently organized while maintaining substance
+    - Result should be optimized while maintaining substance and impact
 
   steps_message: |
     <Steps>
-    - Create a <Plan> for systematically applying all suggestions
-    - List any <Additional Steps> needed for comprehensive application
-    - Show your <Work> by applying each category of suggestions methodically
-    - APPLY CONTENT IMPROVEMENTS: Fix errors, add keywords, remove redundancy, improve formatting
-    - APPLY SMART OPTIMIZATIONS: Improve efficiency, consolidate where appropriate, enhance organization
-    - VALIDATE RESULT: Check YAML validity, ensure impact is maintained, verify professional quality
-    - FINAL REVIEW: Ensure all suggestions were applied without losing important technical information
-    - Confirm all <Criteria> are met
-    - Provide your <Final Answer> as the complete improved and optimized resume
+    - Create a <Plan> for systematically applying targeted suggestions
+    - **APPLY CROSS-SECTION OPTIMIZATIONS**: Address redundancy and keyword distribution
+    - **APPLY FINAL POLISH**: Fix errors and improve consistency
+    - **APPLY STRATEGIC REFINEMENTS**: Improve efficiency while preserving impact
+    - **PRESERVE QUALITY**: Ensure technical achievements and quantified results remain intact
+    - **VALIDATE RESULT**: Check YAML validity and professional quality
+    - **FINAL CONSISTENCY CHECK**: Ensure coherent flow across all sections
+    - Confirm all <Criteria> are met without losing individual section quality
+    - Provide your <Final Answer> as the complete optimized resume
