@@ -139,6 +139,6 @@ class ResumeOnePageOptimizerOutput(BaseModel):
     work: List[str] = Field(
         ..., description=Prompts.descriptions["ONE_PAGE_OPTIMIZER"]["work"]
     )
-    final_answer: List[ResumeImprovements] = Field(
-        ..., description=Prompts.descriptions["ONE_PAGE_OPTIMIZER"]["final_answer"]
+    final_answer: str = Field(  # Changed from List[ResumeImprovements] to str
+        ..., description="The complete optimized resume content in YAML format"
     )

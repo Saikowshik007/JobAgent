@@ -817,30 +817,63 @@ class ResumeImprover:
             from services.langchain_helpers import create_llm
             from langchain.prompts import ChatPromptTemplate
 
+            logger.info("Starting one-page resume optimization...")
+
             # Set up the prompt and LLM
             prompt = ChatPromptTemplate(messages=Prompts.lookup["ONE_PAGE_OPTIMIZER"])
             llm = create_llm(api_key=self.api_key, **self.llm_kwargs)
             chain = prompt | llm.with_structured_output(schema=ResumeOnePageOptimizerOutput)
 
-            # Prepare the chain inputs using your standard helper
-            self._get_formatted_chain_inputs  # confirm it's available
+            # Prepare the chain inputs
             chain_inputs = {
                 "job_posting": self.job_post_raw or "No job description available.",
                 "resume_draft": resume_draft
             }
 
+            logger.info(f"Input resume length: {len(resume_draft)} characters")
             logger.info("Invoking LLM for one-page resume optimization...")
+
             result = chain.invoke(chain_inputs)
+            logger.info(f"LLM response type: {type(result)}")
+
+            # Handle both Pydantic model and dictionary responses
+            optimized_resume = None
 
             if hasattr(result, "final_answer"):
-                logger.info("One-page optimization completed successfully.")
-                return result.final_answer
+                # Pydantic model
+                optimized_resume = result.final_answer
+                logger.info("Retrieved optimized resume from Pydantic model")
+            elif isinstance(result, dict):
+                # Dictionary response
+                optimized_resume = result.get("final_answer")
+                logger.info("Retrieved optimized resume from dictionary")
+            else:
+                logger.error(f"Unexpected response type: {type(result)}")
+                logger.error(f"Response content: {result}")
+                return resume_draft
 
-            logger.warning("Final answer not found in LLM response. Returning original draft.")
-            return resume_draft
+            if optimized_resume and isinstance(optimized_resume, str):
+                logger.info(f"Optimized resume length: {len(optimized_resume)} characters")
+
+                # Validate that it's proper YAML
+                try:
+                    import yaml
+                    yaml.safe_load(optimized_resume)
+                    logger.info("Optimized resume is valid YAML")
+                    return optimized_resume
+                except yaml.YAMLError as e:
+                    logger.warning(f"Optimized resume is not valid YAML: {e}")
+                    logger.warning("Returning original resume draft")
+                    return resume_draft
+            else:
+                logger.warning(f"Invalid final_answer type: {type(optimized_resume)}")
+                logger.warning("Returning original resume draft")
+                return resume_draft
 
         except Exception as e:
             logger.error(f"One-page resume optimization failed: {e}")
+            import traceback
+            logger.error(f"Optimization traceback: {traceback.format_exc()}")
             return resume_draft
 
 
