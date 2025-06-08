@@ -131,11 +131,11 @@ class ResumeImprover:
 
             # Step 6: Final optimization for length
             logger.info("Optimizing final resume for length...")
-            final_yaml = self.optimize_resume_for_length(improved_yaml)
+            # final_yaml = self.optimize_resume_for_length(improved_yaml)
 
             # Step 7: Return complete result
             result = {
-                'tailored_resume': final_yaml,              # Final improved and optimized resume
+                'content': improved_yaml,              # Final improved and optimized resume
                 'original_tailored': initial_yaml,          # Original tailored version (before improvements)
                 'improvements': improvements,               # List of improvements that were applied
                 'metadata': {
@@ -150,11 +150,11 @@ class ResumeImprover:
 
             logger.info("=== Complete Resume Creation with Applied Improvements Finished ===")
             logger.info(f"Final result includes:")
-            logger.info(f"  - Final resume: {'✓' if final_yaml else '✗'}")
+            logger.info(f"  - Final resume: {'✓' if improved_yaml else '✗'}")
             logger.info(f"  - Original tailored: {'✓' if initial_yaml else '✗'}")
             logger.info(f"  - Improvements: {'✓' if improvements else '✗'}")
 
-            return result
+            return improved_yaml
 
         except Exception as e:
             logger.error(f"Complete resume creation with applied improvements failed: {e}")
