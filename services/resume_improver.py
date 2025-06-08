@@ -114,7 +114,6 @@ class ResumeImprover:
             logger.info("=== Resume Creation Complete ===")
 
             optimized_yaml = self.optimize_resume_for_length(yaml_content)
-            optimized_yaml = self.dict_to_yaml_string(optimized_yaml)
             return optimized_yaml
 
         except Exception as e:
