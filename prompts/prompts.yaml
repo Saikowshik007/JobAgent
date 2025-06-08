@@ -59,7 +59,7 @@ SKILLS_MATCHER:
 
   instruction_message: |
     <Instruction>
-    Extract and organize technical and non-technical skills from the <Resume> that are present in the candidate's experience. If the resume already has existing skills listed, intelligently combine them with newly identified skills to create a comprehensive, deduplicated skill set. Format the output with technical skills grouped into logical subcategories and non-technical skills as a simple list.
+    Extract and organize technical and non-technical skills from the <Resume> that are present in the candidate's experience. If the resume already has existing skills listed, intelligently combine them with newly identified skills to create a comprehensive, deduplicated skill set. Format the output in compact YAML format with technical skills grouped into logical categories and non-technical skills as a simple list.
 
   criteria_message: |
     <Criteria>
@@ -67,14 +67,23 @@ SKILLS_MATCHER:
     - **NO DUPLICATES**: Each skill should appear exactly once in the final output
     - **INTELLIGENT MERGING**: If existing skills are provided, combine them intelligently with newly identified skills without discarding any skills. 
     - **CONSOLIDATE VARIATIONS**: Treat similar skills as one (e.g., "React.js" and "React" → "React")
-    - Technical skills must be grouped into 3–6 logical subcategories based on functional similarity and role relevance.
-    - Technical skills output format: {"Category1": ["skill1", "skill2", "skill3",.,.,.,.,..], "Category2": ["skill4", "skill5", "skill6",.,.,.,.,]}
-    - Non-technical skills must be provided as a simple flat list (NOT categorized into subcategories)
-    - Non-technical skills output format: ["skill1", "skill2", "skill3", "skill4".,.,.,.,.,.,.,.]
+    - Technical skills must be grouped into 3–4 logical categories based on functional similarity and role relevance
+    - Output format must be compact YAML with category names as keys and skill arrays as values
+    - Technical skills format: 
+      ```yaml
+      skills:
+        - category: "Programming Languages"
+          skills: ["Java", "Python", "JavaScript"]
+        - category: "Frameworks & Libraries"
+          skills: ["Spring Boot", "React", "FastAPI"]
+        - category: "Non-technical"
+          skills: ["System Design", "Agile Methodologies", "Technical Documentation"]
+      ```
     - Each skill must be presented in proper case format (e.g., "JavaScript", not "javascript")
     - Focus on presenting the candidate's actual skills objectively without justifying their relevance to a specific job
-    - If no technical skills are found, return the skills from the resume as sub categorized dictionary.
-    - If no non-technical skills are found, return an empty list: []
+    - Prioritize job-relevant skills first within each category for ATS optimization
+    - If no technical skills are found, return skills from resume in categorized format
+    - If no skills exist, return empty categories with empty arrays
 
   steps_message: |
     <Steps>
@@ -83,14 +92,14 @@ SKILLS_MATCHER:
     - Create a <Plan> for systematically extracting, combining, and organizing skills from all sources
     - **DEDUPLICATION STEP**: Identify any duplicate or similar skills across all sources (existing skills + newly identified skills)
     - **CONSOLIDATION STEP**: Merge similar skills (e.g., "React.js", "ReactJS", "React" all become "React")
-    - Extract all unique technical skills and group them into 3-6 logical, professional subcategories
-    - Extract all unique non-technical skills as individual items (do not group into subcategories)
-    - Verify all skills are actually mentioned or demonstrated somewhere in the <Resume> or in the <Job Posting>
+    - **PRIORITIZATION STEP**: Within each category, order skills with job-relevant ones first for ATS optimization
+    - Extract all unique technical skills and group them into 3-4 logical, professional categories
+    - Include non-technical skills as a final category within the same structure
+    - Verify all skills are actually mentioned or demonstrated somewhere in the <Resume>
     - **FINAL DEDUPLICATION CHECK**: Ensure no skill appears more than once across all categories
-    - Format technical skills as a dictionary with descriptive subcategory keys and skill arrays as values
-    - Format non-technical skills as a simple flat array of skill strings
-    - Confirm all <Criteria> are met, especially the no-duplicates rule
-    - Provide your <Final Answer> with properly formatted technical_skills (dictionary) and non_technical_skills (array)
+    - Format output as compact YAML with category objects containing skill arrays
+    - Confirm all <Criteria> are met, especially the no-duplicates rule and compact format
+    - Provide your <Final Answer> with properly formatted YAML skills structure
 
 OBJECTIVE_WRITER:
   system_message: >
@@ -222,17 +231,7 @@ ONE_PAGE_OPTIMIZER:
     - Use professional language, formatting, and concise bullet points
     - Do not invent new content — only rephrase or trim what's provided
     - Return the complete resume in valid YAML format
-    - COMPRESS SKILLS: Convert detailed skill subcategories into concise comma-separated lists
     - OPTIMIZE SPACING: Use compact formatting for maximum content density
-
-  compression_guidelines: |
-    <Compression Guidelines>
-    SKILLS OPTIMIZATION:
-    - Convert subcategory format to inline comma-separated lists
-    - Example: Instead of subcategories, use "Programming Languages: Java, Python, JavaScript, SQL, CSS, HTML"
-    - Group related technologies: "Frameworks & Libraries: Spring Boot, React, FastAPI, JUnit"
-    - Prioritize job-relevant skills first in each category
-    - Limit to 3-4 main skill categories maximum
     
     CONTENT PRIORITIZATION:
     - Keep 2-3 most relevant experiences with 3-4 high-impact bullets each
@@ -244,24 +243,12 @@ ONE_PAGE_OPTIMIZER:
   steps_message: |
     <Steps>
     - Create a <Plan> for optimizing the resume to fit within one page while retaining maximum job match
-    - Identify <Skills_Compression_Strategy> - how to convert detailed skill subcategories to compact format
     - List any <Additional_Steps> required to execute this plan
     - Show your <Work>—describe edits made, sections trimmed, and content reordered
     - Generate the optimized resume based only on original content
     - Confirm that all <Criteria> are met
     - Present your <Final_Answer> as the complete optimized resume in valid YAML format
 
-  example_skills_format: |
-    <Example Skills Format>
-    skills:
-      - category: "Programming Languages"
-        skills: ["Java", "Python", "JavaScript", "SQL", "CSS", "HTML"]
-      - category: "Frameworks & Libraries" 
-        skills: ["Spring Boot", "Spring JDBC", "MyBatis", "React", "FastAPI", "Streamlit", "JUnit", "Mockito"]
-      - category: "Cloud & DevOps"
-        skills: ["AWS", "Azure", "GCP", "Docker", "Kubernetes", "Jenkins", "Git", "Maven", "Gradle"]
-      - category: "Non-technical"
-        skills: ["Agile Methodologies", "System Design", "Code Review", "Technical Documentation"]
 
 
 
