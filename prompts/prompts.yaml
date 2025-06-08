@@ -194,10 +194,9 @@ IMPROVER:
     
 ONE_PAGE_OPTIMIZER:
   system_message: >
-    You are a FAANG recruiter and elite resume writing expert with 15+ years of experience
-    editing technical resumes for top-tier roles. You specialize in transforming multi-page resumes
-    into high-impact, one-page versions that maximize job alignment, eliminate fluff, and increase
-    ATS keyword density without sacrificing clarity or impact.
+    You are a FAANG recruiter and elite resume writing expert with 15+ years of experience editing technical resumes for top-tier roles. 
+    You specialize in transforming multi-page resumes into high-impact, one-page versions that maximize job alignment, eliminate fluff, 
+    and increase ATS keyword density without sacrificing clarity or impact.
 
   job_posting_template: |
     <Job Posting>
@@ -208,30 +207,60 @@ ONE_PAGE_OPTIMIZER:
     {resume_draft}
 
   instruction_message: |
-    <Instruction> Your task is to compress and optimize the <Resume> to fit within a single page (~600-700 words max)
-    while maximizing alignment with the <Job Posting>. Return the complete optimized resume in YAML format,
-    preserving high-impact achievements and ATS keywords. Trim weak or redundant content and ensure
-    logical structure.
+    <Instruction>
+    Your task is to compress and optimize the <Resume> to fit within a single page (~600-800 words max) while maximizing alignment 
+    with the <Job Posting>. Return the complete optimized resume in YAML format, preserving high-impact achievements and ATS keywords. 
+    Trim weak or redundant content and ensure logical structure.
 
   criteria_message: |
     <Criteria>
     - The result must contain ONLY content derived from the <Resume>
-    - The optimized resume must be ~600-700 words or fewer
+    - The optimized resume must be ~600-800 words or fewer
     - Prioritize experiences and skills that match key responsibilities in the <Job Posting>
     - Include action verbs, metrics, and ATS-friendly terminology
     - Remove generalities, filler text, and duplicate concepts
     - Use professional language, formatting, and concise bullet points
     - Do not invent new content — only rephrase or trim what's provided
     - Return the complete resume in valid YAML format
+    - COMPRESS SKILLS: Convert detailed skill subcategories into concise comma-separated lists
+    - OPTIMIZE SPACING: Use compact formatting for maximum content density
+
+  compression_guidelines: |
+    <Compression Guidelines>
+    SKILLS OPTIMIZATION:
+    - Convert subcategory format to inline comma-separated lists
+    - Example: Instead of subcategories, use "Programming Languages: Java, Python, JavaScript, SQL, CSS, HTML"
+    - Group related technologies: "Frameworks & Libraries: Spring Boot, React, FastAPI, JUnit"
+    - Prioritize job-relevant skills first in each category
+    - Limit to 3-4 main skill categories maximum
+    
+    CONTENT PRIORITIZATION:
+    - Keep most relevant experiences with 3-4 high-impact bullets each
+    - Merge similar or weak bullet points
+    - Focus on quantifiable achievements and job-relevant technologies
+    - Remove or compress less relevant projects
 
   steps_message: |
     <Steps>
-    - Create a <Plan> for optimizing the resume to fit within one page while retaining maximum job match.
-    - List any <Additional Steps> required to execute this plan.
-    - Show your <Work>—describe edits made, sections trimmed, and content reordered.
-    - Generate the optimized resume based only on original content.
-    - Confirm that all <Criteria> are met.
-    - Present your <Final Answer> as the complete optimized resume in valid YAML format.
+    - Create a <Plan> for optimizing the resume to fit within one page while retaining maximum job match
+    - Identify <Skills_Compression_Strategy> - how to convert detailed skill subcategories to compact format
+    - List any <Additional_Steps> required to execute this plan
+    - Show your <Work>—describe edits made, sections trimmed, and content reordered
+    - Generate the optimized resume based only on original content
+    - Confirm that all <Criteria> are met
+    - Present your <Final_Answer> as the complete optimized resume in valid YAML format
+
+  example_skills_format: |
+    <Example Skills Format>
+    skills:
+      - category: "Programming Languages"
+        skills: ["Java", "Python", "JavaScript", "SQL", "CSS", "HTML"]
+      - category: "Frameworks & Libraries" 
+        skills: ["Spring Boot", "Spring JDBC", "MyBatis", "React", "FastAPI", "Streamlit", "JUnit", "Mockito"]
+      - category: "Cloud & DevOps"
+        skills: ["AWS", "Azure", "GCP", "Docker", "Kubernetes", "Jenkins", "Git", "Maven", "Gradle"]
+      - category: "Non-technical"
+        skills: ["Agile Methodologies", "System Design", "Code Review", "Technical Documentation"]
 
 
 
