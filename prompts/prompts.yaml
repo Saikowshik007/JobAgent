@@ -16,7 +16,7 @@ SECTION_HIGHLIGHTER:
     {section}
 
   instruction_message: |
-      <Instruction> Identify the relevant portions from the <Resume> that match the <Job Posting>, rephrase these relevant portions into highlights, and rate the relevance of each highlight to the <Job Posting> on a scale of 1-5.
+    <Instruction> Identify the relevant portions from the <Resume> that match the <Job Posting>, rephrase these relevant portions into highlights, and rate the relevance of each highlight to the <Job Posting> on a scale of 1-5.
 
   criteria_message: |
     <Criteria> 
@@ -39,7 +39,6 @@ SECTION_HIGHLIGHTER:
     - Verify all highlights are derived from the <Resume> and not fabricated from the <Job Posting>
     - Confirm all <Criteria> are met and make necessary adjustments
     - Provide the answer to the <Instruction> with prefix <Final Answer>.
-
 
 SKILLS_MATCHER:
   system_message: >
@@ -191,14 +190,13 @@ IMPROVER:
     - Assess each section for opportunities to add quantifiable achievements
     - Confirm all <Criteria> are met and make necessary adjustments
     - Provide the answer to the <Instruction> with prefix <Final Answer>.
-    
 
 COMPREHENSIVE_SUGGESTIONS:
   system_message: >
     You are a FAANG recruiter and elite resume optimization specialist with 15+ years of experience.
     Your goal is to analyze a resume and provide TWO types of suggestions:
     1. Content improvement suggestions (spelling, grammar, keywords, formatting, redundancy)
-    2. One-page optimization suggestions (length reduction, prioritization, content trimming)
+    2. Smart length optimization suggestions (reduce redundancy, improve conciseness, maintain impact)
     You will provide detailed suggestions but NOT apply them - that will be done in a separate step.
 
   job_posting_template: |
@@ -217,7 +215,7 @@ COMPREHENSIVE_SUGGESTIONS:
     <Instruction> 
     Analyze the <Current Resume> against the <Job Posting> and provide comprehensive suggestions in two categories:
     1. CONTENT IMPROVEMENTS: Issues with spelling, grammar, keywords, formatting, redundancy, and content quality
-    2. ONE-PAGE OPTIMIZATION: Specific suggestions for reducing length while maintaining impact and job relevance
+    2. SMART LENGTH OPTIMIZATION: Specific suggestions for improving conciseness while maintaining impact and job relevance
 
   criteria_message: |
     <Criteria>
@@ -230,38 +228,40 @@ COMPREHENSIVE_SUGGESTIONS:
     - Suggest formatting improvements for consistency and readability
     - Organize suggestions by resume section (objective, experiences, projects, skills, etc.)
     
-    ONE-PAGE OPTIMIZATION SUGGESTIONS:
-    - Suggest specific content to remove or consolidate for length reduction
-    - Recommend experience highlights to trim (keeping most job-relevant ones)
-    - Recommend project highlights to trim (keeping most impactful ones)
-    - Identify verbose descriptions that can be made more concise
-    - Suggest structural changes to improve space efficiency
-    - Prioritize suggestions by impact on job match and overall resume strength
-    - Target final length of ~700-800 words
+    SMART LENGTH OPTIMIZATION SUGGESTIONS:
+    - Suggest removing only truly redundant or weak content
+    - Recommend consolidating similar experiences or skills
+    - Identify verbose descriptions that can be made more concise WITHOUT losing impact
+    - Suggest combining related bullet points where appropriate
+    - Focus on improving word efficiency rather than cutting content length
+    - Prioritize maintaining job-relevant achievements and technical details
+    - **IMPORTANT**: Each experience should keep 3-4 strong highlights, each project should keep 2-3 highlights
+    - **PRESERVE IMPACT**: Don't suggest removing quantified achievements or technical accomplishments
+    - Target better organization and word efficiency, not drastic content removal
     
     OUTPUT REQUIREMENTS:
     - Provide specific, actionable suggestions
     - Organize content improvements by section
-    - List optimization suggestions in order of priority
+    - List optimization suggestions that improve efficiency without sacrificing quality
     - Ensure suggestions maintain factual accuracy and don't require inventing new content
 
   steps_message: |
     <Steps>
     - Create a <Plan> for comprehensively analyzing the resume for both types of improvements
     - List any <Additional Steps> needed for thorough analysis
-    - Show your <Work> by systematically reviewing each section for content and length issues
+    - Show your <Work> by systematically reviewing each section for content and efficiency issues
     - CONTENT ANALYSIS: Review each section for errors, missing keywords, redundancy, weak content
-    - LENGTH ANALYSIS: Calculate approximate word count, identify verbose areas, prioritize content by job relevance
-    - CATEGORIZE SUGGESTIONS: Organize content improvements by section, prioritize optimization suggestions
-    - VALIDATE SUGGESTIONS: Ensure all suggestions are specific, actionable, and maintain factual accuracy
+    - EFFICIENCY ANALYSIS: Identify verbose areas, redundant phrases, opportunities for better organization
+    - CATEGORIZE SUGGESTIONS: Organize content improvements by section, focus optimization on efficiency not cutting
+    - VALIDATE SUGGESTIONS: Ensure suggestions improve quality and efficiency without losing important details
     - Confirm all <Criteria> are met
-    - Provide your <Final Answer> with both content improvements and optimization suggestions
+    - Provide your <Final Answer> with both content improvements and smart optimization suggestions
 
 ALL_SUGGESTIONS_APPLIER:
   system_message: >
     You are an expert FAANG-level resume editor with 15+ years of experience applying comprehensive 
     improvements to technical resumes. Your goal is to take a resume and apply BOTH content 
-    improvements AND one-page optimization suggestions systematically while maintaining factual 
+    improvements AND smart optimization suggestions while maintaining impact, factual 
     accuracy, YAML structure, and professional quality.
 
   job_posting_template: |
@@ -279,8 +279,8 @@ ALL_SUGGESTIONS_APPLIER:
   instruction_message: |
     <Instruction> 
     Apply ALL the suggestions from <All Suggestions> to the <Current Resume>, including both content 
-    improvements and one-page optimizations. Create a final resume that is both improved in quality 
-    AND optimized for one-page length (~700-800 words).
+    improvements and smart optimizations. Create a final resume that is both improved in quality 
+    AND optimized for better efficiency while maintaining impact and technical detail.
 
   criteria_message: |
     <Criteria>
@@ -292,13 +292,14 @@ ALL_SUGGESTIONS_APPLIER:
     - Remove explicit job-alignment justifications as flagged
     - Enhance bullet points with metrics and action verbs where suggested
     
-    ONE-PAGE OPTIMIZATIONS TO APPLY:
-    - Reduce content length to ~700-800 words maximum
-    - Remove or consolidate content as specifically suggested
-    - Trim experience highlights as recommended (prioritize job-relevant ones)
-    - Trim project highlights as recommended (prioritize impactful ones).
-    - Make verbose descriptions more concise as suggested
-    - Apply structural improvements for space efficiency
+    SMART OPTIMIZATIONS TO APPLY:
+    - Apply efficiency improvements that maintain impact
+    - Consolidate redundant content as suggested
+    - Make verbose descriptions more concise while preserving technical details
+    - Combine related bullet points where recommended
+    - **MAINTAIN HIGHLIGHT COUNTS**: Keep 3-4 highlights per experience, 2-3 per project
+    - **PRESERVE IMPACT**: Keep all quantified achievements and technical accomplishments
+    - Focus on better word efficiency and organization, not content removal
     
     QUALITY REQUIREMENTS:
     - Maintain exact YAML structure and format
@@ -306,7 +307,7 @@ ALL_SUGGESTIONS_APPLIER:
     - Ensure professional tone and technical accuracy
     - Keep all dates, companies, titles, and technical details accurate
     - Output must be valid, parseable YAML
-    - Result should be both improved AND optimized for length
+    - Result should be improved AND efficiently organized while maintaining substance
 
   steps_message: |
     <Steps>
@@ -314,8 +315,8 @@ ALL_SUGGESTIONS_APPLIER:
     - List any <Additional Steps> needed for comprehensive application
     - Show your <Work> by applying each category of suggestions methodically
     - APPLY CONTENT IMPROVEMENTS: Fix errors, add keywords, remove redundancy, improve formatting
-    - APPLY LENGTH OPTIMIZATIONS: Trim content, consolidate sections, reduce verbosity
-    - VALIDATE RESULT: Check YAML validity, word count, job relevance, professional quality
-    - FINAL REVIEW: Ensure all suggestions were applied without losing important information
+    - APPLY SMART OPTIMIZATIONS: Improve efficiency, consolidate where appropriate, enhance organization
+    - VALIDATE RESULT: Check YAML validity, ensure impact is maintained, verify professional quality
+    - FINAL REVIEW: Ensure all suggestions were applied without losing important technical information
     - Confirm all <Criteria> are met
     - Provide your <Final Answer> as the complete improved and optimized resume
