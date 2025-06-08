@@ -17,6 +17,7 @@ logger = config.getLogger("ResumeImprover")
 class ResumeImprover:
     """
     Parallel ResumeImprover using asyncio.gather with run_in_executor for true HTTP parallelism.
+    Now includes mandatory suggest_improvements functionality.
     """
 
     def __init__(self, url, api_key, parsed_job=None, llm_kwargs: dict = None, timeout: int = 500):
@@ -44,19 +45,22 @@ class ResumeImprover:
         # Thread pool for running sync LLM calls
         self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
 
-    def create_complete_tailored_resume(self, require_objective: bool = True) -> str:
+    def create_complete_tailored_resume(self, require_objective: bool = True) -> Dict:
         """
-        NEW main method: Create complete tailored resume with parallel processing.
-        This is what ResumeGenerator calls - does everything.
+        Main method: Create complete tailored resume with improvement suggestions.
+        This is what ResumeGenerator calls - does everything including mandatory improvements.
 
         Args:
             require_objective: Whether to generate an objective section (default: True)
+
+        Returns:
+            Dict: Contains both the tailored resume YAML and improvement suggestions
         """
         try:
-            logger.info("=== Creating Complete Tailored Resume (Parallel) ===")
+            logger.info("=== Creating Complete Tailored Resume with Improvements (Parallel) ===")
             logger.info(f"Objective generation: {'enabled' if require_objective else 'disabled'}")
 
-            # Try parallel execution first
+            # Step 1: Generate core resume content in parallel
             try:
                 start_time = time.time()
 
@@ -90,7 +94,7 @@ class ResumeImprover:
             experiences = results.get('experiences', [])
             projects = results.get('projects', [])
 
-            logger.info(f"Results summary:")
+            logger.info(f"Content generation results:")
             logger.info(f"  - Objective: {'✓' if objective else '✗'}")
             logger.info(f"  - Skills: {len(skills)} categories")
             logger.info(f"  - Experiences: {len(experiences)} items")
@@ -114,16 +118,106 @@ class ResumeImprover:
                 }
             }
 
-            # Step 3: Convert to YAML
+            # Step 3: Convert to YAML and optimize
             yaml_content = self.dict_to_yaml_string(final_resume)
-            logger.info("=== Resume Creation Complete ===")
+            # optimized_yaml = self.optimize_resume_for_length(yaml_content)
 
-            optimized_yaml = self.optimize_resume_for_length(yaml_content)
-            return optimized_yaml
+            # Step 4: Generate improvement suggestions (MANDATORY)
+            logger.info("Generating improvement suggestions...")
+            improvements = self.suggest_improvements()
+
+            # Step 5: Return complete result
+            result = {
+                'tailored_resume': yaml_content,
+                'improvements': improvements,
+                'metadata': {
+                    'generated_at': datetime.now().isoformat(),
+                    'job_url': self.url,
+                    'has_improvements': improvements is not None,
+                    'objective_generated': require_objective
+                }
+            }
+
+            logger.info("=== Complete Resume Creation with Improvements Finished ===")
+            logger.info(f"Final result includes: resume ({'✓' if yaml_content else '✗'}), improvements ({'✓' if improvements else '✗'})")
+            logger.info(yaml_content)
+            return result
 
         except Exception as e:
-            logger.error(f"Complete resume creation failed: {e}")
+            logger.error(f"Complete resume creation with improvements failed: {e}")
             raise
+
+    def suggest_improvements(self, **chain_kwargs) -> Dict:
+        """
+        Suggest improvements for the resume based on job requirements.
+        This is the core improvement functionality that was missing.
+
+        Args:
+            **chain_kwargs: Additional keyword arguments for the chain.
+
+        Returns:
+            Dict: The suggested improvements with categories and specific recommendations.
+        """
+        try:
+            logger.info("Starting resume improvement analysis...")
+
+            from prompts import Prompts
+            from dataModels.resume import ResumeImproverOutput
+            from services.langchain_helpers import create_llm
+            from langchain.prompts import ChatPromptTemplate
+
+            # Create the improvement chain
+            prompt = ChatPromptTemplate(messages=Prompts.lookup["IMPROVER"])
+            llm = create_llm(api_key=self.api_key, **self.llm_kwargs)
+            chain = prompt | llm.with_structured_output(schema=ResumeImproverOutput)
+
+            # Get formatted inputs for the chain
+            chain_inputs = self._get_formatted_chain_inputs(chain=chain)
+            logger.debug(f"Improvement chain inputs: {list(chain_inputs.keys())}")
+
+            # Invoke the LLM to get improvement suggestions
+            logger.debug("Invoking LLM for improvement suggestions...")
+            improvements = chain.invoke(chain_inputs)
+            logger.debug(f"LLM response type: {type(improvements)}")
+
+            if improvements:
+                # Handle both Pydantic model and dictionary responses
+                if hasattr(improvements, 'final_answer'):
+                    # Pydantic model
+                    improvement_data = improvements.final_answer
+                    logger.info("Retrieved improvements from Pydantic model")
+                elif isinstance(improvements, dict):
+                    # Dictionary response
+                    improvement_data = improvements.get('final_answer')
+                    logger.info("Retrieved improvements from dictionary")
+                else:
+                    logger.error(f"Unexpected response type: {type(improvements)}")
+                    return None
+
+                if improvement_data:
+                    logger.info("✓ Resume improvement suggestions generated successfully")
+
+                    # Log summary of improvements
+                    if isinstance(improvement_data, dict):
+                        for category, suggestions in improvement_data.items():
+                            if isinstance(suggestions, list):
+                                logger.info(f"  - {category}: {len(suggestions)} suggestions")
+                            else:
+                                logger.info(f"  - {category}: {suggestions}")
+
+                    return improvement_data
+                else:
+                    logger.warning("No improvement data in LLM response")
+                    return None
+            else:
+                logger.warning("No improvements returned from LLM")
+                return None
+
+        except Exception as e:
+            logger.error(f"Error in suggest_improvements: {e}")
+            import traceback
+            logger.error(f"Improvement traceback: {traceback.format_exc()}")
+            return None
 
     async def _generate_content_async_parallel(self, require_objective: bool = True) -> Dict:
         """Generate all resume content in parallel using asyncio.gather."""
@@ -838,11 +932,6 @@ class ResumeImprover:
             logger.error("Failed to convert dict to YAML string.")
             raise e
 
-    def __del__(self):
-        """Cleanup thread pool on deletion."""
-        if hasattr(self, 'executor'):
-            self.executor.shutdown(wait=False)
-
     def optimize_resume_for_length(self, resume_draft: str) -> str:
         """Optimize the resume YAML or plain text to fit within a single page, prioritizing job match."""
         try:
@@ -909,3 +998,8 @@ class ResumeImprover:
             import traceback
             logger.error(f"Optimization traceback: {traceback.format_exc()}")
             return resume_draft
+
+    def __del__(self):
+        """Cleanup thread pool on deletion."""
+        if hasattr(self, 'executor'):
+            self.executor.shutdown(wait=False)
