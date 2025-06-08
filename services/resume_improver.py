@@ -14,6 +14,7 @@ from typing import Dict, List, Optional
 
 logger = config.getLogger("ResumeImprover")
 
+
 class ResumeImprover:
     """
     Parallel ResumeImprover using asyncio.gather with run_in_executor for true HTTP parallelism.
@@ -47,17 +48,12 @@ class ResumeImprover:
 
     def create_complete_tailored_resume(self, require_objective) -> Dict:
         """
-        Main method: Create complete tailored resume with improvement suggestions AND apply them.
-        This is what ResumeGenerator calls - does everything including mandatory improvements.
-
-        Args:
-            require_objective: Whether to generate an objective section (default: True)
-
-        Returns:
-            Dict: Contains the final improved resume YAML, original tailored resume, and improvement suggestions
+        Main method: Create complete tailored resume with two-step improvement approach.
+        Step 1: Get both content improvements AND one-page optimization suggestions
+        Step 2: Apply all suggestions in one go
         """
         try:
-            logger.info("=== Creating Complete Tailored Resume with Applied Improvements (Parallel) ===")
+            logger.info("=== Creating Complete Tailored Resume with Two-Step Improvement ===")
             logger.info(f"Objective generation: {'enabled' if require_objective else 'disabled'}")
 
             # Step 1: Generate core resume content in parallel
@@ -68,15 +64,13 @@ class ResumeImprover:
                 try:
                     loop = asyncio.get_event_loop()
                     if loop.is_running():
-                        # We're in an async context, use thread-based approach
                         logger.info("Using thread-based parallel approach (async context detected)")
                         results = self._generate_content_parallel_threads(require_objective=require_objective)
                     else:
-                        # No active loop, safe to use asyncio.run
                         logger.info("Using asyncio-based parallel approach")
-                        results = asyncio.run(self._generate_content_async_parallel(require_objective=require_objective))
+                        results = asyncio.run(
+                            self._generate_content_async_parallel(require_objective=require_objective))
                 except RuntimeError:
-                    # No event loop, safe to use asyncio.run
                     logger.info("Using asyncio-based parallel approach (no existing loop)")
                     results = asyncio.run(self._generate_content_async_parallel(require_objective=require_objective))
 
@@ -85,10 +79,9 @@ class ResumeImprover:
 
             except Exception as parallel_error:
                 logger.warning(f"Parallel execution failed: {parallel_error}, falling back to sequential")
-                # Fallback to sequential execution
                 results = self._generate_content_sequential(require_objective=require_objective)
 
-            # Extract results with detailed logging
+            # Extract results
             objective = results.get('objective')
             skills = results.get('skills', [])
             experiences = results.get('experiences', [])
@@ -121,165 +114,167 @@ class ResumeImprover:
             # Step 3: Convert to YAML
             initial_yaml = self.dict_to_yaml_string(initial_resume)
 
-            # Step 4: Generate improvement suggestions (MANDATORY)
-            logger.info("Generating improvement suggestions...")
-            improvements = self.suggest_improvements()
+            # Step 4: Get comprehensive improvement suggestions (NEW APPROACH)
+            logger.info("Getting comprehensive improvement and optimization suggestions...")
+            all_suggestions = self.get_comprehensive_suggestions(initial_yaml)
 
-            # Step 5: Apply improvements automatically (MANDATORY)
-            logger.info("Applying improvements to resume...")
-            improved_yaml = self.apply_improvements_to_resume(initial_yaml, improvements)
+            # Step 5: Apply all suggestions at once (MODIFIED)
+            logger.info("Applying all suggestions to resume...")
+            final_yaml = self.apply_all_suggestions_to_resume(initial_yaml, all_suggestions)
 
-            # Step 6: Final optimization for length
-            logger.info("Optimizing final resume for length...")
-            final_yaml = self.optimize_resume_for_length(improved_yaml)
-
-            # Step 7: Return complete result
+            # Step 6: Return complete result
             result = {
-                'content': final_yaml,              # Final improved and optimized resume
-                'original_tailored': initial_yaml,          # Original tailored version (before improvements)
-                'improvements': improvements,               # List of improvements that were applied
+                'content': final_yaml,  # Final improved and optimized resume
+                'original_tailored': initial_yaml,  # Original tailored version
+                'suggestions': all_suggestions,  # All suggestions that were applied
                 'metadata': {
                     'generated_at': datetime.now().isoformat(),
                     'job_url': self.url,
-                    'has_improvements': improvements is not None,
-                    'improvements_applied': True,
+                    'has_suggestions': all_suggestions is not None,
+                    'suggestions_applied': True,
                     'objective_generated': require_objective,
-                    'optimized': True
+                    'optimized': True,
+                    'two_step_approach': True  # Flag to indicate new approach
                 }
             }
 
-            logger.info("=== Complete Resume Creation with Applied Improvements Finished ===")
+            logger.info("=== Complete Resume Creation with Two-Step Approach Finished ===")
             logger.info(f"Final result includes:")
             logger.info(f"  - Final resume: {'✓' if final_yaml else '✗'}")
             logger.info(f"  - Original tailored: {'✓' if initial_yaml else '✗'}")
-            logger.info(f"  - Improvements: {'✓' if improvements else '✗'}")
+            logger.info(f"  - Suggestions: {'✓' if all_suggestions else '✗'}")
 
             return final_yaml
 
         except Exception as e:
-            logger.error(f"Complete resume creation with applied improvements failed: {e}")
+            logger.error(f"Complete resume creation with two-step approach failed: {e}")
             raise
 
-    def suggest_improvements(self, **chain_kwargs) -> List:
+    def get_comprehensive_suggestions(self, resume_yaml: str) -> Dict:
         """
-        Suggest improvements for the resume based on job requirements.
-        This is the core improvement functionality.
-
-        Args:
-            **chain_kwargs: Additional keyword arguments for the chain.
-
-        Returns:
-            List: The suggested improvements with categories and specific recommendations.
-        """
-        try:
-            logger.info("Starting resume improvement analysis...")
-
-            from prompts import Prompts
-            from dataModels.resume import ResumeImproverOutput
-            from services.langchain_helpers import create_llm
-            from langchain.prompts import ChatPromptTemplate
-
-            # Create the improvement chain
-            prompt = ChatPromptTemplate(messages=Prompts.lookup["IMPROVER"])
-            llm = create_llm(api_key=self.api_key, **self.llm_kwargs)
-            chain = prompt | llm.with_structured_output(schema=ResumeImproverOutput)
-
-            # Get formatted inputs for the chain
-            chain_inputs = self._get_formatted_chain_inputs(chain=chain)
-            logger.debug(f"Improvement chain inputs: {list(chain_inputs.keys())}")
-
-            # Invoke the LLM to get improvement suggestions
-            logger.debug("Invoking LLM for improvement suggestions...")
-            improvements = chain.invoke(chain_inputs)
-            logger.debug(f"LLM response type: {type(improvements)}")
-
-            if improvements:
-                # Handle both Pydantic model and dictionary responses
-                if hasattr(improvements, 'final_answer'):
-                    # Pydantic model
-                    improvement_data = improvements.final_answer
-                    logger.info("Retrieved improvements from Pydantic model")
-                elif isinstance(improvements, dict):
-                    # Dictionary response
-                    improvement_data = improvements.get('final_answer')
-                    logger.info("Retrieved improvements from dictionary")
-                else:
-                    logger.error(f"Unexpected response type: {type(improvements)}")
-                    return []
-
-                if improvement_data:
-                    logger.info("✓ Resume improvement suggestions generated successfully")
-
-                    # Log summary of improvements
-                    if isinstance(improvement_data, list):
-                        logger.info(f"Generated {len(improvement_data)} improvement categories")
-                        for imp in improvement_data:
-                            if hasattr(imp, 'section'):
-                                section = imp.section
-                                count = len(imp.improvements) if hasattr(imp, 'improvements') else 0
-                            elif isinstance(imp, dict):
-                                section = imp.get('section', 'Unknown')
-                                count = len(imp.get('improvements', []))
-                            else:
-                                section = 'Unknown'
-                                count = 0
-                            logger.info(f"  - {section}: {count} suggestions")
-
-                    return improvement_data
-                else:
-                    logger.warning("No improvement data in LLM response")
-                    return []
-            else:
-                logger.warning("No improvements returned from LLM")
-                return []
-
-        except Exception as e:
-            logger.error(f"Error in suggest_improvements: {e}")
-            import traceback
-            logger.error(f"Improvement traceback: {traceback.format_exc()}")
-            return []
-
-    def apply_improvements_to_resume(self, resume_yaml: str, improvements: List) -> str:
-        """
-        Apply the improvement suggestions to the actual resume content automatically.
+        Get both content improvement suggestions AND one-page optimization suggestions in one call.
 
         Args:
             resume_yaml: The current resume in YAML format
-            improvements: List of ResumeImprovements from suggest_improvements()
 
         Returns:
-            str: The improved resume in YAML format
+            Dict: Contains both content_improvements and optimization_suggestions
         """
         try:
-            logger.info("Starting automatic application of improvements...")
-
-            # If no improvements, return original
-            if not improvements:
-                logger.info("No improvements to apply, returning original resume")
-                return resume_yaml
+            logger.info("Starting comprehensive suggestion analysis...")
 
             from prompts import Prompts
-            from dataModels.resume import ResumeImprovementApplierOutput
+            from dataModels.resume import ComprehensiveSuggestionsOutput  # New model needed
             from services.langchain_helpers import create_llm
             from langchain.prompts import ChatPromptTemplate
 
-            # Convert improvements list to a readable format for the LLM
-            improvements_text = self._format_improvements_for_application(improvements)
-            logger.info(f"Formatted {len(improvements)} improvement categories for application")
-
-            # Create the improvement application chain
-            prompt = ChatPromptTemplate(messages=Prompts.lookup["IMPROVEMENT_APPLIER"])
+            # Create the comprehensive suggestions chain
+            prompt = ChatPromptTemplate(messages=Prompts.lookup["COMPREHENSIVE_SUGGESTIONS"])  # New prompt needed
             llm = create_llm(api_key=self.api_key, **self.llm_kwargs)
-            chain = prompt | llm.with_structured_output(schema=ResumeImprovementApplierOutput)
+            chain = prompt | llm.with_structured_output(schema=ComprehensiveSuggestionsOutput)
 
             # Prepare inputs
             chain_inputs = {
                 "resume_yaml": resume_yaml,
-                "improvements_text": improvements_text,
+                "job_posting": self.job_post_raw or "No job description available.",
+                "ats_keywords": ", ".join(self.parsed_job.get('ats_keywords', [])) if self.parsed_job else "",
+                "duties": "\n".join(self.parsed_job.get('duties', [])) if self.parsed_job else "",
+                "qualifications": "\n".join(self.parsed_job.get('qualifications', [])) if self.parsed_job else "",
+                "technical_skills": "\n".join(self.parsed_job.get('technical_skills', [])) if self.parsed_job else ""
+            }
+
+            logger.info("Invoking LLM for comprehensive suggestions...")
+            result = chain.invoke(chain_inputs)
+
+            if result:
+                # Handle both Pydantic model and dictionary responses
+                if hasattr(result, 'final_answer'):
+                    # Pydantic model
+                    suggestions_data = result.final_answer
+                    logger.info("Retrieved suggestions from Pydantic model")
+                elif isinstance(result, dict):
+                    # Dictionary response
+                    suggestions_data = result.get('final_answer')
+                    logger.info("Retrieved suggestions from dictionary")
+                else:
+                    logger.error(f"Unexpected response type: {type(result)}")
+                    return {}
+
+                if suggestions_data:
+                    logger.info("✓ Comprehensive suggestions generated successfully")
+
+                    # Log summary of suggestions
+                    if hasattr(suggestions_data, 'content_improvements'):
+                        content_improvements = suggestions_data.content_improvements
+                        optimization_suggestions = suggestions_data.optimization_suggestions
+                    elif isinstance(suggestions_data, dict):
+                        content_improvements = suggestions_data.get('content_improvements', [])
+                        optimization_suggestions = suggestions_data.get('optimization_suggestions', [])
+                    else:
+                        logger.warning(f"Unexpected suggestions format: {type(suggestions_data)}")
+                        return {}
+
+                    logger.info(f"Content improvements: {len(content_improvements)} categories")
+                    logger.info(f"Optimization suggestions: {len(optimization_suggestions)} items")
+
+                    return {
+                        'content_improvements': content_improvements,
+                        'optimization_suggestions': optimization_suggestions
+                    }
+                else:
+                    logger.warning("No suggestions data in LLM response")
+                    return {}
+            else:
+                logger.warning("No suggestions returned from LLM")
+                return {}
+
+        except Exception as e:
+            logger.error(f"Error in get_comprehensive_suggestions: {e}")
+            import traceback
+            logger.error(f"Suggestions traceback: {traceback.format_exc()}")
+            return {}
+
+    def apply_all_suggestions_to_resume(self, resume_yaml: str, all_suggestions: Dict) -> str:
+        """
+        Apply both content improvements AND optimization suggestions to the resume in one go.
+
+        Args:
+            resume_yaml: The current resume in YAML format
+            all_suggestions: Dict containing content_improvements and optimization_suggestions
+
+        Returns:
+            str: The improved and optimized resume in YAML format
+        """
+        try:
+            logger.info("Starting application of all suggestions...")
+
+            # If no suggestions, return original
+            if not all_suggestions:
+                logger.info("No suggestions to apply, returning original resume")
+                return resume_yaml
+
+            from prompts import Prompts
+            from dataModels.resume import AllSuggestionsApplierOutput  # New model needed
+            from services.langchain_helpers import create_llm
+            from langchain.prompts import ChatPromptTemplate
+
+            # Convert suggestions to a readable format for the LLM
+            suggestions_text = self._format_all_suggestions_for_application(all_suggestions)
+            logger.info(f"Formatted comprehensive suggestions for application")
+
+            # Create the application chain
+            prompt = ChatPromptTemplate(messages=Prompts.lookup["ALL_SUGGESTIONS_APPLIER"])  # New prompt needed
+            llm = create_llm(api_key=self.api_key, **self.llm_kwargs)
+            chain = prompt | llm.with_structured_output(schema=AllSuggestionsApplierOutput)
+
+            # Prepare inputs
+            chain_inputs = {
+                "resume_yaml": resume_yaml,
+                "suggestions_text": suggestions_text,
                 "ats_keywords": ", ".join(self.parsed_job.get('ats_keywords', [])) if self.parsed_job else ""
             }
 
-            logger.info("Invoking LLM to apply improvements...")
+            logger.info("Invoking LLM to apply all suggestions...")
             result = chain.invoke(chain_inputs)
 
             if result:
@@ -301,8 +296,8 @@ class ResumeImprover:
                     try:
                         import yaml
                         yaml.safe_load(improved_resume)
-                        logger.info("✓ Improved resume is valid YAML")
-                        logger.info(f"Applied improvements successfully")
+                        logger.info("✓ Improved resume with all suggestions is valid YAML")
+                        logger.info(f"Applied all suggestions successfully")
                         return improved_resume
                     except yaml.YAMLError as e:
                         logger.warning(f"Improved resume is not valid YAML: {e}")
@@ -316,10 +311,61 @@ class ResumeImprover:
                 return resume_yaml
 
         except Exception as e:
-            logger.error(f"Error applying improvements to resume: {e}")
+            logger.error(f"Error applying all suggestions to resume: {e}")
             import traceback
-            logger.error(f"Apply improvements traceback: {traceback.format_exc()}")
+            logger.error(f"Apply all suggestions traceback: {traceback.format_exc()}")
             return resume_yaml
+
+    def _format_all_suggestions_for_application(self, all_suggestions: Dict) -> str:
+        """
+        Format both content improvements and optimization suggestions into readable text for the LLM.
+
+        Args:
+            all_suggestions: Dict containing content_improvements and optimization_suggestions
+
+        Returns:
+            str: Formatted suggestions text
+        """
+        try:
+            formatted_text = ""
+
+            # Format content improvements
+            content_improvements = all_suggestions.get('content_improvements', [])
+            if content_improvements:
+                formatted_text += "## CONTENT IMPROVEMENTS:\n\n"
+
+                for improvement_section in content_improvements:
+                    # Handle both Pydantic objects and dictionaries
+                    if hasattr(improvement_section, 'section'):
+                        section = improvement_section.section
+                        section_improvements = improvement_section.improvements
+                    elif isinstance(improvement_section, dict):
+                        section = improvement_section.get('section', 'Unknown')
+                        section_improvements = improvement_section.get('improvements', [])
+                    else:
+                        logger.warning(f"Unexpected improvement format: {type(improvement_section)}")
+                        continue
+
+                    formatted_text += f"### {section.upper()} SECTION:\n"
+                    for i, improvement in enumerate(section_improvements, 1):
+                        formatted_text += f"{i}. {improvement}\n"
+                    formatted_text += "\n"
+
+            # Format optimization suggestions
+            optimization_suggestions = all_suggestions.get('optimization_suggestions', [])
+            if optimization_suggestions:
+                formatted_text += "## ONE-PAGE OPTIMIZATION SUGGESTIONS:\n\n"
+
+                for i, suggestion in enumerate(optimization_suggestions, 1):
+                    formatted_text += f"{i}. {suggestion}\n"
+                formatted_text += "\n"
+
+            logger.debug(f"Formatted all suggestions text: {formatted_text[:500]}...")
+            return formatted_text
+
+        except Exception as e:
+            logger.error(f"Error formatting all suggestions: {e}")
+            return "No suggestions to apply."
 
     def _format_improvements_for_application(self, improvements: List) -> str:
         """
@@ -1072,73 +1118,6 @@ class ResumeImprover:
         except YAMLError as e:
             logger.error("Failed to convert dict to YAML string.")
             raise e
-
-    def optimize_resume_for_length(self, resume_draft: str) -> str:
-        """Optimize the resume YAML or plain text to fit within a single page, prioritizing job match."""
-        try:
-            from prompts import Prompts
-            from dataModels.resume import ResumeOnePageOptimizerOutput
-            from services.langchain_helpers import create_llm
-            from langchain.prompts import ChatPromptTemplate
-
-            logger.info("Starting one-page resume optimization...")
-
-            # Set up the prompt and LLM
-            prompt = ChatPromptTemplate(messages=Prompts.lookup["ONE_PAGE_OPTIMIZER"])
-            llm = create_llm(api_key=self.api_key, **self.llm_kwargs)
-            chain = prompt | llm.with_structured_output(schema=ResumeOnePageOptimizerOutput)
-
-            # Prepare the chain inputs
-            chain_inputs = {
-                "job_posting": self.job_post_raw or "No job description available.",
-                "resume_draft": resume_draft
-            }
-
-            logger.info(f"Input resume length: {len(resume_draft)} characters")
-            logger.info("Invoking LLM for one-page resume optimization...")
-
-            result = chain.invoke(chain_inputs)
-            logger.info(f"LLM response type: {type(result)}")
-
-            # Handle both Pydantic model and dictionary responses
-            optimized_resume = None
-
-            if hasattr(result, "final_answer"):
-                # Pydantic model
-                optimized_resume = result.final_answer
-                logger.info("Retrieved optimized resume from Pydantic model")
-            elif isinstance(result, dict):
-                # Dictionary response
-                optimized_resume = result.get("final_answer")
-                logger.info("Retrieved optimized resume from dictionary")
-            else:
-                logger.error(f"Unexpected response type: {type(result)}")
-                logger.error(f"Response content: {result}")
-                return resume_draft
-
-            if optimized_resume and isinstance(optimized_resume, str):
-                logger.info(f"Optimized resume length: {len(optimized_resume)} characters")
-
-                # Validate that it's proper YAML
-                try:
-                    import yaml
-                    yaml.safe_load(optimized_resume)
-                    logger.info("Optimized resume is valid YAML")
-                    return optimized_resume
-                except yaml.YAMLError as e:
-                    logger.warning(f"Optimized resume is not valid YAML: {e}")
-                    logger.warning("Returning original resume draft")
-                    return resume_draft
-            else:
-                logger.warning(f"Invalid final_answer type: {type(optimized_resume)}")
-                logger.warning("Returning original resume draft")
-                return resume_draft
-
-        except Exception as e:
-            logger.error(f"One-page resume optimization failed: {e}")
-            import traceback
-            logger.error(f"Optimization traceback: {traceback.format_exc()}")
-            return resume_draft
 
     def __del__(self):
         """Cleanup thread pool on deletion."""

@@ -125,38 +125,46 @@ class ResumeImproverOutput(BaseModel):
         ..., description=Prompts.descriptions["RESUME_IMPROVER_OUTPUT"]["final_answer"]
     )
 
+class ComprehensiveSuggestions(BaseModel):
+    """Pydantic model that combines content improvements and optimization suggestions."""
 
-class ResumeOnePageOptimizerOutput(BaseModel):
-    """Schema for the one-page resume optimizer result."""
-
-    plan: List[str] = Field(
-        ..., description=Prompts.descriptions["ONE_PAGE_OPTIMIZER"]["plan"]
+    content_improvements: List[ResumeImprovements] = Field(
+        ..., description="List of content improvement suggestions organized by section"
     )
-    additional_steps: List[str] = Field(
-        ...,
-        description=Prompts.descriptions["ONE_PAGE_OPTIMIZER"]["additional_steps"],
-    )
-    work: List[str] = Field(
-        ..., description=Prompts.descriptions["ONE_PAGE_OPTIMIZER"]["work"]
-    )
-    final_answer: str = Field(  # Changed from List[ResumeImprovements] to str
-        ..., description="The complete optimized resume content in YAML format"
+    optimization_suggestions: List[str] = Field(
+        ..., description="List of specific one-page optimization suggestions in priority order"
     )
 
 
-class ResumeImprovementApplierOutput(BaseModel):
-    """Pydantic class that defines the output for applying improvements to a resume."""
+class ComprehensiveSuggestionsOutput(BaseModel):
+    """Pydantic class that defines the output for comprehensive suggestions analysis."""
 
     plan: List[str] = Field(
-        ..., description=Prompts.descriptions["RESUME_IMPROVEMENT_APPLIER_OUTPUT"]["plan"]
+        ..., description="Itemized plan for analyzing both content and length improvements"
     )
     additional_steps: List[str] = Field(
-        ...,
-        description=Prompts.descriptions["RESUME_IMPROVEMENT_APPLIER_OUTPUT"]["additional_steps"],
+        ..., description="Additional steps needed for comprehensive analysis"
     )
     work: List[str] = Field(
-        ..., description=Prompts.descriptions["RESUME_IMPROVEMENT_APPLIER_OUTPUT"]["work"]
+        ..., description="Detailed work performed during analysis"
+    )
+    final_answer: ComprehensiveSuggestions = Field(
+        ..., description="Both content improvements and optimization suggestions"
+    )
+
+
+class AllSuggestionsApplierOutput(BaseModel):
+    """Pydantic class that defines the output for applying all suggestions."""
+
+    plan: List[str] = Field(
+        ..., description="Itemized plan for applying all suggestions"
+    )
+    additional_steps: List[str] = Field(
+        ..., description="Additional steps needed for comprehensive application"
+    )
+    work: List[str] = Field(
+        ..., description="Detailed work performed during application"
     )
     final_answer: str = Field(
-        ..., description=Prompts.descriptions["RESUME_IMPROVEMENT_APPLIER_OUTPUT"]["final_answer"]
+        ..., description="The complete improved and optimized resume in valid YAML format"
     )
