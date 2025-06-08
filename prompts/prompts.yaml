@@ -74,6 +74,7 @@ SKILLS_MATCHER:
     - Each skill must be presented in proper case format (e.g., "JavaScript", not "javascript")
     - Focus on presenting the candidate's actual skills objectively without justifying their relevance to a specific job
     - If no technical skills are found, return the skills from the resume as sub categorized dictionary.
+    - Total number of skills sub categories should not be more than 4. If more than 4 sub categories are found, reorganize them internally.
     - If no non-technical skills are found, return an empty list: []
 
   steps_message: |
