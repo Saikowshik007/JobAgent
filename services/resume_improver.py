@@ -640,16 +640,7 @@ class ResumeImprover:
                     logger.info(f"Pydantic model: Got {len(highlights)} highlights")
                     if highlights:
                         sorted_highlights = sorted(highlights, key=lambda d: d.relevance * -1)
-
-                        # Determine limit based on section type
-                        section_type = self._determine_section_type(section)
-                        limit = 5 if section_type == 'experience' else 3 if section_type == 'project' else len(sorted_highlights)
-
-                        # Apply limit
-                        limited_highlights = sorted_highlights[:limit]
-                        result = [s.highlight for s in limited_highlights]
-
-                        logger.info(f"Limited to top {limit} highlights for {section_type} section")
+                        result = [s.highlight for s in sorted_highlights]
                         logger.debug(f"Final highlights: {result}")
                         return result
 
@@ -659,16 +650,7 @@ class ResumeImprover:
                     logger.info(f"Dictionary: Got {len(highlights)} highlights")
                     if highlights:
                         sorted_highlights = sorted(highlights, key=lambda d: d.get("relevance", 0) * -1)
-
-                        # Determine limit based on section type
-                        section_type = self._determine_section_type(section)
-                        limit = 5 if section_type == 'experience' else 3 if section_type == 'project' else len(sorted_highlights)
-
-                        # Apply limit
-                        limited_highlights = sorted_highlights[:limit]
-                        result = [s.get("highlight", "") for s in limited_highlights]
-
-                        logger.info(f"Limited to top {limit} highlights for {section_type} section")
+                        result = [s.get("highlight", "") for s in sorted_highlights]
                         logger.debug(f"Final highlights: {result}")
                         return result
                 else:
@@ -685,18 +667,6 @@ class ResumeImprover:
             import traceback
             logger.error(f"Rewrite section traceback: {traceback.format_exc()}")
             return section.get("highlights", [])
-
-    def _determine_section_type(self, section) -> str:
-        """Determine if section is experience or project based on its structure."""
-        # Check for experience indicators
-        if 'titles' in section or 'title' in section or 'company' in section:
-            return 'experience'
-        # Check for project indicators
-        elif 'name' in section:
-            return 'project'
-        else:
-            # Default fallback
-            return 'unknown'
 
     def _get_formatted_chain_inputs(self, chain, section=None):
         """Get formatted inputs for chain with proper skills formatting"""
@@ -840,35 +810,39 @@ class ResumeImprover:
             self.executor.shutdown(wait=False)
 
     def optimize_resume_for_length(self, resume_draft: str) -> str:
-        """Optimize the resume YAML (or plaintext) to fit within a single page, prioritizing job match."""
+        """Optimize the resume YAML or plain text to fit within a single page, prioritizing job match."""
         try:
             from prompts import Prompts
+            from dataModels.resume import ResumeOnePageOptimizerOutput
             from services.langchain_helpers import create_llm
             from langchain.prompts import ChatPromptTemplate
 
-            # Create the LLM chain
+            # Set up the prompt and LLM
             prompt = ChatPromptTemplate(messages=Prompts.lookup["ONE_PAGE_OPTIMIZER"])
             llm = create_llm(api_key=self.api_key, **self.llm_kwargs)
-            chain = prompt | llm
+            chain = prompt | llm.with_structured_output(schema=ResumeOnePageOptimizerOutput)
 
-            # Prepare inputs
-            job_posting = self.job_post_raw or "No job description provided."
-            inputs = {
-                "job_posting": job_posting,
+            # Prepare the chain inputs using your standard helper
+            self._get_formatted_chain_inputs  # confirm it's available
+            chain_inputs = {
+                "job_posting": self.job_post_raw or "No job description available.",
                 "resume_draft": resume_draft
             }
 
-            logger.info("Invoking LLM for one-page optimization...")
-            result = chain.invoke(inputs)
+            logger.info("Invoking LLM for one-page resume optimization...")
+            result = chain.invoke(chain_inputs)
 
-            if not result:
-                logger.warning("Second-pass optimization returned no result.")
-                return resume_draft
+            if hasattr(result, "final_answer"):
+                logger.info("One-page optimization completed successfully.")
+                return result.final_answer
 
-            logger.info("One-page optimization completed successfully.")
-            return result if isinstance(result, str) else str(result)
+            logger.warning("Final answer not found in LLM response. Returning original draft.")
+            return resume_draft
 
         except Exception as e:
-            logger.error(f"Error during one-page resume optimization: {e}")
+            logger.error(f"One-page resume optimization failed: {e}")
             return resume_draft
+
+
+
 

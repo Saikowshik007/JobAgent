@@ -193,24 +193,43 @@ IMPROVER:
     - Provide the answer to the <Instruction> with prefix <Final Answer>.
     
 ONE_PAGE_OPTIMIZER:
-  system_message: |
-    You are an expert resume editor tasked with transforming a resume draft into a one-page, job-tailored, ATS-optimized version.
+  system_message: >
+    You are a FAANG recruiter and elite resume compression expert with 15+ years of experience
+    editing technical resumes for top-tier roles. You specialize in transforming multi-page resumes
+    into high-impact, one-page versions that maximize job alignment, eliminate fluff, and increase
+    ATS keyword density without sacrificing clarity or impact.
+
   job_posting_template: |
-    Job Description:
+    <Job Posting>
     {job_posting}
+
   resume_template: |
-    Resume Draft:
+    <Resume>
     {resume_draft}
+
   instruction_message: |
-    Carefully reduce and rewrite the content to:
-    - Fit into one page
-    - Prioritize content most relevant to the job description
-    - Remove redundancy and low-impact lines
-    - Preserve quantifiable achievements and high-signal keywords
+    <Instruction> Your task is to compress and optimize the <Resume> to fit within a single page (~800 words max)
+    while maximizing alignment with the <Job Posting>. Preserve high-impact achievements and ATS keywords.
+    Trim weak or redundant lines, rephrase where necessary, and present a logically structured, clean resume.
+
   criteria_message: |
-    Emphasize alignment with role requirements. Minimize vague or generic lines.
+    <Criteria>
+    - The result must contain ONLY content derived from the <Resume>
+    - The optimized resume must be ~600 words or fewer
+    - Prioritize experiences and skills that match key responsibilities in the <Job Posting>
+    - Include action verbs, metrics, and ATS-friendly terminology
+    - Remove generalities, filler text, and duplicate concepts
+    - Use professional language, formatting, and concise bullet points
+    - Do not invent new content — only rephrase or trim what's provided
+    - Final result must be delivered using prefix <Final Answer>
+
   steps_message: |
-    1. Skim the job description to identify key responsibilities and skills.
-    2. Scan the resume draft for relevant accomplishments.
-    3. Keep impactful bullets that align directly.
-    4. Remove/rephrase others to fit page constraint.
+    <Steps>
+    - Create a <Plan> for optimizing the resume to fit within one page while retaining maximum job match.
+    - List any <Additional Steps> required to execute this plan.
+    - Show your <Work>—describe edits made, sections trimmed, and content reordered.
+    - Rewrite the <Resume> based only on original content.
+    - Confirm that all <Criteria> are met.
+    - Present your <Final Answer> as the completed one-page resume (YAML or plaintext format).
+
+
