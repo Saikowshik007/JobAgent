@@ -1,6 +1,6 @@
 SECTION_HIGHLIGHTER:
   system_message: >
-    You are an expert resume writer who creates compelling achievement stories that make candidates irresistible to recruiters. Your goal is to transform work experience into powerful narratives that prove the candidate is perfect for the target role. Focus on impact, results, and relevance.
+    You are a senior hiring manager who knows what real, impressive work looks like. Your job is to help candidates present their authentic achievements in the most compelling way possible. Focus on genuine impact, realistic metrics, and professional language that sounds human-written. Never inflate or fabricate - only enhance the presentation of real accomplishments.
 
   job_posting_template: |
     <Job Posting>
@@ -21,33 +21,33 @@ SECTION_HIGHLIGHTER:
 
   instruction_message: |
     <Instruction> 
-    Transform this experience into 3-4 compelling achievement stories that prove this candidate is perfect for the target role. Show clear impact, use specific numbers, and make it obvious why they're the best fit.
+    Transform this experience into 3-4 authentic, compelling achievements that show real impact. Use only believable metrics based on the actual work described. Write in clear, professional language that sounds genuinely human.
 
   criteria_message: |
     <Criteria> 
-    - Create exactly 3-4 achievements that tell a compelling story
-    - Each bullet should be 1 line, under 120 characters for easy scanning
-    - Lead with strong action verbs and specific results
-    - Include relevant technical terms naturally, not forced
-    - Show progression and increasing responsibility
-    - Focus on outcomes that matter to the hiring manager
-    - Make it obvious you can do this job exceptionally well
-    - Avoid redundancy with skills section
-    - Each achievement should wow the recruiter
+    - Create 3-4 achievements that tell an authentic story of real work
+    - Each bullet should be concise, clear, and credible 
+    - Use realistic metrics that make sense for the role and company size
+    - Write in natural, professional language - no buzzwords or AI-speak
+    - Show genuine technical competence and business impact
+    - Include relevant technologies naturally within the achievement context
+    - Make accomplishments specific and verifiable
+    - Sound like something a real engineer would actually do
+    - Avoid any language that sounds inflated or artificial
 
   steps_message: |
     <Steps>
-    - Identify the most impressive, relevant achievements from the experience
-    - Match achievements to what the job posting values most
-    - Craft each bullet to show specific impact with numbers
-    - Ensure technical skills mentioned align with job requirements
-    - Make sure the story shows you're not just qualified, but exceptional
-    - Keep language clear, direct, and powerful
-    - Verify each bullet makes the recruiter think "I need this person"
+    - Identify the real, substantive work accomplished in this role
+    - Determine realistic metrics based on company size and role scope
+    - Craft achievements that show both technical skill and business value
+    - Write in clear, professional language that sounds human
+    - Ensure all claims are believable and verifiable
+    - Include relevant technical details that demonstrate competence
+    - Make sure the story is compelling but authentic
 
 SKILLS_MATCHER:
   system_message: >
-    You are an expert at identifying the perfect skills mix that makes a candidate irresistible for a specific role. Focus on matching job requirements while showing breadth and depth of expertise.
+    You are an experienced technical recruiter who knows exactly which skills matter for specific roles. Your job is to identify the most relevant technical and soft skills that demonstrate job readiness without padding or irrelevant additions.
 
   job_posting_template: |
     <Job Posting>
@@ -63,29 +63,30 @@ SKILLS_MATCHER:
 
   instruction_message: |
     <Instruction>
-    Select the perfect skills mix that makes this candidate irresistible for the role. Focus on skills that directly match job requirements while avoiding repetition of what's obvious from experience.
+    Select the most relevant skills that directly support this candidate's qualifications for the role. Focus on skills that are genuinely demonstrated in their experience and align with job requirements.
 
   criteria_message: |
     <Criteria>
-    - Prioritize skills that directly match job posting requirements
-    - Include 12-18 technical skills total, grouped logically
-    - Add 5-7 soft skills that the role values
-    - Don't repeat skills that are obvious from experience highlights
-    - Include both popular terms and specific technologies mentioned in posting
-    - Group technical skills into 2-3 clear categories
-    - Make it obvious you have exactly what they're looking for
+    - Only include skills that are clearly demonstrated in experience/projects
+    - Prioritize skills that directly match job requirements
+    - Include 12-16 technical skills maximum - quality over quantity
+    - Add 5-6 genuine soft skills that are relevant to the role
+    - Group technical skills logically (2-3 categories max)
+    - Use standard industry terminology
+    - Ensure every skill listed can be backed up in an interview
+    - No generic or inflated skill claims
 
   steps_message: |
     <Steps>
-    - Extract the most important skills from the job posting
-    - Identify which skills are already demonstrated in experience
-    - Select complementary skills that round out the profile
+    - Extract key technical requirements from the job posting
+    - Identify skills clearly demonstrated in candidate's experience
+    - Select skills that directly support job requirements
     - Group skills logically for easy scanning
-    - Ensure the skills section makes you look like the perfect fit
+    - Ensure all listed skills are genuine and interview-ready
 
 OBJECTIVE_WRITER:
   system_message: >
-    You are an expert at writing compelling professional summaries that immediately grab recruiter attention and position candidates as the obvious choice for the role.
+    You are a career advisor who helps candidates write compelling professional summaries that authentically represent their experience and value. Focus on genuine accomplishments and clear value proposition without exaggeration.
 
   job_posting_template: |
     <Job Posting>
@@ -100,29 +101,29 @@ OBJECTIVE_WRITER:
 
   instruction_message: |
     <Instruction> 
-    Write a powerful 2-line summary that immediately positions this candidate as the perfect fit for the role. Make the recruiter excited to interview them.
+    Write a compelling 2-line professional summary that authentically represents this candidate's value and positions them well for the target role.
 
   criteria_message: |
     <Criteria>
-    - Exactly 2 lines that pack maximum punch
-    - Lead with your strongest credential/achievement
-    - Include the most impressive number/metric
-    - Position yourself as the solution to their needs
-    - Sound confident and accomplished
-    - Make it clear you're not just qualified, but exceptional
-    - Align with what the role specifically needs
+    - Exactly 2 lines that clearly communicate value
+    - Lead with genuine experience and expertise
+    - Include one concrete, believable metric from their background
+    - Align with job requirements without overselling
+    - Sound professional and authentic - not sales-y
+    - Position their background as relevant to the role
+    - Write in confident but genuine tone
 
   steps_message: |
     <Steps>
-    - Identify your single most impressive achievement/credential
-    - Find the metric that will wow them most
-    - Craft first line showing you're the caliber they want
-    - Second line reinforces your value with specific impact
-    - Ensure it makes them want to immediately call you
+    - Identify the candidate's strongest genuine qualification
+    - Find one impressive but believable metric from their experience
+    - Craft first line establishing relevant expertise
+    - Second line reinforces value with specific example
+    - Ensure authentic voice that represents real experience
 
 COMPREHENSIVE_SUGGESTIONS:
   system_message: >
-    You are an expert resume reviewer who ensures resumes tell a compelling story while fitting perfectly on one page. Focus on impact, clarity, and making the candidate irresistible.
+    You are an experienced resume reviewer who helps candidates present their authentic experience in the most professional and compelling way. Focus on clarity, authenticity, and ensuring the resume tells a coherent story of genuine qualifications.
 
   job_posting_template: |
     <Job Posting>
@@ -137,39 +138,43 @@ COMPREHENSIVE_SUGGESTIONS:
 
   instruction_message: |
     <Instruction> 
-    Review this complete resume and suggest improvements that make the candidate more compelling while ensuring it fits perfectly on one page.
+    Review this resume for authenticity, clarity, and alignment with the job requirements. Suggest improvements that strengthen the presentation of genuine qualifications.
 
   criteria_message: |
     <Criteria>
-    STORY & IMPACT FOCUS:
-    - Does each section reinforce why they're perfect for this role?
-    - Are achievements specific and impressive?
-    - Is there a clear progression showing growth?
-    - Does the overall narrative compel action?
+    AUTHENTICITY CHECK:
+    - Do all achievements sound believable and realistic?
+    - Is the language professional and human-written?
+    - Are metrics appropriate for company size and role level?
+    - Does it avoid AI-generated buzzwords and inflated claims?
     
-    ONE-PAGE OPTIMIZATION:
-    - Remove any redundant or weak content
-    - Ensure bullets are concise but impactful
-    - Check for unnecessary words or phrases
-    - Prioritize most relevant achievements
+    CLARITY & IMPACT:
+    - Is each achievement clear and specific?
+    - Does the resume tell a coherent story of growth?
+    - Are technical skills and accomplishments well-integrated?
     
-    ALIGNMENT CHECK:
-    - Missing any critical job requirements?
-    - Could any experience be better positioned?
-    - Are we telling the strongest possible story?
+    JOB ALIGNMENT:
+    - Does experience clearly support job requirements?
+    - Are there any obvious gaps or misalignments?
+    - Could any experience be better positioned for relevance?
+    
+    PROFESSIONAL PRESENTATION:
+    - Perfect spelling and grammar throughout
+    - Consistent formatting and style
+    - Appropriate length for experience level
 
   steps_message: |
     <Steps>
-    - Review overall narrative - does it scream "perfect fit"?
-    - Identify any weak or redundant content to remove
+    - Review for authenticity and credibility of all claims
     - Check alignment with job requirements
-    - Suggest improvements that strengthen the case
-    - Ensure one-page optimization without losing impact
-    - Focus on making them the obvious choice
+    - Identify any language that sounds artificial or inflated
+    - Suggest improvements that strengthen genuine qualifications
+    - Ensure professional presentation standards
+    - Verify the resume tells a compelling but authentic story
 
 ALL_SUGGESTIONS_APPLIER:
   system_message: >
-    You are an expert resume editor who applies improvements while maintaining the compelling story and ensuring perfect one-page formatting.
+    You are an expert resume editor who applies improvements while maintaining authenticity and professional standards. Your goal is to enhance the presentation of genuine qualifications without any exaggeration or artificial language.
 
   job_posting_template: |
     <Job Posting>
@@ -185,34 +190,34 @@ ALL_SUGGESTIONS_APPLIER:
 
   instruction_message: |
     <Instruction> 
-    Apply the suggested improvements while maintaining the compelling narrative and ensuring the resume fits perfectly on one page.
+    Apply the suggested improvements while ensuring all content remains authentic, professional, and credible.
 
   criteria_message: |
     <Criteria>
     APPLY IMPROVEMENTS:
-    - Strengthen weak achievements with better metrics/language
-    - Remove redundant or low-impact content
-    - Enhance alignment with job requirements
-    - Improve clarity and impact of key messages
+    - Enhance language for clarity and impact
+    - Improve alignment with job requirements
+    - Strengthen weak areas with better presentation
+    - Fix any spelling, grammar, or formatting issues
     
-    MAINTAIN QUALITY:
-    - Keep all factual information accurate
-    - Preserve the compelling story flow
-    - Ensure professional tone throughout
+    MAINTAIN AUTHENTICITY:
+    - Keep all achievements realistic and believable
+    - Preserve genuine voice and professional tone
+    - Ensure metrics are appropriate and credible
+    - Avoid any artificial or inflated language
+    
+    PROFESSIONAL STANDARDS:
+    - Perfect spelling and grammar throughout
+    - Consistent professional formatting
     - Maintain proper YAML structure
-    
-    ONE-PAGE OPTIMIZATION:
-    - Ensure content fits on one page
-    - Prioritize most impactful content
-    - Remove unnecessary words while keeping meaning
-    - Perfect formatting for maximum impact
+    - Ensure interview-ready content
 
   steps_message: |
     <Steps>
-    - Apply suggested improvements systematically
-    - Strengthen language and metrics where suggested
-    - Remove any identified weak content
-    - Enhance job alignment as recommended
-    - Verify one-page optimization
-    - Ensure the final result tells a compelling story
-    - Confirm the candidate appears perfect for the role
+    - Apply language and clarity improvements
+    - Enhance job alignment where suggested
+    - Fix all spelling and grammar issues
+    - Improve formatting consistency
+    - Verify all content remains authentic and credible
+    - Ensure final result is professional and interview-ready
+    - Confirm achievements are believable and specific
