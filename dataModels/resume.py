@@ -142,3 +142,21 @@ class ResumeOnePageOptimizerOutput(BaseModel):
     final_answer: str = Field(  # Changed from List[ResumeImprovements] to str
         ..., description="The complete optimized resume content in YAML format"
     )
+
+
+class ResumeImprovementApplierOutput(BaseModel):
+    """Pydantic class that defines the output for applying improvements to a resume."""
+
+    plan: List[str] = Field(
+        ..., description=Prompts.descriptions["RESUME_IMPROVEMENT_APPLIER_OUTPUT"]["plan"]
+    )
+    additional_steps: List[str] = Field(
+        ...,
+        description=Prompts.descriptions["RESUME_IMPROVEMENT_APPLIER_OUTPUT"]["additional_steps"],
+    )
+    work: List[str] = Field(
+        ..., description=Prompts.descriptions["RESUME_IMPROVEMENT_APPLIER_OUTPUT"]["work"]
+    )
+    final_answer: str = Field(
+        ..., description=Prompts.descriptions["RESUME_IMPROVEMENT_APPLIER_OUTPUT"]["final_answer"]
+    )
