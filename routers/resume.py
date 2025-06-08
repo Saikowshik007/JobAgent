@@ -14,18 +14,25 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+
 @router.post("/generate")
 async def generate_resume(
         request: GenerateResumeRequest,
         handle_existing: str = Query("replace", regex="^(replace|keep_both|error)$",
                                      description="How to handle existing resumes: replace, keep_both, or error"),
-        include_objective: bool = Query(True, description="Whether to include an objective section"),
         cache_manager: DBCacheManager = Depends(get_cache_manager),
         user_id: str = Depends(get_user_id),
         api_key: str = Depends(get_user_key)
 ):
     """Generate a tailored resume with orphaning prevention."""
     try:
+        # Use include_objective from the request body, not from query parameter
+        include_objective = request.include_objective
+        if include_objective is None:
+            include_objective = True  # Default to True if not specified
+
+        logger.info(f"Resume generation request for job {request.job_id}, include_objective={include_objective}")
+
         resume_generator = ResumeGenerator(cache_manager, user_id, api_key)
         resume_info = await resume_generator.generate_resume(
             job_id=request.job_id,
@@ -33,7 +40,7 @@ async def generate_resume(
             customize=request.customize,
             resume_data=request.resume_data,
             handle_existing=handle_existing,
-            include_objective=include_objective
+            include_objective=include_objective  # Pass the value from request body
         )
 
         return resume_info
