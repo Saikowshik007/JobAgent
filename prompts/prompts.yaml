@@ -59,7 +59,7 @@ SKILLS_MATCHER:
 
   instruction_message: |
     <Instruction>
-    Extract and organize technical and non-technical skills from the <Resume> that are present in the candidate's experience. If the resume already has existing skills listed, intelligently combine them with newly identified skills to create a comprehensive, deduplicated skill set. Format the output in compact YAML format with technical skills grouped into logical categories and non-technical skills as a simple list.
+    Extract and organize technical and non-technical skills from the <Resume> that are present in the candidate's experience. If the resume already has existing skills listed, intelligently combine them with newly identified skills to create a comprehensive, deduplicated skill set. Format the output with technical skills grouped into logical subcategories and non-technical skills as a simple list.
 
   criteria_message: |
     <Criteria>
@@ -67,23 +67,14 @@ SKILLS_MATCHER:
     - **NO DUPLICATES**: Each skill should appear exactly once in the final output
     - **INTELLIGENT MERGING**: If existing skills are provided, combine them intelligently with newly identified skills without discarding any skills. 
     - **CONSOLIDATE VARIATIONS**: Treat similar skills as one (e.g., "React.js" and "React" → "React")
-    - Technical skills must be grouped into 3–4 logical categories based on functional similarity and role relevance
-    - Output format must be compact YAML with category names as keys and skill arrays as values
-    - Technical skills format: 
-      ```yaml
-      skills:
-        - category: "Programming Languages"
-          skills: ["Java", "Python", "JavaScript"]
-        - category: "Frameworks & Libraries"
-          skills: ["Spring Boot", "React", "FastAPI"]
-        - category: "Non-technical"
-          skills: ["System Design", "Agile Methodologies", "Technical Documentation"]
-      ```
+    - Technical skills must be grouped into 3–6 logical subcategories based on functional similarity and role relevance.
+    - Technical skills output format: {"Category1": ["skill1", "skill2", "skill3",.,.,.,.,..], "Category2": ["skill4", "skill5", "skill6",.,.,.,.,]}
+    - Non-technical skills must be provided as a simple flat list (NOT categorized into subcategories)
+    - Non-technical skills output format: ["skill1", "skill2", "skill3", "skill4".,.,.,.,.,.,.,.]
     - Each skill must be presented in proper case format (e.g., "JavaScript", not "javascript")
     - Focus on presenting the candidate's actual skills objectively without justifying their relevance to a specific job
-    - Prioritize job-relevant skills first within each category for ATS optimization
-    - If no technical skills are found, return skills from resume in categorized format
-    - If no skills exist, return empty categories with empty arrays
+    - If no technical skills are found, return the skills from the resume as sub categorized dictionary.
+    - If no non-technical skills are found, return an empty list: []
 
   steps_message: |
     <Steps>
@@ -92,14 +83,14 @@ SKILLS_MATCHER:
     - Create a <Plan> for systematically extracting, combining, and organizing skills from all sources
     - **DEDUPLICATION STEP**: Identify any duplicate or similar skills across all sources (existing skills + newly identified skills)
     - **CONSOLIDATION STEP**: Merge similar skills (e.g., "React.js", "ReactJS", "React" all become "React")
-    - **PRIORITIZATION STEP**: Within each category, order skills with job-relevant ones first for ATS optimization
-    - Extract all unique technical skills and group them into 3-4 logical, professional categories
-    - Include non-technical skills as a final category within the same structure
-    - Verify all skills are actually mentioned or demonstrated somewhere in the <Resume>
+    - Extract all unique technical skills and group them into 3-6 logical, professional subcategories
+    - Extract all unique non-technical skills as individual items (do not group into subcategories)
+    - Verify all skills are actually mentioned or demonstrated somewhere in the <Resume> or in the <Job Posting>
     - **FINAL DEDUPLICATION CHECK**: Ensure no skill appears more than once across all categories
-    - Format output as compact YAML with category objects containing skill arrays
-    - Confirm all <Criteria> are met, especially the no-duplicates rule and compact format
-    - Provide your <Final Answer> with properly formatted YAML skills structure
+    - Format technical skills as a dictionary with descriptive subcategory keys and skill arrays as values
+    - Format non-technical skills as a simple flat array of skill strings
+    - Confirm all <Criteria> are met, especially the no-duplicates rule
+    - Provide your <Final Answer> with properly formatted technical_skills (dictionary) and non_technical_skills (array)
 
 OBJECTIVE_WRITER:
   system_message: >
@@ -203,9 +194,10 @@ IMPROVER:
     
 ONE_PAGE_OPTIMIZER:
   system_message: >
-    You are a FAANG recruiter and elite resume writing expert with 15+ years of experience editing technical resumes for top-tier roles. 
-    You specialize in transforming multi-page resumes into high-impact, one-page versions that maximize job alignment, eliminate fluff, 
-    and increase ATS keyword density without sacrificing clarity or impact.
+    You are a FAANG recruiter and elite resume writing expert with 15+ years of experience
+    editing technical resumes for top-tier roles. You specialize in transforming multi-page resumes
+    into high-impact, one-page versions that maximize job alignment, eliminate fluff, and increase
+    ATS keyword density without sacrificing clarity or impact.
 
   job_posting_template: |
     <Job Posting>
@@ -216,10 +208,10 @@ ONE_PAGE_OPTIMIZER:
     {resume_draft}
 
   instruction_message: |
-    <Instruction>
-    Your task is to compress and optimize the <Resume> to fit within a single page (~600-800 words max) while maximizing alignment 
-    with the <Job Posting>. Return the complete optimized resume in YAML format, preserving high-impact achievements and ATS keywords. 
-    Trim weak or redundant content and ensure logical structure.
+    <Instruction> Your task is to compress and optimize the <Resume> to fit within a single page (~600-800 words max)
+    while maximizing alignment with the <Job Posting>. Return the complete optimized resume in YAML format,
+    preserving high-impact achievements and ATS keywords. Trim weak or redundant content and ensure
+    logical structure.
 
   criteria_message: |
     <Criteria>
@@ -231,24 +223,15 @@ ONE_PAGE_OPTIMIZER:
     - Use professional language, formatting, and concise bullet points
     - Do not invent new content — only rephrase or trim what's provided
     - Return the complete resume in valid YAML format
-    - OPTIMIZE SPACING: Use compact formatting for maximum content density
-    
-    CONTENT PRIORITIZATION:
-    - Keep 2-3 most relevant experiences with 3-4 high-impact bullets each
-    - Merge similar or weak bullet points
-    - Focus on quantifiable achievements and job-relevant technologies
-    - Trim education to essential details only
-    - Remove or compress less relevant projects
 
   steps_message: |
     <Steps>
-    - Create a <Plan> for optimizing the resume to fit within one page while retaining maximum job match
-    - List any <Additional_Steps> required to execute this plan
-    - Show your <Work>—describe edits made, sections trimmed, and content reordered
-    - Generate the optimized resume based only on original content
-    - Confirm that all <Criteria> are met
-    - Present your <Final_Answer> as the complete optimized resume in valid YAML format
-
+    - Create a <Plan> for optimizing the resume to fit within one page while retaining maximum job match.
+    - List any <Additional Steps> required to execute this plan.
+    - Show your <Work>—describe edits made, sections trimmed, and content reordered.
+    - Generate the optimized resume based only on original content.
+    - Confirm that all <Criteria> are met.
+    - Present your <Final Answer> as the complete optimized resume in valid YAML format.
 
 
 
