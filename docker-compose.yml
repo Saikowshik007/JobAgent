@@ -99,17 +99,17 @@ services:
     labels:
       - "traefik.enable=true"
 
-      # Main HTTPS router - handles ALL requests to the domain
+      # FIXED: Catch-all router that handles ALL paths for the domain
       - "traefik.http.routers.api.rule=Host(`jobtrackai.duckdns.org`)"
       - "traefik.http.routers.api.entrypoints=websecure"
       - "traefik.http.routers.api.tls.certresolver=letsencrypt"
       - "traefik.http.routers.api.service=api"
 
-      # Service definition pointing to FastAPI
+      # Service definition
       - "traefik.http.services.api.loadbalancer.server.port=8000"
       - "traefik.http.services.api.loadbalancer.server.scheme=http"
 
-      # Health check for the service
+      # Health check
       - "traefik.http.services.api.loadbalancer.healthcheck.path=/health"
       - "traefik.http.services.api.loadbalancer.healthcheck.interval=30s"
 
@@ -122,21 +122,16 @@ services:
       - "traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https"
       - "traefik.http.middlewares.redirect-to-https.redirectscheme.permanent=true"
 
-      # CORS middleware (enhanced)
-      - "traefik.http.middlewares.api-cors.headers.accesscontrolallowmethods=GET,OPTIONS,PUT,POST,DELETE,PATCH,HEAD"
+      # CORS middleware (simplified)
+      - "traefik.http.middlewares.api-cors.headers.accesscontrolallowmethods=GET,POST,PUT,DELETE,OPTIONS,PATCH,HEAD"
       - "traefik.http.middlewares.api-cors.headers.accesscontrolallowheaders=*"
-      - "traefik.http.middlewares.api-cors.headers.accesscontrolalloworiginlistregex=^https?://(.*\\.)?job-agent-ui.*\\.vercel\\.app$$,^https?://jobtrackai\\.duckdns\\.org$$"
+      - "traefik.http.middlewares.api-cors.headers.accesscontrolalloworiginlist=https://job-agent-ui.vercel.app,https://jobtrackai.duckdns.org"
       - "traefik.http.middlewares.api-cors.headers.accesscontrolallowcredentials=true"
       - "traefik.http.middlewares.api-cors.headers.accesscontrolmaxage=86400"
       - "traefik.http.middlewares.api-cors.headers.addvaryheader=true"
 
-      # Rate limiting (more permissive for debugging)
-      - "traefik.http.middlewares.api-ratelimit.ratelimit.average=200"
-      - "traefik.http.middlewares.api-ratelimit.ratelimit.burst=400"
-      - "traefik.http.middlewares.api-ratelimit.ratelimit.period=1m"
-
-      # Apply middlewares to HTTPS router
-      - "traefik.http.routers.api.middlewares=api-cors,api-ratelimit"
+      # Apply CORS middleware to HTTPS router
+      - "traefik.http.routers.api.middlewares=api-cors"
 
   # Include PostgreSQL and Redis services directly in this file
   postgres:
