@@ -41,9 +41,9 @@ services:
       - "8000:8000"  # Keep for direct access during debugging
     volumes:
       - .:/app
-      - ./database:app/database
-      - ./output:app/output
-      - ./logs:app/logs
+      - ./database:/app/database
+      - ./output:/app/output
+      - ./logs:/app/logs
     restart: unless-stopped
     networks:
       - jobtrak-network

@@ -1,4 +1,4 @@
-#!/bin/bash
+ echo#!/bin/bash
 # Unified JobTrak Docker Management Script
 # Handles everything: database initialization, monitoring setup, and service management
 
