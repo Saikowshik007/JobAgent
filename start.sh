@@ -1,6 +1,6 @@
 #!/bin/bash
 # Unified JobTrak Docker Management Script
-# Handles everything: database initialization, Traefik setup, and service management
+# Handles everything: database initialization, monitoring setup, and service management
 
 set -e  # Exit on any error
 
@@ -105,6 +105,7 @@ setup_environment() {
 COMPOSE_PROJECT_NAME=jobtrak
 OPENAI_API_KEY=your_openai_api_key
 HOST_IP=auto-detect
+LOG_LEVEL=INFO
 EOF
         print_success "Created .env file - please update with your actual API keys"
     fi
@@ -199,6 +200,210 @@ EOF
     chmod 755 letsencrypt
 
     print_success "Environment setup completed"
+}
+
+# Function to setup monitoring configurations
+setup_monitoring_configs() {
+    print_status "Setting up monitoring configurations..."
+
+    # Create Prometheus config
+    mkdir -p prometheus
+    if [ ! -f "prometheus/prometheus.yml" ]; then
+        cat > prometheus/prometheus.yml << 'EOF'
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  - job_name: 'jobtrak-api'
+    static_configs:
+      - targets: ['jobtrak-api:8000']
+    metrics_path: '/metrics'
+    scrape_interval: 30s
+
+  - job_name: 'cadvisor'
+    static_configs:
+      - targets: ['cadvisor:8080']
+
+  - job_name: 'postgres'
+    static_configs:
+      - targets: ['postgres:5432']
+
+  - job_name: 'redis'
+    static_configs:
+      - targets: ['redis:6379']
+EOF
+    fi
+
+    # Create Loki config
+    mkdir -p loki
+    if [ ! -f "loki/local-config.yaml" ]; then
+        cat > loki/local-config.yaml << 'EOF'
+auth_enabled: false
+
+server:
+  http_listen_port: 3100
+  grpc_listen_port: 9096
+
+ingester:
+  wal:
+    enabled: true
+    dir: /loki/wal
+  lifecycler:
+    address: 127.0.0.1
+    ring:
+      kvstore:
+        store: inmemory
+      replication_factor: 1
+    final_sleep: 0s
+  chunk_idle_period: 1h
+  max_chunk_age: 1h
+  chunk_target_size: 1048576
+  chunk_retain_period: 30s
+  max_transfer_retries: 0
+
+schema_config:
+  configs:
+    - from: 2020-10-24
+      store: boltdb-shipper
+      object_store: filesystem
+      schema: v11
+      index:
+        prefix: index_
+        period: 24h
+
+storage_config:
+  boltdb_shipper:
+    active_index_directory: /loki/boltdb-shipper-active
+    cache_location: /loki/boltdb-shipper-cache
+    cache_ttl: 24h
+    shared_store: filesystem
+  filesystem:
+    directory: /loki/chunks
+
+compactor:
+  working_directory: /loki/boltdb-shipper-compactor
+  shared_store: filesystem
+
+limits_config:
+  reject_old_samples: true
+  reject_old_samples_max_age: 168h
+
+chunk_store_config:
+  max_look_back_period: 0s
+
+table_manager:
+  retention_deletes_enabled: false
+  retention_period: 0s
+
+ruler:
+  storage:
+    type: local
+    local:
+      directory: /loki/rules
+  rule_path: /loki/rules
+  alertmanager_url: http://localhost:9093
+  ring:
+    kvstore:
+      store: inmemory
+  enable_api: true
+EOF
+    fi
+
+    # Create Promtail config
+    mkdir -p promtail
+    if [ ! -f "promtail/config.yml" ]; then
+        cat > promtail/config.yml << 'EOF'
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  - job_name: containers
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: containerlogs
+          __path__: /var/lib/docker/containers/*/*log
+
+  - job_name: jobtrak-logs
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: jobtrak
+          __path__: /var/log/jobtrak/*.log
+
+  - job_name: syslog
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: syslog
+          __path__: /var/log/syslog
+EOF
+    fi
+
+    # Create Grafana provisioning
+    mkdir -p grafana/provisioning/datasources grafana/provisioning/dashboards grafana/dashboards
+
+    if [ ! -f "grafana/provisioning/datasources/datasources.yaml" ]; then
+        cat > grafana/provisioning/datasources/datasources.yaml << 'EOF'
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+
+  - name: Loki
+    type: loki
+    access: proxy
+    url: http://loki:3100
+
+  - name: PostgreSQL
+    type: postgres
+    url: postgres:5432
+    database: jobtrak
+    user: jobtrak_user
+    secureJsonData:
+      password: jobtrak_secure_password_2024
+    jsonData:
+      sslmode: disable
+EOF
+    fi
+
+    if [ ! -f "grafana/provisioning/dashboards/dashboards.yaml" ]; then
+        cat > grafana/provisioning/dashboards/dashboards.yaml << 'EOF'
+apiVersion: 1
+
+providers:
+  - name: 'default'
+    orgId: 1
+    folder: ''
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 10
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards
+EOF
+    fi
+
+    print_success "Monitoring configurations created"
 }
 
 # Function to clean up old containers and networks
@@ -330,11 +535,11 @@ show_status() {
     check_url_health "Traefik Dashboard" "http://localhost:8080/api/rawdata"
 
     # Check monitoring services if enabled
-    if docker ps --format "{{.Names}}" | grep -q "jobtrak-grafana"; then
+    if $DOCKER_CMD ps --format "{{.Names}}" | grep -q "jobtrak-grafana"; then
         check_url_health "Grafana" "http://localhost:3000/api/health"
     fi
 
-    if docker ps --format "{{.Names}}" | grep -q "jobtrak-prometheus"; then
+    if $DOCKER_CMD ps --format "{{.Names}}" | grep -q "jobtrak-prometheus"; then
         check_url_health "Prometheus" "http://localhost:9090/-/healthy"
     fi
 
@@ -348,7 +553,7 @@ show_status() {
     echo ""
 
     # Show monitoring URLs if enabled
-    if docker ps --format "{{.Names}}" | grep -q "jobtrak-grafana"; then
+    if $DOCKER_CMD ps --format "{{.Names}}" | grep -q "jobtrak-grafana"; then
         echo "📊 Monitoring URLs (--profile monitoring):"
         echo "   📈 Grafana: http://localhost:3000 (admin/admin123)"
         echo "   📊 Prometheus: http://localhost:9090"
@@ -490,309 +695,8 @@ service_operations() {
     esac
 }
 
-# Function to setup monitoring configurations
-setup_monitoring_configs() {
-    print_status "Setting up monitoring configurations..."
-
-    # Create Prometheus config
-    mkdir -p prometheus
-    if [ ! -f "prometheus/prometheus.yml" ]; then
-        cat > prometheus/prometheus.yml << 'EOF'
-global:
-  scrape_interval: 15s
-  evaluation_interval: 15s
-
-rule_files:
-  # - "first_rules.yml"
-  # - "second_rules.yml"
-
-scrape_configs:
-  - job_name: 'prometheus'
-    static_configs:
-      - targets: ['localhost:9090']
-
-  - job_name: 'jobtrak-api'
-    static_configs:
-      - targets: ['jobtrak-api:8000']
-    metrics_path: '/metrics'
-    scrape_interval: 30s
-
-  - job_name: 'cadvisor'
-    static_configs:
-      - targets: ['cadvisor:8080']
-
-  - job_name: 'postgres'
-    static_configs:
-      - targets: ['postgres:5432']
-
-  - job_name: 'redis'
-    static_configs:
-      - targets: ['redis:6379']
-EOF
-    fi
-
-    # Create Loki config
-    mkdir -p loki
-    if [ ! -f "loki/local-config.yaml" ]; then
-        cat > loki/local-config.yaml << 'EOF'
-auth_enabled: false
-
-server:
-  http_listen_port: 3100
-  grpc_listen_port: 9096
-
-ingester:
-  wal:
-    enabled: true
-    dir: /loki/wal
-  lifecycler:
-    address: 127.0.0.1
-    ring:
-      kvstore:
-        store: inmemory
-      replication_factor: 1
-    final_sleep: 0s
-  chunk_idle_period: 1h
-  max_chunk_age: 1h
-  chunk_target_size: 1048576
-  chunk_retain_period: 30s
-  max_transfer_retries: 0
-
-schema_config:
-  configs:
-    - from: 2020-10-24
-      store: boltdb-shipper
-      object_store: filesystem
-      schema: v11
-      index:
-        prefix: index_
-        period: 24h
-
-storage_config:
-  boltdb_shipper:
-    active_index_directory: /loki/boltdb-shipper-active
-    cache_location: /loki/boltdb-shipper-cache
-    cache_ttl: 24h
-    shared_store: filesystem
-  filesystem:
-    directory: /loki/chunks
-
-compactor:
-  working_directory: /loki/boltdb-shipper-compactor
-  shared_store: filesystem
-
-limits_config:
-  reject_old_samples: true
-  reject_old_samples_max_age: 168h
-
-chunk_store_config:
-  max_look_back_period: 0s
-
-table_manager:
-  retention_deletes_enabled: false
-  retention_period: 0s
-
-ruler:
-  storage:
-    type: local
-    local:
-      directory: /loki/rules
-  rule_path: /loki/rules
-  alertmanager_url: http://localhost:9093
-  ring:
-    kvstore:
-      store: inmemory
-  enable_api: true
-EOF
-    fi
-
-    # Create Promtail config
-    mkdir -p promtail
-    if [ ! -f "promtail/config.yml" ]; then
-        cat > promtail/config.yml << 'EOF'
-server:
-  http_listen_port: 9080
-  grpc_listen_port: 0
-
-positions:
-  filename: /tmp/positions.yaml
-
-clients:
-  - url: http://loki:3100/loki/api/v1/push
-
-scrape_configs:
-  - job_name: containers
-    static_configs:
-      - targets:
-          - localhost
-        labels:
-          job: containerlogs
-          __path__: /var/lib/docker/containers/*/*log
-
-    pipeline_stages:
-      - json:
-          expressions:
-            output: log
-            stream: stream
-            attrs:
-      - json:
-          source: attrs
-          expressions:
-            tag:
-      - regex:
-          source: tag
-          expression: (?P<container_name>(?:[^|]*))\|(?P<image_name>(?:[^|]*))\|(?P<image_id>(?:[^|]*))\|(?P<container_id>(?:[^|]*))
-      - timestamp:
-          format: RFC3339Nano
-          source: time
-      - labels:
-          stream:
-          container_name:
-          image_name:
-          image_id:
-          container_id:
-      - output:
-          source: output
-
-  - job_name: jobtrak-logs
-    static_configs:
-      - targets:
-          - localhost
-        labels:
-          job: jobtrak
-          __path__: /var/log/jobtrak/*.log
-
-  - job_name: syslog
-    static_configs:
-      - targets:
-          - localhost
-        labels:
-          job: syslog
-          __path__: /var/log/syslog
-EOF
-    fi
-
-    # Create Grafana provisioning
-    mkdir -p grafana/provisioning/datasources grafana/provisioning/dashboards grafana/dashboards
-
-    if [ ! -f "grafana/provisioning/datasources/datasources.yaml" ]; then
-        cat > grafana/provisioning/datasources/datasources.yaml << 'EOF'
-apiVersion: 1
-
-datasources:
-  - name: Prometheus
-    type: prometheus
-    access: proxy
-    url: http://prometheus:9090
-    isDefault: true
-
-  - name: Loki
-    type: loki
-    access: proxy
-    url: http://loki:3100
-
-  - name: PostgreSQL
-    type: postgres
-    url: postgres:5432
-    database: jobtrak
-    user: jobtrak_user
-    secureJsonData:
-      password: jobtrak_secure_password_2024
-    jsonData:
-      sslmode: disable
-EOF
-    fi
-
-    if [ ! -f "grafana/provisioning/dashboards/dashboards.yaml" ]; then
-        cat > grafana/provisioning/dashboards/dashboards.yaml << 'EOF'
-apiVersion: 1
-
-providers:
-  - name: 'default'
-    orgId: 1
-    folder: ''
-    type: file
-    disableDeletion: false
-    updateIntervalSeconds: 10
-    allowUiUpdates: true
-    options:
-      path: /var/lib/grafana/dashboards
-EOF
-    fi
-
-    print_success "Monitoring configurations created"
-}
-
-# Function to setup Grafana dashboards
-setup_grafana_dashboards() {
-    print_status "Setting up Grafana dashboards..."
-
-    # Wait for Grafana to be ready
-    local counter=0
-    while [ $counter -lt 60 ]; do
-        if curl -f "http://localhost:3000/api/health" >/dev/null 2>&1; then
-            break
-        fi
-        counter=$((counter + 1))
-        sleep 1
-    done
-
-    # Create a simple JobTrak dashboard
-    if [ ! -f "grafana/dashboards/jobtrak-dashboard.json" ]; then
-        cat > grafana/dashboards/jobtrak-dashboard.json << 'EOF'
-{
-  "dashboard": {
-    "id": null,
-    "title": "JobTrak Dashboard",
-    "tags": ["jobtrak"],
-    "timezone": "browser",
-    "panels": [
-      {
-        "id": 1,
-        "title": "API Response Time",
-        "type": "graph",
-        "targets": [
-          {
-            "expr": "histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m]))",
-            "legendFormat": "95th percentile"
-          }
-        ]
-      },
-      {
-        "id": 2,
-        "title": "Database Connections",
-        "type": "graph",
-        "targets": [
-          {
-            "expr": "pg_stat_database_numbackends",
-            "legendFormat": "Active connections"
-          }
-        ]
-      },
-      {
-        "id": 3,
-        "title": "Redis Memory Usage",
-        "type": "graph",
-        "targets": [
-          {
-            "expr": "redis_memory_used_bytes",
-            "legendFormat": "Memory used"
-          }
-        ]
-      }
-    ],
-    "time": {
-      "from": "now-6h",
-      "to": "now"
-    },
-    "refresh": "5s"
-  }
-}
-EOF
-    fi
-
-    print_success "Grafana dashboards configured"
-}
+# Function to test the API
+test_api() {
     print_header "Testing API Endpoints"
 
     local base_url="http://localhost:8000"
@@ -824,38 +728,44 @@ show_usage() {
 Usage: ./start.sh [COMMAND] [OPTIONS]
 
 Commands:
-  start          - Start all services (default)
-  stop           - Stop all services
-  restart        - Restart all services
-  status         - Show service status and health
-  logs [service] - Show logs (optionally for specific service)
+  start             - Start all services (default)
+  stop              - Stop all services
+  restart           - Restart all services
+  status            - Show service status and health
+  logs [service]    - Show logs (optionally for specific service)
 
 Database Commands:
-  db init        - Initialize database schema
-  db reset       - Reset database (WARNING: deletes all data)
-  db backup      - Create database backup
-  db status      - Show database status
+  db init           - Initialize database schema
+  db reset          - Reset database (WARNING: deletes all data)
+  db backup         - Create database backup
+  db status         - Show database status
 
 Service Commands:
-  shell [service]- Open shell in service container
-  test           - Test API endpoints
+  shell [service]   - Open shell in service container
+  test              - Test API endpoints
+
+Profile Commands:
+  tools             - Start with tools profile (pgAdmin)
+  monitoring        - Start with monitoring profile (Grafana, Prometheus, Loki)
 
 Options:
-  --profile [profile] - Start with specific profile (tools)
+  --profile [name]  - Start with specific profile
 
 Examples:
-  ./start.sh                    # Start all services
-  ./start.sh start --profile tools  # Start with pgAdmin
-  ./start.sh logs api           # Show API logs
-  ./start.sh db init            # Initialize database
-  ./start.sh status             # Show service status
-  ./start.sh shell postgres     # Open PostgreSQL shell
+  ./start.sh                         # Start all services
+  ./start.sh start --profile tools   # Start with pgAdmin
+  ./start.sh monitoring              # Start with monitoring stack
+  ./start.sh logs api                # Show API logs
+  ./start.sh db init                 # Initialize database
+  ./start.sh status                  # Show service status
+  ./start.sh shell postgres          # Open PostgreSQL shell
 
 Access Points:
   🌐 API: http://localhost:8000 or https://jobtrackai.duckdns.org
   🚦 Traefik: http://localhost:8080
   🗄️ pgAdmin: http://localhost:8082 (with --profile tools)
-  🖥️ Selenium VNC: http://localhost:7900
+  📈 Grafana: http://localhost:3000 (with monitoring profile)
+  📊 Prometheus: http://localhost:9090 (with monitoring profile)
 
 EOF
 }
@@ -878,6 +788,9 @@ main() {
             # Handle profiles
             if [ "$arg2" = "--profile" ] && [ -n "$arg3" ]; then
                 print_status "Starting with profile: $arg3"
+                if [ "$arg3" = "monitoring" ]; then
+                    setup_monitoring_configs
+                fi
                 $COMPOSE_CMD -f $COMPOSE_FILE --profile "$arg3" up --build -d
                 wait_for_services
             elif [[ "$*" == *"--profile tools"* ]]; then
@@ -889,7 +802,6 @@ main() {
                 setup_monitoring_configs
                 $COMPOSE_CMD -f $COMPOSE_FILE --profile monitoring up --build -d
                 wait_for_services
-                setup_grafana_dashboards
             else
                 start_services
             fi
@@ -930,6 +842,25 @@ main() {
 
         "test")
             test_api
+            ;;
+
+        "tools")
+            setup_environment
+            cleanup
+            print_status "Starting with tools profile..."
+            $COMPOSE_CMD -f $COMPOSE_FILE --profile tools up --build -d
+            wait_for_services
+            show_status
+            ;;
+
+        "monitoring")
+            setup_environment
+            cleanup
+            print_status "Starting with monitoring profile..."
+            setup_monitoring_configs
+            $COMPOSE_CMD -f $COMPOSE_FILE --profile monitoring up --build -d
+            wait_for_services
+            show_status
             ;;
 
         "help"|"-h"|"--help")
