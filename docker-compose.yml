@@ -103,20 +103,15 @@ services:
       - "traefik.http.routers.api.tls.certresolver=letsencrypt"
       - "traefik.http.services.api.loadbalancer.server.port=8000"
 
-      # CORS headers middleware - SIMPLIFIED
-      - "traefik.http.middlewares.api-cors.headers.accesscontrolallowmethods=GET,POST,PUT,DELETE,OPTIONS,PATCH,HEAD"
-      - "traefik.http.middlewares.api-cors.headers.accesscontrolallowheaders=*"
-      - "traefik.http.middlewares.api-cors.headers.accesscontrolalloworiginlist=*"
-      - "traefik.http.middlewares.api-cors.headers.accesscontrolallowcredentials=true"
-      - "traefik.http.middlewares.api-cors.headers.accesscontrolmaxage=3600"
+      # Remove CORS from Traefik - let FastAPI handle it
+      # - "traefik.http.routers.api.middlewares=" # No middlewares
 
-      # Apply CORS middleware
-      - "traefik.http.routers.api.middlewares=api-cors"
-
-      # HTTP to HTTPS redirect
+      # HTTP to HTTPS redirect - separate from CORS
       - "traefik.http.routers.api-http.rule=Host(`jobtrackai.duckdns.org`)"
       - "traefik.http.routers.api-http.entrypoints=web"
-      - "traefik.http.routers.api-http.middlewares=api-cors"
+      - "traefik.http.middlewares.https-redirect.redirectscheme.scheme=https"
+      - "traefik.http.middlewares.https-redirect.redirectscheme.permanent=true"
+      - "traefik.http.routers.api-http.middlewares=https-redirect"
 
   postgres:
     image: postgres:15-alpine
