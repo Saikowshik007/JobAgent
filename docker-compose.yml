@@ -1,62 +1,120 @@
-version: '3.8'
-
 services:
-  # Traefik reverse proxy with Let's Encrypt
+  # Traefik reverse proxy for DuckDNS
   traefik:
     image: traefik:v3.0
     container_name: jobtrak-traefik
     command:
-      # API Configuration
-      - "--api.dashboard=true"
       - "--api.insecure=true"
-      
-      # Provider Configuration
       - "--providers.docker=true"
       - "--providers.docker.exposedbydefault=false"
-      - "--providers.docker.network=jobtrak-network"
-      
-      # Entrypoints Configuration
       - "--entrypoints.web.address=:80"
       - "--entrypoints.websecure.address=:443"
-      
-      # Certificate Resolver (Let's Encrypt)
+      # Let's Encrypt configuration - UPDATE YOUR EMAIL HERE
       - "--certificatesresolvers.letsencrypt.acme.tlschallenge=true"
       - "--certificatesresolvers.letsencrypt.acme.email=askowshik@outlook.com"
       - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
-      - "--certificatesresolvers.letsencrypt.acme.caserver=https://acme-v02.api.letsencrypt.org/directory"
-      
-      # Global HTTP to HTTPS redirect
+      # Redirect HTTP to HTTPS
       - "--entrypoints.web.http.redirections.entrypoint.to=websecure"
       - "--entrypoints.web.http.redirections.entrypoint.scheme=https"
       - "--entrypoints.web.http.redirections.entrypoint.permanent=true"
-      
       # Logging
       - "--log.level=INFO"
       - "--accesslog=true"
-      
-      # Metrics (optional)
-      - "--metrics.prometheus=true"
-      - "--metrics.prometheus.addentrypointslabels=true"
-      - "--metrics.prometheus.addserviceslabels=true"
     ports:
       - "80:80"
       - "443:443"
       - "8080:8080"  # Traefik dashboard
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      - traefik_letsencrypt:/letsencrypt
+      - ./letsencrypt:/letsencrypt
     networks:
       - jobtrak-network
     restart: unless-stopped
+
+  # FastAPI service
+  jobtrak-api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: jobtrak-api
+    ports:
+      - "8000:8000"  # Keep for direct access during debugging
+    volumes:
+      - .:/app
+      - ./database:/app/database
+      - ./output:/app/output
+      - ./logs:/app/logs
+    restart: unless-stopped
+    networks:
+      - jobtrak-network
+    environment:
+      # Application settings
+      - PYTHONPATH=/app
+      - PYTHONUNBUFFERED=1
+      - PYTHONDONTWRITEBYTECODE=1
+      - API_DEBUG=1
+      - HOST_IP=${HOST_IP:-auto-detect}
+
+      # External services
+      - SELENIUM_REMOTE_URL=http://selenium-chrome:4444/wd/hub
+      - SIMPLIFY_JOBS_API_URL=https://api.simplify.jobs/v2
+      - SIMPLIFY_SITE_KEY=6LcStf4UAAAAAIVZo9JUJ3PntTfRBhvXLKBTGww8
+
+      # Database configuration (PostgreSQL)
+      - DATABASE_URL=postgresql://jobtrak_user:jobtrak_secure_password_2024@postgres:5432/jobtrak
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=jobtrak
+      - POSTGRES_USER=jobtrak_user
+      - POSTGRES_PASSWORD=jobtrak_secure_password_2024
+
+      # Redis configuration
+      - REDIS_URL=redis://redis:6379/0
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_DB=0
+      - CACHE_TTL=3600
+
+      # LinkedIn credentials (consider using Docker secrets in production)
+      - LINKEDIN_EMAIL=saianantula007@outlook.com
+      - LINKEDIN_PASSWORD=Saikowshik@2000
+
+      # OpenAI configuration
+      - OPENAI_API_KEY=your_openai_api_key
+      - MODEL_PROVIDER=openai
+      - MODEL_NAME=gpt-4.1-mini
+      - MODEL_TEMPERATURE=0.3
+    # Add dependency on data services
+    depends_on:
+      - postgres
+      - redis
     labels:
       - "traefik.enable=true"
-      # Dashboard configuration
-      - "traefik.http.routers.dashboard.rule=Host(`jobtrackai.duckdns.org`) && (PathPrefix(`/api`) || PathPrefix(`/dashboard`))"
-      - "traefik.http.routers.dashboard.entrypoints=websecure"
-      - "traefik.http.routers.dashboard.tls.certresolver=letsencrypt"
-      - "traefik.http.routers.dashboard.service=api@internal"
 
-  # PostgreSQL Database
+      # API routing for your DuckDNS domain
+      - "traefik.http.routers.api.rule=Host(`jobtrackai.duckdns.org`) && PathPrefix(`/api`)"
+      - "traefik.http.routers.api.entrypoints=websecure"
+      - "traefik.http.routers.api.tls.certresolver=letsencrypt"
+      - "traefik.http.services.api.loadbalancer.server.port=8000"
+
+      # Rate limiting only (CORS handled by FastAPI)
+      - "traefik.http.middlewares.api-ratelimit.ratelimit.average=100"
+      - "traefik.http.middlewares.api-ratelimit.ratelimit.burst=50"
+      - "traefik.http.middlewares.api-ratelimit.ratelimit.period=1m"
+
+      # Define HTTPS redirect middleware
+      - "traefik.http.middlewares.https-redirect.redirectscheme.scheme=https"
+      - "traefik.http.middlewares.https-redirect.redirectscheme.permanent=true"
+
+      # Apply only rate limiting middleware (let FastAPI handle CORS)
+      - "traefik.http.routers.api.middlewares=api-ratelimit"
+
+      # HTTP to HTTPS redirect
+      - "traefik.http.routers.api-http.rule=Host(`jobtrackai.duckdns.org`) && PathPrefix(`/`)"
+      - "traefik.http.routers.api-http.entrypoints=web"
+      - "traefik.http.routers.api-http.middlewares=https-redirect"
+
+  # Include PostgreSQL and Redis services directly in this file
   postgres:
     image: postgres:15-alpine
     container_name: jobtrak-postgres
@@ -78,7 +136,6 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 30s
     command: >
       postgres
       -c shared_buffers=256MB
@@ -94,7 +151,6 @@ services:
       -c max_connections=100
       -c log_min_duration_statement=1000
 
-  # Redis Cache
   redis:
     image: redis:7-alpine
     container_name: jobtrak-redis
@@ -121,209 +177,8 @@ services:
       interval: 10s
       timeout: 3s
       retries: 3
-      start_period: 10s
 
-  # FastAPI Application
-  jobtrak-api:
-    build:
-      context: .
-      dockerfile: Dockerfile.api
-    container_name: jobtrak-api
-    ports:
-      - "8000:8000"  # Direct access for debugging
-    volumes:
-      - .:/app
-      - ./database:/app/database
-      - ./output:/app/output
-      - ./logs:/app/logs
-    environment:
-      # Application settings
-      - PYTHONPATH=/app
-      - PYTHONUNBUFFERED=1
-      - PYTHONDONTWRITEBYTECODE=1
-      - API_DEBUG=1
-      - HOST_IP=${HOST_IP:-auto-detect}
-
-      # Database configuration
-      - DATABASE_URL=postgresql://jobtrak_user:jobtrak_secure_password_2024@postgres:5432/jobtrak
-      - POSTGRES_HOST=postgres
-      - POSTGRES_PORT=5432
-      - POSTGRES_DB=jobtrak
-      - POSTGRES_USER=jobtrak_user
-      - POSTGRES_PASSWORD=jobtrak_secure_password_2024
-
-      # Redis configuration
-      - REDIS_URL=redis://redis:6379/0
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - REDIS_DB=0
-      - CACHE_TTL=3600
-
-      # External services
-      - SIMPLIFY_JOBS_API_URL=https://api.simplify.jobs/v2
-      - SIMPLIFY_SITE_KEY=6LcStf4UAAAAAIVZo9JUJ3PntTfRBhvXLKBTGww8
-
-      # LinkedIn credentials (use Docker secrets in production)
-      - LINKEDIN_EMAIL=saianantula007@outlook.com
-      - LINKEDIN_PASSWORD=Saikowshik@2000
-
-      # OpenAI configuration
-      - OPENAI_API_KEY=${OPENAI_API_KEY:-your_openai_api_key}
-      - MODEL_PROVIDER=openai
-      - MODEL_NAME=gpt-4o-mini
-      - MODEL_TEMPERATURE=0.3
-
-      # Logging configuration
-      - LOG_LEVEL=${LOG_LEVEL:-INFO}
-      - ENABLE_FILE_LOGGING=true
-      - LOG_FORMAT=json
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    networks:
-      - jobtrak-network
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
-    labels:
-      - "traefik.enable=true"
-
-      # Main API routes
-      - "traefik.http.routers.api.rule=Host(`jobtrackai.duckdns.org`) && PathPrefix(`/api/`)"
-      - "traefik.http.routers.api.entrypoints=websecure"
-      - "traefik.http.routers.api.tls.certresolver=letsencrypt"
-      - "traefik.http.services.api.loadbalancer.server.port=8000"
-
-      # Root path routing (if you want to serve from root)
-      - "traefik.http.routers.api-root.rule=Host(`jobtrackai.duckdns.org`) && PathPrefix(`/`)"
-      - "traefik.http.routers.api-root.entrypoints=websecure"
-      - "traefik.http.routers.api-root.tls.certresolver=letsencrypt"
-      - "traefik.http.routers.api-root.service=api"
-
-      # Middleware for rate limiting and security
-      - "traefik.http.middlewares.api-ratelimit.ratelimit.average=100"
-      - "traefik.http.middlewares.api-ratelimit.ratelimit.burst=50"
-      - "traefik.http.middlewares.api-ratelimit.ratelimit.period=1m"
-
-      # Security headers
-      - "traefik.http.middlewares.security-headers.headers.framedeny=true"
-      - "traefik.http.middlewares.security-headers.headers.sslredirect=true"
-      - "traefik.http.middlewares.security-headers.headers.browserxssfilter=true"
-      - "traefik.http.middlewares.security-headers.headers.contenttypenosniff=true"
-      - "traefik.http.middlewares.security-headers.headers.referrerpolicy=strict-origin-when-cross-origin"
-
-      # Apply middlewares
-      - "traefik.http.routers.api.middlewares=api-ratelimit,security-headers"
-      - "traefik.http.routers.api-root.middlewares=api-ratelimit,security-headers"
-
-  # Grafana for monitoring and log visualization
-  grafana:
-    image: grafana/grafana:latest
-    container_name: jobtrak-grafana
-    environment:
-      - GF_SECURITY_ADMIN_USER=admin
-      - GF_SECURITY_ADMIN_PASSWORD=admin123
-      - GF_USERS_ALLOW_SIGN_UP=false
-      - GF_SERVER_ROOT_URL=http://localhost:3000
-      - GF_INSTALL_PLUGINS=grafana-clock-panel,grafana-simple-json-datasource
-    ports:
-      - "3000:3000"
-    volumes:
-      - grafana_data:/var/lib/grafana
-      - ./grafana/provisioning:/etc/grafana/provisioning
-      - ./grafana/dashboards:/var/lib/grafana/dashboards
-    networks:
-      - jobtrak-network
-    restart: unless-stopped
-    profiles:
-      - monitoring
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.grafana.rule=Host(`jobtrackai.duckdns.org`) && PathPrefix(`/grafana`)"
-      - "traefik.http.routers.grafana.entrypoints=websecure"
-      - "traefik.http.routers.grafana.tls.certresolver=letsencrypt"
-      - "traefik.http.services.grafana.loadbalancer.server.port=3000"
-
-  # Loki for log aggregation
-  loki:
-    image: grafana/loki:latest
-    container_name: jobtrak-loki
-    command: -config.file=/etc/loki/local-config.yaml
-    ports:
-      - "3100:3100"
-    volumes:
-      - loki_data:/loki
-      - ./loki:/etc/loki
-    networks:
-      - jobtrak-network
-    restart: unless-stopped
-    profiles:
-      - monitoring
-
-  # Promtail for log shipping
-  promtail:
-    image: grafana/promtail:latest
-    container_name: jobtrak-promtail
-    command: -config.file=/etc/promtail/config.yml
-    volumes:
-      - ./logs:/var/log/jobtrak:ro
-      - ./promtail:/etc/promtail
-      - /var/log:/var/log:ro
-      - /var/lib/docker/containers:/var/lib/docker/containers:ro
-    networks:
-      - jobtrak-network
-    restart: unless-stopped
-    profiles:
-      - monitoring
-    depends_on:
-      - loki
-
-  # Prometheus for metrics collection
-  prometheus:
-    image: prom/prometheus:latest
-    container_name: jobtrak-prometheus
-    command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheus'
-      - '--web.console.libraries=/etc/prometheus/console_libraries'
-      - '--web.console.templates=/etc/prometheus/consoles'
-      - '--storage.tsdb.retention.time=200h'
-      - '--web.enable-lifecycle'
-    ports:
-      - "9090:9090"
-    volumes:
-      - prometheus_data:/prometheus
-      - ./prometheus:/etc/prometheus
-    networks:
-      - jobtrak-network
-    restart: unless-stopped
-    profiles:
-      - monitoring
-
-  # cAdvisor for container metrics
-  cadvisor:
-    image: gcr.io/cadvisor/cadvisor:latest
-    container_name: jobtrak-cadvisor
-    ports:
-      - "8081:8080"
-    volumes:
-      - /:/rootfs:ro
-      - /var/run:/var/run:rw
-      - /sys:/sys:ro
-      - /var/lib/docker/:/var/lib/docker:ro
-    networks:
-      - jobtrak-network
-    restart: unless-stopped
-    profiles:
-      - monitoring
-
-  # pgAdmin for database management (optional)
+  # Optional: pgAdmin for PostgreSQL management
   pgadmin:
     image: dpage/pgadmin4:latest
     container_name: jobtrak-pgadmin
@@ -331,7 +186,6 @@ services:
       PGADMIN_DEFAULT_EMAIL: admin@jobtrak.local
       PGADMIN_DEFAULT_PASSWORD: admin123
       PGADMIN_CONFIG_SERVER_MODE: 'False'
-      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: 'False'
     ports:
       - "8082:80"
     volumes:
@@ -343,13 +197,7 @@ services:
         condition: service_healthy
     restart: unless-stopped
     profiles:
-      - tools  # Only start with --profile tools
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.pgadmin.rule=Host(`jobtrackai.duckdns.org`) && PathPrefix(`/pgadmin`)"
-      - "traefik.http.routers.pgadmin.entrypoints=websecure"
-      - "traefik.http.routers.pgadmin.tls.certresolver=letsencrypt"
-      - "traefik.http.services.pgadmin.loadbalancer.server.port=80"
+      - tools
 
 networks:
   jobtrak-network:
@@ -362,19 +210,9 @@ volumes:
     name: jobtrak-postgres-data
   redis_data:
     driver: local
-    name: jobtank-redis-data
+    name: jobtrak-redis-data
   pgadmin_data:
     driver: local
     name: jobtrak-pgadmin-data
-  traefik_letsencrypt:
+  letsencrypt:
     driver: local
-    name: jobtrak-letsencrypt
-  grafana_data:
-    driver: local
-    name: jobtrak-grafana-data
-  loki_data:
-    driver: local
-    name: jobtrak-loki-data
-  prometheus_data:
-    driver: local
-    name: jobtrak-prometheus-data
