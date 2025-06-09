@@ -18,6 +18,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+
 def get_allowed_origins():
     """Get the list of allowed CORS origins."""
     # Base origins that are always allowed
@@ -34,7 +35,9 @@ def get_allowed_origins():
         # External integrations
         "https://simplify.jobs",
 
-        # Development origins
+        # Development origins - LOCALHOST
+        "http://localhost",
+        "https://localhost",
         "http://localhost:3000",
         "https://localhost:3000",
         "http://127.0.0.1:3000",
@@ -43,6 +46,19 @@ def get_allowed_origins():
         "https://localhost:3001",
         "http://localhost:8000",
         "http://127.0.0.1:8000",
+        "https://localhost:8000",
+        "https://127.0.0.1:8000",
+
+        # LOCAL NETWORK - ADD YOUR MACHINE'S IP
+        "http://192.168.1.114",
+        "https://192.168.1.114",
+        "http://192.168.1.114:80",
+        "https://192.168.1.114:443",
+        "http://192.168.1.114:8000",
+        "https://192.168.1.114:8000",
+
+        # NULL origin for direct requests
+        "null",
     ]
 
     # Add debug origins if in debug mode
@@ -54,6 +70,9 @@ def get_allowed_origins():
             "http://192.168.1.101:3000",
             # Add wildcard for Vercel previews in debug mode
             "https://*.vercel.app",
+            # Allow any localhost port in debug
+            "http://localhost:*",
+            "https://localhost:*",
         ]
         origins.extend(debug_origins)
 
