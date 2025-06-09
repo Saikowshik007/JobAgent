@@ -1,7 +1,5 @@
-# 1. FIRST - Update your main.py (complete rewrite to ensure proper order)
-
 """
-Main FastAPI application with proper initialization.
+Main FastAPI application with proper initialization and enhanced CORS configuration.
 """
 import os
 import logging
@@ -24,10 +22,16 @@ def get_allowed_origins():
     """Get the list of allowed CORS origins."""
     # Base origins that are always allowed
     origins = [
-        # Production origins - EXACT MATCHES
+        # Production origins - EXACT MATCHES (most important)
         "https://job-agent-ui.vercel.app",
         "https://jobtrackai.duckdns.org",
         "http://jobtrackai.duckdns.org",
+
+        # Vercel preview deployments (common pattern)
+        "https://job-agent-ui-git-main-your-username.vercel.app",
+        "https://job-agent-ui-git-dev-your-username.vercel.app",
+
+        # External integrations
         "https://simplify.jobs",
 
         # Development origins
@@ -48,8 +52,16 @@ def get_allowed_origins():
             "http://localhost:5000",
             "http://192.168.1.100:3000",
             "http://192.168.1.101:3000",
+            # Add wildcard for Vercel previews in debug mode
+            "https://*.vercel.app",
         ]
         origins.extend(debug_origins)
+
+    # Add any additional origins from environment variable
+    env_origins = os.environ.get('ADDITIONAL_CORS_ORIGINS', '')
+    if env_origins:
+        additional_origins = [origin.strip() for origin in env_origins.split(',')]
+        origins.extend(additional_origins)
 
     logger.info(f"CORS allowed origins: {origins}")
     return origins
@@ -96,7 +108,7 @@ app = FastAPI(
 # Configure CORS IMMEDIATELY after app creation - this is critical!
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=get_allowed_origins(),  # Specific origins, not ["*"]
+    allow_origins=get_allowed_origins(),  # Specific origins
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH", "HEAD"],
     allow_headers=[
@@ -114,6 +126,7 @@ app.add_middleware(
         "User-Agent",
         "X-Requested-With",
         "Range",
+        "Referer",
         # Custom API headers
         "X-Api-Key",
         "x-api-key",
@@ -125,6 +138,9 @@ app.add_middleware(
         "X-Forwarded-For",
         "X-Forwarded-Proto",
         "X-Real-IP",
+        # Common frontend framework headers
+        "X-Vercel-Id",
+        "X-Deployment-Id",
     ],
     expose_headers=[
         "Content-Range",
@@ -148,27 +164,37 @@ async def root():
     return {
         "message": "JobTrak API",
         "version": "1.0.0",
-        "status": "running"
+        "status": "running",
+        "timestamp": "2025-06-08"
     }
 
 @app.get("/health")
 async def health_check():
-    """Simple health check endpoint."""
+    """Enhanced health check endpoint."""
     return {
         "status": "healthy",
         "cache_manager_initialized": hasattr(app.state, "cache_manager"),
-        "database_initialized": hasattr(app.state, "db")
+        "database_initialized": hasattr(app.state, "db"),
+        "timestamp": "2025-06-08",
+        "version": "1.0.0"
     }
 
-# Add a specific CORS debug endpoint
+# Add a specific CORS test endpoint
 @app.get("/api/cors-test")
 async def cors_test():
     """Test endpoint specifically for CORS debugging."""
     return {
         "message": "CORS test successful",
-        "timestamp": "2025-05-26",
-        "origin_allowed": True
+        "timestamp": "2025-06-08",
+        "origin_allowed": True,
+        "cors_origins": get_allowed_origins()
     }
+
+# Add OPTIONS handler for preflight requests
+@app.options("/{path:path}")
+async def options_handler(path: str):
+    """Handle OPTIONS requests for CORS preflight."""
+    return {"message": "OK"}
 
 if __name__ == "__main__":
     import uvicorn
