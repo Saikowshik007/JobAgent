@@ -211,9 +211,6 @@ cleanup() {
     # Clean up old networks
     $DOCKER_CMD network prune -f 2>/dev/null || true
 
-    # Clean up unused volumes (be careful with this)
-    # $DOCKER_CMD volume prune -f 2>/dev/null || true
-
     print_success "Cleanup completed"
 }
 
@@ -313,7 +310,11 @@ show_service_logs() {
 # Function to show all logs
 show_logs() {
     print_header "Service Logs"
-    $COMPOSE_CMD -f $COMPOSE_FILE logs --tail=50
+    if [ -n "$1" ]; then
+        $COMPOSE_CMD -f $COMPOSE_FILE logs --tail=50 -f "jobtrak-$1"
+    else
+        $COMPOSE_CMD -f $COMPOSE_FILE logs --tail=50
+    fi
 }
 
 # Function to show service status
@@ -388,27 +389,11 @@ restart_services() {
     start_services
 }
 
-# Function to update services
-update_services() {
-    print_header "Updating JobTrak Services"
-
-    # Pull latest images
-    print_status "Pulling latest images..."
-    $COMPOSE_CMD -f $COMPOSE_FILE pull
-
-    # Rebuild and restart
-    print_status "Rebuilding and restarting services..."
-    $COMPOSE_CMD -f $COMPOSE_FILE up --build -d
-
-    wait_for_services
-    print_success "Services updated successfully"
-}
-
-# Function to run database operations
+# Function to handle database operations
 database_operations() {
-    print_header "Database Operations"
+    local operation="$1"
 
-    case "${2:-status}" in
+    case "$operation" in
         "init"|"initialize")
             print_status "Initializing database..."
             if $DOCKER_CMD exec -i jobtrak-postgres psql -U jobtrak_user -d jobtrak < ./init-scripts/01-init-database.sql; then
@@ -439,70 +424,13 @@ database_operations() {
             print_status "Database Status:"
             $DOCKER_CMD exec jobtrak-postgres psql -U jobtrak_user -d jobtrak -c "
                 SELECT
-                    schemaname,
                     tablename,
-                    attname,
-                    n_distinct,
-                    n_tup_ins,
-                    n_tup_upd,
-                    n_tup_del
-                FROM pg_stat_user_tables
-                JOIN pg_stats ON pg_stat_user_tables.relname = pg_stats.tablename;
-            "
+                    pg_size_pretty(pg_total_relation_size(schemaname||'.'||tablename)) as size
+                FROM pg_tables
+                WHERE schemaname = 'public';
+            " 2>/dev/null || print_error "Could not connect to database"
             ;;
     esac
-}
-
-# Function to show usage
-show_usage() {
-    cat << 'EOF'
-🚀 JobTrak Unified Docker Management Script
-==========================================
-
-Usage: ./start.sh [COMMAND] [OPTIONS]
-
-Commands:
-  start          - Start all services (default)
-  stop           - Stop all services
-  restart        - Restart all services
-  status         - Show service status and health
-  logs           - Show recent logs from all services
-  update         - Pull latest images and restart services
-  cleanup        - Clean up old containers and networks
-
-Database Commands:
-  db init        - Initialize database schema
-  db reset       - Reset database (WARNING: deletes all data)
-  db backup      - Create database backup
-  db status      - Show database status
-
-Service-specific Commands:
-  logs [service] - Show logs for specific service (api, postgres, redis, etc.)
-  shell [service]- Open shell in service container
-
-Development Commands:
-  dev            - Start with development settings
-  tools          - Start with additional tools (pgAdmin)
-
-Options:
-  --profile [profile] - Start with specific profile (tools, dev)
-  --build            - Force rebuild of images
-  --no-cache         - Build without using cache
-
-Examples:
-  ./start.sh                    # Start all services
-  ./start.sh start --profile tools  # Start with pgAdmin
-  ./start.sh logs api           # Show API logs
-  ./start.sh db init            # Initialize database
-  ./start.sh status             # Show service status
-
-Access Points:
-  🌐 API: http://localhost:8000 or https://jobtrackai.duckdns.org
-  🚦 Traefik: http://localhost:8080
-  🗄️ pgAdmin: http://localhost:8082 (with --profile tools)
-  🖥️ Selenium VNC: http://localhost:7900
-
-EOF
 }
 
 # Function to handle service-specific operations
@@ -512,12 +440,7 @@ service_operations() {
 
     case "$operation" in
         "logs")
-            if [ -n "$service" ]; then
-                print_status "Showing logs for $service..."
-                $COMPOSE_CMD -f $COMPOSE_FILE logs --tail=50 -f "jobtrak-$service"
-            else
-                show_logs
-            fi
+            show_logs "$service"
             ;;
         "shell")
             if [ -z "$service" ]; then
@@ -553,109 +476,12 @@ service_operations() {
     esac
 }
 
-# Function to handle development mode
-dev_mode() {
-    print_header "Starting JobTrak in Development Mode"
-
-    # Set development environment variables
-    export API_DEBUG=1
-    export LOG_LEVEL=DEBUG
-
-    # Start services with development overrides
-    $COMPOSE_CMD -f $COMPOSE_FILE -f docker-compose.dev.yml up --build -d 2>/dev/null || {
-        print_warning "Development compose file not found, using standard configuration"
-        $COMPOSE_CMD -f $COMPOSE_FILE up --build -d
-    }
-
-    wait_for_services
-    print_success "Development environment ready"
-
-    # Show development-specific information
-    echo ""
-    print_status "Development Mode Active:"
-    print_status "- API Debug mode enabled"
-    print_status "- Hot reload enabled (if configured)"
-    print_status "- Extended logging enabled"
-}
-
-# Function to check system requirements
-check_requirements() {
-    print_header "Checking System Requirements"
-
-    local requirements_met=true
-
-    # Check available memory
-    local mem_gb=$(free -g | awk '/^Mem:/{print $2}')
-    if [ "$mem_gb" -lt 4 ]; then
-        print_warning "System has less than 4GB RAM ($mem_gb GB). Performance may be affected."
-    else
-        print_success "Memory: ${mem_gb}GB available"
-    fi
-
-    # Check available disk space
-    local disk_gb=$(df -BG . | awk 'NR==2{print $4}' | sed 's/G//')
-    if [ "$disk_gb" -lt 10 ]; then
-        print_warning "Less than 10GB disk space available ($disk_gb GB). Consider freeing up space."
-    else
-        print_success "Disk space: ${disk_gb}GB available"
-    fi
-
-    # Check if ports are available
-    local ports=(80 443 5432 6379 8000 8080 8082 4444)
-    for port in "${ports[@]}"; do
-        if netstat -tuln 2>/dev/null | grep -q ":$port "; then
-            print_warning "Port $port is already in use"
-            requirements_met=false
-        fi
-    done
-
-    if [ "$requirements_met" = true ]; then
-        print_success "All port checks passed"
-    fi
-
-    # Check Docker version
-    local docker_version=$($DOCKER_CMD --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
-    print_success "Docker version: $docker_version"
-
-    # Check Docker Compose version
-    local compose_version=$($COMPOSE_CMD version --short 2>/dev/null || echo "unknown")
-    print_success "Docker Compose version: $compose_version"
-
-    return 0
-}
-
-# Function to generate SSL certificates manually (fallback)
-generate_ssl_certs() {
-    print_header "Generating SSL Certificates"
-
-    if [ ! -d "letsencrypt/live/$DOMAIN" ]; then
-        print_status "Generating self-signed certificates for development..."
-
-        mkdir -p letsencrypt/live/$DOMAIN
-
-        # Generate self-signed certificate
-        openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
-            -keyout letsencrypt/live/$DOMAIN/privkey.pem \
-            -out letsencrypt/live/$DOMAIN/fullchain.pem \
-            -subj "/C=US/ST=State/L=City/O=Organization/CN=$DOMAIN" \
-            2>/dev/null || {
-            print_warning "OpenSSL not available, using HTTP only"
-            return 1
-        }
-
-        print_success "Self-signed certificates generated"
-        print_warning "These are self-signed certificates. Browsers will show security warnings."
-    else
-        print_success "SSL certificates already exist"
-    fi
-}
-
 # Function to test the API
 test_api() {
     print_header "Testing API Endpoints"
 
     local base_url="http://localhost:8000"
-    local endpoints=("/health" "/docs" "/api/v1/jobs" "/api/v1/status")
+    local endpoints=("/health" "/docs")
 
     for endpoint in "${endpoints[@]}"; do
         local url="$base_url$endpoint"
@@ -674,28 +500,49 @@ test_api() {
     fi
 }
 
-# Function to backup entire system
-backup_system() {
-    print_header "Creating System Backup"
+# Function to show usage
+show_usage() {
+    cat << 'EOF'
+🚀 JobTrak Unified Docker Management Script
+==========================================
 
-    local backup_dir="backup_$(date +%Y%m%d_%H%M%S)"
-    mkdir -p "$backup_dir"
+Usage: ./start.sh [COMMAND] [OPTIONS]
 
-    # Backup database
-    print_status "Backing up database..."
-    $DOCKER_CMD exec jobtrak-postgres pg_dump -U jobtrak_user jobtrak > "$backup_dir/database.sql"
+Commands:
+  start          - Start all services (default)
+  stop           - Stop all services
+  restart        - Restart all services
+  status         - Show service status and health
+  logs [service] - Show logs (optionally for specific service)
 
-    # Backup volumes
-    print_status "Backing up Redis data..."
-    $DOCKER_CMD run --rm -v jobtrak-redis-data:/data -v "$(pwd)/$backup_dir":/backup alpine tar czf /backup/redis-data.tar.gz -C /data .
+Database Commands:
+  db init        - Initialize database schema
+  db reset       - Reset database (WARNING: deletes all data)
+  db backup      - Create database backup
+  db status      - Show database status
 
-    # Backup configuration files
-    print_status "Backing up configuration..."
-    cp docker-compose.yml "$backup_dir/"
-    cp -r init-scripts "$backup_dir/" 2>/dev/null || true
-    cp .env "$backup_dir/" 2>/dev/null || true
+Service Commands:
+  shell [service]- Open shell in service container
+  test           - Test API endpoints
 
-    print_success "System backup created in: $backup_dir"
+Options:
+  --profile [profile] - Start with specific profile (tools)
+
+Examples:
+  ./start.sh                    # Start all services
+  ./start.sh start --profile tools  # Start with pgAdmin
+  ./start.sh logs api           # Show API logs
+  ./start.sh db init            # Initialize database
+  ./start.sh status             # Show service status
+  ./start.sh shell postgres     # Open PostgreSQL shell
+
+Access Points:
+  🌐 API: http://localhost:8000 or https://jobtrackai.duckdns.org
+  🚦 Traefik: http://localhost:8080
+  🗄️ pgAdmin: http://localhost:8082 (with --profile tools)
+  🖥️ Selenium VNC: http://localhost:7900
+
+EOF
 }
 
 # Main script logic
@@ -717,9 +564,11 @@ main() {
             if [ "$arg2" = "--profile" ] && [ -n "$arg3" ]; then
                 print_status "Starting with profile: $arg3"
                 $COMPOSE_CMD -f $COMPOSE_FILE --profile "$arg3" up --build -d
+                wait_for_services
             elif [[ "$*" == *"--profile tools"* ]]; then
                 print_status "Starting with tools profile (pgAdmin included)"
                 $COMPOSE_CMD -f $COMPOSE_FILE --profile tools up --build -d
+                wait_for_services
             else
                 start_services
             fi
@@ -754,50 +603,12 @@ main() {
             service_operations "shell" "$arg2"
             ;;
 
-        "update")
-            update_services
-            show_status
-            ;;
-
-        "cleanup")
-            cleanup
-            print_success "Cleanup completed"
-            ;;
-
-        "dev")
-            setup_environment
-            cleanup
-            dev_mode
-            show_status
-            ;;
-
-        "tools")
-            setup_environment
-            cleanup
-            print_status "Starting with tools profile..."
-            $COMPOSE_CMD -f $COMPOSE_FILE --profile tools up --build -d
-            wait_for_services
-            show_status
-            ;;
-
         "db")
-            database_operations "$command" "$arg2"
+            database_operations "$arg2"
             ;;
 
         "test")
             test_api
-            ;;
-
-        "backup")
-            backup_system
-            ;;
-
-        "requirements"|"req")
-            check_requirements
-            ;;
-
-        "ssl")
-            generate_ssl_certs
             ;;
 
         "help"|"-h"|"--help")
