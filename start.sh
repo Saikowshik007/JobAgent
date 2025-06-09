@@ -445,9 +445,65 @@ wait_for_services() {
     print_status "Waiting for Redis..."
     wait_for_service "redis" "redis-cli ping" 30
 
-    # Wait for API
+    # Wait for API - try multiple approaches
     print_status "Waiting for API..."
-    wait_for_url "http://localhost:8000/health" 60
+
+    # First try: Check if container is running and healthy
+    local api_ready=false
+    local counter=0
+    local max_attempts=60
+
+    while [ $counter -lt $max_attempts ] && [ "$api_ready" = false ]; do
+        # Check if container is running
+        if ! $DOCKER_CMD ps | grep -q "jobtrak-api"; then
+            print_error "API container is not running"
+            return 1
+        fi
+
+        # Try different health check methods
+        # Method 1: Check from inside the container
+        if $DOCKER_CMD exec jobtrak-api curl -f http://localhost:8000/health >/dev/null 2>&1; then
+            api_ready=true
+            break
+        fi
+
+        # Method 2: Check using container IP
+        local container_ip=$($DOCKER_CMD inspect jobtrak-api --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' 2>/dev/null || echo "")
+        if [ -n "$container_ip" ] && curl -f "http://$container_ip:8000/health" >/dev/null 2>&1; then
+            api_ready=true
+            break
+        fi
+
+        # Method 3: Check if port is accessible via host
+        if curl -f "http://127.0.0.1:8000/health" >/dev/null 2>&1; then
+            api_ready=true
+            break
+        fi
+
+        counter=$((counter + 1))
+
+        if [ $((counter % 10)) -eq 0 ]; then
+            print_status "Still waiting for API... (${counter}s/${max_attempts}s)"
+
+            # Show some debug info every 20 seconds
+            if [ $((counter % 20)) -eq 0 ]; then
+                print_debug "API container status: $($DOCKER_CMD ps --filter name=jobtrak-api --format '{{.Status}}')"
+                print_debug "Checking if API process is running..."
+                $DOCKER_CMD exec jobtrak-api ps aux | grep -E "(python|uvicorn)" || true
+            fi
+        fi
+
+        sleep 1
+    done
+
+    if [ "$api_ready" = true ]; then
+        print_success "API is ready"
+    else
+        print_error "API failed to start within $max_attempts seconds"
+        print_status "API container logs:"
+        $COMPOSE_CMD -f $COMPOSE_FILE logs --tail=30 jobtrak-api || true
+        return 1
+    fi
 
     print_success "All services are ready!"
 }
@@ -498,6 +554,21 @@ wait_for_url() {
     done
 
     print_error "URL $url not available within $timeout seconds"
+
+    # Show API logs for debugging
+    if [[ "$url" == *"8000"* ]]; then
+        print_status "API failed to start. Showing recent logs:"
+        $COMPOSE_CMD -f $COMPOSE_FILE logs --tail=30 jobtrak-api || true
+
+        # Check if container is running
+        print_status "Checking API container status:"
+        $DOCKER_CMD ps -a --filter name=jobtrak-api --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" || true
+
+        # Show container resource usage
+        print_status "Container resource usage:"
+        $DOCKER_CMD stats --no-stream jobtrak-api 2>/dev/null || print_warning "Could not get container stats"
+    fi
+
     return 1
 }
 
@@ -531,7 +602,14 @@ show_status() {
     # Check each service
     check_service_health "postgres" "pg_isready -U jobtrak_user -d jobtrak"
     check_service_health "redis" "redis-cli ping"
-    check_url_health "API" "http://localhost:8000/health"
+
+    # Check API with multiple methods
+    if check_api_health; then
+        print_success "API: Healthy"
+    else
+        print_error "API: Unhealthy"
+    fi
+
     check_url_health "Traefik Dashboard" "http://localhost:8080/api/rawdata"
 
     # Check monitoring services if enabled
@@ -567,6 +645,32 @@ show_status() {
     echo "   Database: jobtrak"
     echo "   User: jobtrak_user"
     echo "   Password: jobtrak_secure_password_2024"
+}
+
+# Function to check API health with multiple methods
+check_api_health() {
+    # Method 1: Check from inside container
+    if $DOCKER_CMD exec jobtrak-api curl -f http://localhost:8000/health >/dev/null 2>&1; then
+        return 0
+    fi
+
+    # Method 2: Check via host port mapping
+    if curl -f "http://127.0.0.1:8000/health" >/dev/null 2>&1; then
+        return 0
+    fi
+
+    # Method 3: Check via localhost
+    if curl -f "http://localhost:8000/health" >/dev/null 2>&1; then
+        return 0
+    fi
+
+    # Method 4: Check via container IP
+    local container_ip=$($DOCKER_CMD inspect jobtrak-api --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' 2>/dev/null || echo "")
+    if [ -n "$container_ip" ] && curl -f "http://$container_ip:8000/health" >/dev/null 2>&1; then
+        return 0
+    fi
+
+    return 1
 }
 
 # Function to check individual service health
@@ -699,15 +803,33 @@ service_operations() {
 test_api() {
     print_header "Testing API Endpoints"
 
-    local base_url="http://localhost:8000"
-    local endpoints=("/health" "/docs")
+    # Get container IP for direct testing
+    local container_ip=$($DOCKER_CMD inspect jobtrak-api --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' 2>/dev/null || echo "")
+
+    # Test endpoints using multiple methods
+    local endpoints=("/health" "/docs" "/")
 
     for endpoint in "${endpoints[@]}"; do
-        local url="$base_url$endpoint"
-        if curl -f -s "$url" >/dev/null; then
-            print_success "✓ $endpoint"
+        local success=false
+
+        # Method 1: Test via host port mapping (127.0.0.1)
+        if curl -f -s "http://127.0.0.1:8000$endpoint" >/dev/null 2>&1; then
+            print_success "✓ $endpoint (via host port)"
+            success=true
+        # Method 2: Test via localhost
+        elif curl -f -s "http://localhost:8000$endpoint" >/dev/null 2>&1; then
+            print_success "✓ $endpoint (via localhost)"
+            success=true
+        # Method 3: Test from inside container
+        elif $DOCKER_CMD exec jobtrak-api curl -f -s "http://localhost:8000$endpoint" >/dev/null 2>&1; then
+            print_success "✓ $endpoint (via container internal)"
+            success=true
+        # Method 4: Test via container IP
+        elif [ -n "$container_ip" ] && curl -f -s "http://$container_ip:8000$endpoint" >/dev/null 2>&1; then
+            print_success "✓ $endpoint (via container IP: $container_ip)"
+            success=true
         else
-            print_error "✗ $endpoint"
+            print_error "✗ $endpoint (all methods failed)"
         fi
     done
 
@@ -717,6 +839,16 @@ test_api() {
     else
         print_warning "✗ Domain access not available: https://$DOMAIN"
     fi
+
+    # Show access information
+    echo ""
+    print_status "API Access Methods:"
+    echo "   🔗 Host port mapping: http://127.0.0.1:8000"
+    echo "   🔗 Localhost: http://localhost:8000"
+    if [ -n "$container_ip" ]; then
+        echo "   🔗 Container IP: http://$container_ip:8000"
+    fi
+    echo "   🔗 Domain: https://$DOMAIN"
 }
 
 # Function to show usage
@@ -733,6 +865,7 @@ Commands:
   restart           - Restart all services
   status            - Show service status and health
   logs [service]    - Show logs (optionally for specific service)
+  debug             - Show detailed debugging information
 
 Database Commands:
   db init           - Initialize database schema
@@ -842,6 +975,35 @@ main() {
 
         "test")
             test_api
+            ;;
+
+        "debug")
+            print_header "Debug Information"
+
+            # Show all container status
+            print_status "All containers:"
+            $DOCKER_CMD ps -a --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}\t{{.Image}}"
+
+            echo ""
+            print_status "API Container Details:"
+            $DOCKER_CMD inspect jobtrak-api --format '{{.State.Status}}: {{.State.Error}}' 2>/dev/null || print_error "API container not found"
+
+            echo ""
+            print_status "Recent API logs:"
+            $COMPOSE_CMD -f $COMPOSE_FILE logs --tail=50 jobtrak-api || true
+
+            echo ""
+            print_status "API container environment:"
+            $DOCKER_CMD exec jobtrak-api env | grep -E "(PYTHONPATH|DATABASE_URL|REDIS_URL)" 2>/dev/null || print_warning "Could not access container environment"
+
+            echo ""
+            print_status "Network connectivity from API container:"
+            $DOCKER_CMD exec jobtrak-api ping -c 2 postgres 2>/dev/null || print_warning "Cannot ping postgres from API"
+            $DOCKER_CMD exec jobtrak-api ping -c 2 redis 2>/dev/null || print_warning "Cannot ping redis from API"
+
+            echo ""
+            print_status "Port availability:"
+            netstat -tuln | grep -E ":(8000|5432|6379)" || print_warning "Could not check port status"
             ;;
 
         "tools")
