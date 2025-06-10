@@ -379,3 +379,76 @@ async def get_job_resumes(
     except Exception as e:
         logger.error(f"Error getting resumes for job {job_id} for user {user_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+@router.post("/analyze-description")
+async def analyze_job_description(
+        job_description: str = Form(...),
+        status: Optional[str] = Form(None),
+        cache_manager: DBCacheManager = Depends(get_cache_manager),
+        user_id: str = Depends(get_user_id),
+        api_key: str = Depends(get_user_key)
+):
+    """Analyze a job posting from a description text."""
+    try:
+        if not job_description.strip():
+            raise HTTPException(status_code=400, detail="Job description cannot be empty")
+
+        if len(job_description.strip()) < 50:
+            raise HTTPException(status_code=400, detail="Job description is too short. Please provide a complete job description.")
+
+        # Create a unique identifier for this description
+        description_hash = hashlib.md5(job_description.encode()).hexdigest()
+        pseudo_url = f"description://{description_hash}"
+
+        # Check if this exact description already exists
+        job_exist = await cache_manager.job_exists(url=pseudo_url, user_id=user_id)
+        if job_exist:
+            raise HTTPException(status_code=409, detail="Job with this description already exists!")
+
+        # Parse the job description using your existing JobPost class
+        from dataModels.job_post import JobPost
+        job_post = JobPost(job_description, api_key)
+        job_details = job_post.parse_job_post(verbose=True)
+
+        # Create a job ID
+        job_id = hashlib.md5(f"{user_id}|{pseudo_url}|{datetime.now().isoformat()}".encode()).hexdigest()
+
+        # Handle status if provided
+        job_status = JobStatus.NEW
+        if status:
+            try:
+                job_status = JobStatus(status)
+            except ValueError:
+                logger.warning(f"Invalid status '{status}' provided, using default NEW")
+
+        # Create job object with description metadata
+        job = Job(
+            id=job_id,
+            job_url=pseudo_url,  # Use pseudo URL for tracking
+            status=job_status,
+            date_found=datetime.now(),
+            metadata={
+                **job_details,
+                "input_method": "description",
+                "original_description": job_description[:1000],  # Store first 1000 chars
+                "description_length": len(job_description),
+                "description_hash": description_hash
+            }
+        )
+
+        # Save job using the unified cache manager
+        await cache_manager.save_job(job, user_id)
+
+        return {
+            "message": "Job description analyzed successfully",
+            "job_id": job_id,
+            "job_url": pseudo_url,
+            "user_id": user_id,
+            "input_method": "description",
+            "job_details": job.to_dict()
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error analyzing job description for user {user_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

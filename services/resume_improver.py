@@ -2,6 +2,7 @@ import yaml
 import requests
 from bs4 import BeautifulSoup
 from fp.fp import FreeProxy
+from requests import RequestException
 from yaml import YAMLError
 from services.langchain_helpers import *
 from dataModels.job_post import JobPost
@@ -393,11 +394,13 @@ class ResumeImprover:
                     self.url, headers=config.get_enhanced_headers(self.url), proxies=proxies
                 )
                 response.raise_for_status()
+                if response and response.status_code!= 200:
+                    raise RequestException
                 self.job_post_html_data = response.text
                 return True
 
             except requests.RequestException as e:
-                if response and response.status_code == 429:
+                if response and (response.status_code == 429 or response.status_code == 999):
                     logger.warning(
                         f"Rate limit exceeded. Retrying in {backoff_factor * 2 ** attempt} seconds..."
                     )
