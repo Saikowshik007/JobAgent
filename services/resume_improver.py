@@ -350,7 +350,7 @@ class ResumeImprover:
         self._download_url()
         self._extract_html_data()
         self.job_post = JobPost(self.job_post_raw, self.api_key)
-        self.parsed_job = self.job_post.parse_job_post(verbose=False)
+        self.parsed_job = self.job_post.parse_job_post(verbose=True)
 
     def _extract_html_data(self):
         """Extract text content from HTML, removing all HTML tags.
@@ -362,7 +362,7 @@ class ResumeImprover:
             soup = BeautifulSoup(self.job_post_html_data, "html.parser")
             self.job_post_raw = soup.get_text(separator=" ", strip=True)
         except Exception as e:
-            config.logger.error(f"Failed to extract HTML data: {e}")
+            logger.error(f"Failed to extract HTML data: {e}")
             raise
 
     def _download_url(self, url=None):
@@ -377,11 +377,12 @@ class ResumeImprover:
         if url:
             self.url = url
 
-        max_retries = config.get("settings.max_retries")
-        backoff_factor = config.get("settings.backoff_factor")
+        max_retries = config.get("settings.max_retries", 3)
+        backoff_factor = config.get("settings.backoff_factor", 2)
         use_proxy = False
 
         for attempt in range(max_retries):
+            response = None
             try:
                 proxies = None
                 if use_proxy:
@@ -396,17 +397,18 @@ class ResumeImprover:
                 return True
 
             except requests.RequestException as e:
-                if response.status_code == 429:
-                    config.logger.warning(
+                if response and response.status_code == 429:
+                    logger.warning(
                         f"Rate limit exceeded. Retrying in {backoff_factor * 2 ** attempt} seconds..."
                     )
-                    time.sleep(backoff_factor * 2 ** attempt)
+                    time.sleep(backoff_factor * 2**attempt)
                     use_proxy = True
                 else:
-                    config.logger.error(f"Failed to download URL {self.url}: {e}")
-                    return False
+                    logger.error(f"Failed to download URL {self.url}: {e}")
+                    if attempt < max_retries - 1:
+                        time.sleep(backoff_factor * 2**attempt)
 
-        config.logger.error(f"Exceeded maximum retries for URL {self.url}")
+        logger.error(f"Exceeded maximum retries for URL {self.url}")
         return False
 
     def write_objective(self, **chain_kwargs) -> str:
