@@ -595,9 +595,11 @@ class RedisCache:
     def _generate_job_signature(self, job: Job, user_id: str) -> str:
         """Generate job signature for similarity matching."""
         metadata = job.metadata or {}
-        title = metadata.get('title', '').lower().strip()
-        company = metadata.get('company', '').lower().strip()
-        location = metadata.get('location', '').lower().strip()
+
+        # Safely handle None values by using or '' after get()
+        title = (metadata.get('title') or '').lower().strip()
+        company = (metadata.get('company') or '').lower().strip()
+        location = (metadata.get('location') or '').lower().strip()
 
         signature = f"{user_id}|{title}|{company}|{location}"
         return hashlib.md5(signature.encode('utf-8')).hexdigest()
