@@ -37,8 +37,17 @@ SECTION_HIGHLIGHTER:
     - Incorporate relevant ATS keywords naturally within technical context
     - Use action verbs that show technical ownership (architected, implemented, optimized, configured, etc.)
     - Maintain professional grammar and technical accuracy
-    - Each highlight should be 1-2 sentences with dense technical information
+    - Each highlight should be 20-25 words maximum with ONE primary technical achievement
+    - Focus on single, clear technical accomplishment per bullet point
     - Avoid generic claims like "improved efficiency by X%" without specific context
+    
+    READABILITY REQUIREMENTS:
+    - Maximum 25 words per bullet point
+    - One primary technical achievement per bullet
+    - 1-2 key technologies mentioned (not 5-6)
+    - Avoid run-on sentences and complex technical jargon chains
+    - Ensure bullets are scannable within 3-5 seconds
+    - Split complex achievements into multiple focused bullets if needed
     
     CREDIBILITY FILTERS:
     - Could another senior engineer understand and potentially replicate the work described?
@@ -57,11 +66,11 @@ SECTION_HIGHLIGHTER:
       * Result: What concrete, measurable outcomes were achieved with specific metrics and measurement tools?
       * Technology: What specific tech stack, tools, and monitoring systems were employed?
     - <Enhance Each Highlight> by adding:
-      * Specific technical implementation details
-      * Concrete baseline and target metrics
+      * ONE specific technical implementation detail per bullet
+      * Concrete baseline and target metrics (when space allows)
       * Scale and scope context
-      * Tools used for measurement and monitoring
-      * Technical methodologies and architectural decisions
+      * 1-2 key tools or technologies (avoid technology lists)
+      * Focus on single, clear technical achievement
     - <Verify Technical Credibility> by ensuring each highlight:
       * Includes specific tools, frameworks, or technologies
       * Shows measurable impact with concrete numbers
@@ -75,24 +84,46 @@ SECTION_HIGHLIGHTER:
     <Technical Depth Examples>
     
     WEAK: "Optimized database performance achieving 50% improvement"
-    STRONG: "Redesigned PostgreSQL query execution by implementing composite B-tree indexes on user_id and timestamp columns, reducing average query response time from 1.2s to 600ms as measured by pg_stat_statements and confirmed through New Relic APM monitoring"
+    STRONG: "Optimized PostgreSQL queries using B-tree indexing, reducing response time from 1.2s to 600ms"
     
     WEAK: "Built scalable REST APIs using Spring Boot"
-    STRONG: "Architected microservices REST API using Spring Boot with Netflix Hystrix circuit breakers and Redis caching layer, handling 45,000 concurrent requests with 99.7% success rate and sub-200ms P95 latency measured via Micrometer metrics"
+    STRONG: "Built Spring Boot REST APIs handling 45K concurrent requests with 99.7% success rate"
     
     WEAK: "Implemented real-time notification system reducing latency by 30%"
-    STRONG: "Designed event-driven notification pipeline using Apache Kafka with 3-partition topics and AWS Lambda consumers, processing 1.2M daily events with average end-to-end latency of 150ms (down from 220ms baseline) measured via CloudWatch metrics"
+    STRONG: "Implemented Apache Kafka event pipeline processing 1.2M daily events with 150ms latency"
     
     WEAK: "Enhanced system scalability by 80%"
-    STRONG: "Refactored monolithic application into containerized microservices using Docker and Kubernetes, increasing concurrent user capacity from 5,000 to 25,000 users while maintaining sub-300ms API response times via horizontal pod autoscaling"
+    STRONG: "Containerized microservices with Kubernetes, scaling from 5K to 25K concurrent users"
+    
+    TOO WORDY: "Architected and implemented scalable RESTful APIs using Go and PostgreSQL, optimizing database schemas with pgAdmin profiling and advanced query tuning to achieve 99.99% uptime and reduce request latencies to under 100ms on workloads exceeding 50K daily transactions"
+    BETTER: "Built Go REST APIs handling 50K+ daily transactions with 99.99% uptime and sub-100ms response times"
+    FOLLOW-UP: "Optimized PostgreSQL schemas using pgAdmin profiling, reducing query execution time by 60%"
 
-  measurement_requirements: |
-    <Measurement Requirements>
-    - Always specify what tool was used to measure performance (pgAdmin, New Relic, CloudWatch, etc.)
-    - Include both baseline and target metrics with units (seconds, milliseconds, requests/second, etc.)
-    - Mention the scope of measurement (peak load, average case, 95th percentile, etc.)
-    - Specify the time period over which improvements were measured
-    - Include relevant technical context (concurrent users, data volume, transaction types, etc.)
+  bullet_structure_guide: |
+    <Optimal Bullet Structure>
+    
+    FORMAT: [Action Verb] + [1-2 Technologies] + [Specific Outcome] + [Scale/Metric]
+    
+    EXAMPLES:
+    ✅ "Optimized PostgreSQL queries using indexing, reducing response time from 450ms to 180ms for 1K+ users"
+    ✅ "Implemented Apache Kafka streaming, processing 1M+ daily events with 150ms average latency"  
+    ✅ "Built Docker CI/CD pipeline with Jenkins, reducing deployment time from 45min to 27min"
+    
+    WORD COUNT TARGETS:
+    - 15-20 words: Ideal for impact and readability
+    - 21-25 words: Maximum acceptable length
+    - 25+ words: Too long, needs splitting
+    
+    SPLITTING COMPLEX ACHIEVEMENTS:
+    Instead of one 40-word bullet, create two focused bullets:
+    1. Primary achievement with key metric
+    2. Technical implementation detail
+    
+    AVOID:
+    ❌ Technology lists: "using Spring Boot, Redis, Kafka, Docker, Kubernetes..."
+    ❌ Multiple metrics: "reduced latency by 30% and increased throughput by 60% while improving..."
+    ❌ Run-on sentences with multiple clauses
+    ❌ Excessive technical jargon in single bullet
 
 
 SKILLS_MATCHER:
