@@ -391,7 +391,7 @@ class ResumeImprover:
                     proxies = {"http": proxy, "https": proxy}
 
                 response = requests.get(
-                    self.url, headers=config.get_enhanced_headers(self.url), proxies=proxies
+                    self.url, headers=config.get_enhanced_headers(), proxies=proxies
                 )
                 response.raise_for_status()
                 if response and response.status_code!= 200:
