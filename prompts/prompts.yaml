@@ -59,13 +59,12 @@ SKILLS_MATCHER:
 
   instruction_message: |
     <Instruction>
-    Extract and organize technical and non-technical skills from the <Resume> that are present in the candidate's experience. If the resume already has existing skills listed, intelligently combine them with newly identified skills to create a comprehensive, deduplicated skill set. Format the output with technical skills grouped into logical subcategories and non-technical skills as a simple list.
+    Extract and organize technical and non-technical skills from the <Resume> that are present in the candidate's experience.Deduplicated skill set. Format the output with technical skills grouped into logical subcategories and non-technical skills as a simple list.
 
   criteria_message: |
     <Criteria>
     - Each identified skill must be explicitly or implicitly mentioned in the <Resume> 
     - **NO DUPLICATES**: Each skill should appear exactly once in the final output
-    - **INTELLIGENT MERGING**: If existing skills are provided, combine them intelligently with newly identified skills without discarding any skills. 
     - **CONSOLIDATE VARIATIONS**: Treat similar skills as one (e.g., "React.js" and "React" → "React")
     - Technical skills must be grouped into 3–4 logical subcategories based on functional similarity and role relevance.
     - Technical skills output format: {"Category1": ["skill1", "skill2", "skill3",.,.,.,.,..], "Category2": ["skill4", "skill5", "skill6",.,.,.,.,]}
@@ -81,7 +80,7 @@ SKILLS_MATCHER:
     <Steps>
     - Review the <Resume> to identify all technical and non-technical skills present in experiences, projects, and existing skills section
     - Reference the <Job Posting> to understand context and identify relevant ATS keywords
-    - Create a <Plan> for systematically extracting, combining, and organizing skills from all sources
+    - Create a <Plan> for systematically extracting, and organizing skills from all sources
     - **DEDUPLICATION STEP**: Identify any duplicate or similar skills across all sources (existing skills + newly identified skills)
     - **CONSOLIDATION STEP**: Merge similar skills (e.g., "React.js", "ReactJS", "React" all become "React")
     - Extract all unique technical skills and group them into 3-4 logical, professional subcategories
