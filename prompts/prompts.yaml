@@ -44,10 +44,13 @@ SECTION_HIGHLIGHTER:
     READABILITY REQUIREMENTS:
     - Maximum 25 words per bullet point
     - One primary technical achievement per bullet
-    - 1-2 key technologies mentioned (not 5-6)
+    - 1-2 key technologies mentioned (not 3-4)
     - Avoid run-on sentences and complex technical jargon chains
     - Ensure bullets are scannable within 3-5 seconds
     - Split complex achievements into multiple focused bullets if needed
+    - Use consistent metric formatting: "from X to Y" or "by X%" (never mix formats)
+    - Always include "by" before percentages ("increasing throughput by 60%")
+    - Prefer concrete baselines over standalone percentages when possible
     
     CREDIBILITY FILTERS:
     - Could another senior engineer understand and potentially replicate the work described?
@@ -77,7 +80,12 @@ SECTION_HIGHLIGHTER:
       * Demonstrates technical depth beyond surface-level task completion
       * Could be understood and evaluated by a technical interviewer
     - <ATS Optimization> by naturally incorporating relevant keywords within technical context
-    - <Final Review> to ensure all highlights meet technical credibility standards
+    - <Final Review> to ensure all highlights meet technical credibility standards and formatting consistency:
+      * Check metric formatting consistency ("from X to Y" vs "by X%")
+      * Ensure "by" precedes all percentages
+      * Verify no vague efficiency claims without context
+      * Confirm technology count per bullet (max 2)
+      * Validate grammar and professional tone
     - Provide the final optimized highlights with prefix <Final Answer>
 
   technical_depth_examples: |
@@ -107,7 +115,13 @@ SECTION_HIGHLIGHTER:
     EXAMPLES:
     ✅ "Optimized PostgreSQL queries using indexing, reducing response time from 450ms to 180ms for 1K+ users"
     ✅ "Implemented Apache Kafka streaming, processing 1M+ daily events with 150ms average latency"  
-    ✅ "Built Docker CI/CD pipeline with Jenkins, reducing deployment time from 45min to 27min"
+    ✅ "Built Docker CI/CD pipeline with Jenkins, reducing deployment time by 40% from 45min baseline"
+    
+    AVOID THESE PATTERNS:
+    ❌ "Built APIs with Spring Boot, Kafka, Docker, Kubernetes..." (too many technologies)
+    ❌ "increasing throughput 60%" (missing "by")
+    ❌ "improved efficiency by 50%" (vague without context)
+    ❌ "cutting latency 30%" (inconsistent format - use "by 30%" or "from X to Y")
     
     WORD COUNT TARGETS:
     - 15-20 words: Ideal for impact and readability
