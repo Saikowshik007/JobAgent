@@ -123,14 +123,14 @@ SKILLS_MATCHER:
     - Each identified skill must be explicitly or implicitly mentioned in the <Resume> 
     - **NO DUPLICATES**: Each skill should appear exactly once in the final output
     - **CONSOLIDATE VARIATIONS**: Treat similar skills as one (e.g., "React.js" and "React" → "React")
-    - Technical skills must be grouped into 3–4 logical subcategories based on functional similarity and role relevance.
+    - Technical skills must be grouped into 3–4 logical subcategories and sorted based on functional similarity and role relevance.
     - Technical skills output format: {"Category1": ["skill1", "skill2", "skill3",.,.,.,.,..], "Category2": ["skill4", "skill5", "skill6",.,.,.,.,]}
     - Non-technical skills must be provided as a simple flat list (NOT categorized into subcategories)
     - Non-technical skills output format: ["skill1", "skill2", "skill3", "skill4".,.,.,.,.,.,.,.]
     - Each skill must be presented in proper case format (e.g., "JavaScript", not "javascript")
     - Focus on presenting the candidate's actual skills objectively without justifying their relevance to a specific job
     - If no technical skills are found, return the skills from the resume as sub categorized dictionary.
-    - Total number of skills sub categories should not be more than 4. If more than 4 sub categories are found, reorganize them internally.
+    - Total number of skills sub categories should not be more than 4 and total number of technical skills combined should not be more than 25. If more than 4 sub categories are found, reorganize them internally.
     - If no non-technical skills are found, return an empty list: []
 
   steps_message: |
