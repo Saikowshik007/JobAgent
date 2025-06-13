@@ -24,7 +24,7 @@ SECTION_HIGHLIGHTER:
     <Criteria> 
     TECHNICAL CREDIBILITY REQUIREMENTS:
     - Each highlight must include specific technical implementation details (tools, methodologies, architectures used)
-    - Must specify concrete baseline and target metrics with measurement methods (e.g., "reduced query time from 2.3s to 800ms using pgAdmin profiling")
+    - Must specify concrete baseline and target metrics with measurement methods
     - Include scale and scope details (data volume, user count, transaction throughput, etc.)
     - Mention specific technologies, frameworks, and tools used for implementation and monitoring
     - Replace vague percentages with concrete numbers and units when possible
@@ -88,56 +88,14 @@ SECTION_HIGHLIGHTER:
       * Validate grammar and professional tone
     - Provide the final optimized highlights with prefix <Final Answer>
 
-  technical_depth_examples: |
-    <Technical Depth Examples>
-    
-    WEAK: "Optimized database performance achieving 50% improvement"
-    STRONG: "Optimized PostgreSQL queries using B-tree indexing, reducing response time from 1.2s to 600ms"
-    
-    WEAK: "Built scalable REST APIs using Spring Boot"
-    STRONG: "Built Spring Boot REST APIs handling 45K concurrent requests with 99.7% success rate"
-    
-    WEAK: "Implemented real-time notification system reducing latency by 30%"
-    STRONG: "Implemented Apache Kafka event pipeline processing 1.2M daily events with 150ms latency"
-    
-    WEAK: "Enhanced system scalability by 80%"
-    STRONG: "Containerized microservices with Kubernetes, scaling from 5K to 25K concurrent users"
-    
-    TOO WORDY: "Architected and implemented scalable RESTful APIs using Go and PostgreSQL, optimizing database schemas with pgAdmin profiling and advanced query tuning to achieve 99.99% uptime and reduce request latencies to under 100ms on workloads exceeding 50K daily transactions"
-    BETTER: "Built Go REST APIs handling 50K+ daily transactions with 99.99% uptime and sub-100ms response times"
-    FOLLOW-UP: "Optimized PostgreSQL schemas using pgAdmin profiling, reducing query execution time by 60%"
 
   bullet_structure_guide: |
     <Optimal Bullet Structure>
-    
     FORMAT: [Action Verb] + [1-2 Technologies] + [Specific Outcome] + [Scale/Metric]
-    
-    EXAMPLES:
-    ✅ "Optimized PostgreSQL queries using indexing, reducing response time from 450ms to 180ms for 1K+ users"
-    ✅ "Implemented Apache Kafka streaming, processing 1M+ daily events with 150ms average latency"  
-    ✅ "Built Docker CI/CD pipeline with Jenkins, reducing deployment time by 40% from 45min baseline"
-    
-    AVOID THESE PATTERNS:
-    ❌ "Built APIs with Spring Boot, Kafka, Docker, Kubernetes..." (too many technologies)
-    ❌ "increasing throughput 60%" (missing "by")
-    ❌ "improved efficiency by 50%" (vague without context)
-    ❌ "cutting latency 30%" (inconsistent format - use "by 30%" or "from X to Y")
-    
     WORD COUNT TARGETS:
     - 15-20 words: Ideal for impact and readability
     - 21-25 words: Maximum acceptable length
-    - 25+ words: Too long, needs splitting
     
-    SPLITTING COMPLEX ACHIEVEMENTS:
-    Instead of one 40-word bullet, create two focused bullets:
-    1. Primary achievement with key metric
-    2. Technical implementation detail
-    
-    AVOID:
-    ❌ Technology lists: "using Spring Boot, Redis, Kafka, Docker, Kubernetes..."
-    ❌ Multiple metrics: "reduced latency by 30% and increased throughput by 60% while improving..."
-    ❌ Run-on sentences with multiple clauses
-    ❌ Excessive technical jargon in single bullet
 
 
 SKILLS_MATCHER:
