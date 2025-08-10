@@ -58,11 +58,11 @@ class JobPost:
         """Initialize JobPost with the job posting string."""
         self.posting = posting
         self.extractor_llm = services.langchain_helpers.create_llm(
+            user= user,
             chat_model=ChatOpenAI,
             model_name=user.model,
             temperature=user.preferences.get("temperature"),
-            cache=True,
-            api_key=user.api_key
+            cache=True
         )
         self.parsed_job = None
 
