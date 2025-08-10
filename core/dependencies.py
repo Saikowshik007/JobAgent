@@ -1,7 +1,9 @@
 """
 Dependency injection functions for FastAPI endpoints.
 """
-from fastapi import HTTPException, Header, Request
+import json
+
+from fastapi import HTTPException, Header, Request, Form
 from typing import Optional
 import logging
 
@@ -98,3 +100,16 @@ async def get_user(
     logger.debug(f"User authenticated: {user.id} using model: {user.model}")
 
     return user
+
+async def get_user_from_form(user: str = Form(...)):
+    """
+    Extracts the 'user' field from multipart/form-data and parses it into a User object.
+    The 'user' field must be a JSON-encoded string.
+    """
+    try:
+        user_data = json.loads(user)
+        return User(**user_data)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid JSON in 'user' form field")
+    except TypeError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid user data: {e}")
