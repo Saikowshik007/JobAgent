@@ -7,10 +7,11 @@ from datetime import datetime
 import hashlib
 import logging
 
-from core.dependencies import get_cache_manager, get_user_id, get_user_key
+from core.dependencies import get_cache_manager, get_user_id, get_user_key, get_user
 from data.dbcache_manager import DBCacheManager
 from dataModels.api_models import JobStatusUpdateRequest
 from dataModels.data_models import JobStatus, Job
+from dataModels.user_model import User
 from services.resume_improver import ResumeImprover
 
 logger = logging.getLogger(__name__)
