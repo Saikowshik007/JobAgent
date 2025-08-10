@@ -278,3 +278,38 @@ IMPROVER:
     - Flag and suggest removal of any content that explicitly justifies how experience aligns with job requirements
     - Identify redundant or duplicate skills and experiences with consolidation recommendations
     - **CROSS-SECTION ANALYSIS**: Evaluate consistency between objective, skills, and experience sections
+    - **NARRATIVE FLOW ASSESSMENT**: Check if the resume tells a coherent career story from objective through experiences
+    - **ATS OPTIMIZATION GAPS**: Identify keyword gaps that hurt ATS scoring without compromising credibility
+    - **KEYWORD DISTRIBUTION ANALYSIS**: Assess if keywords are optimally distributed across sections
+    - Highlight areas where quantifiable achievements or metrics could be added
+    - Suggest structural improvements for better visual organization and readability
+    - **TECHNICAL CREDIBILITY VERIFICATION**: Ensure technical claims are specific and verifiable
+    - For each suggestion, specify the resume section, the issue, and a clear improvement strategy
+    - Include a dedicated section addressing spelling and grammar issues
+    - **HOLISTIC CONSISTENCY CHECK**: Ensure all sections work together to support a unified professional narrative
+    - Ensure recommendations maintain focus on accomplishments and skills without explicit job alignment justifications
+    - **ATS SCORING IMPACT**: Prioritize improvements that will have the highest impact on ATS compatibility
+
+  steps_message: |
+    <Steps>
+    - Create a <Plan> for systematically evaluating and improving the resume holistically
+    - Determine what <Additional Steps> are needed to execute this <Plan> effectively
+    - Follow all steps systematically and document your <Work> process
+    - **HOLISTIC ANALYSIS**: Review the complete resume as a unified document, assessing narrative flow from objective through all sections
+    - **CROSS-SECTION CONSISTENCY CHECK**: Verify that technical skills mentioned in skills section are demonstrated in experiences
+    - **KEYWORD MAPPING**: Map job posting keywords to resume sections and identify gaps
+    - **ATS OPTIMIZATION ANALYSIS**: Calculate keyword coverage and identify priority areas for improvement
+    - Check for spelling and grammar errors throughout the entire resume
+    - Identify critical ATS keywords from the job posting missing from the resume
+    - **NARRATIVE COHERENCE ASSESSMENT**: Ensure objective sets up a story that experiences and projects deliver on
+    - Identify and flag any statements that explicitly justify how experience aligns with job requirements
+    - **REDUNDANCY ELIMINATION**: Check for redundant or duplicate content across all sections
+    - **TECHNICAL DEPTH VERIFICATION**: Assess whether technical claims include sufficient implementation details
+    - **QUANTIFICATION OPPORTUNITIES**: Identify where metrics and quantifiable achievements could be added
+    - **KEYWORD DENSITY OPTIMIZATION**: Ensure optimal keyword distribution without over-saturation
+    - Assess each section for opportunities to add quantifiable achievements
+    - **STRUCTURAL AND READABILITY ANALYSIS**: Evaluate visual organization and scanning efficiency
+    - **ATS COMPATIBILITY SCORING**: Provide overall assessment of ATS optimization level
+    - Confirm all <Criteria> are met and make necessary adjustments
+    - **IMPACT PRIORITIZATION**: Rank improvement suggestions by potential impact on interview securing
+    - Provide the answer to the <Instruction> with prefix <Final Answer>
