@@ -5,7 +5,7 @@ param(
     [Parameter(Position=0)]
     [ValidateSet("deploy", "status", "rollback", "logs")]
     [string]$Action = "deploy",
-    
+
     [Parameter(Position=1)]
     [string]$ServiceName = ""
 )
@@ -16,7 +16,7 @@ function Write-ColorOutput {
         [string]$Message,
         [string]$Type = "Info"
     )
-    
+
     switch ($Type) {
         "Info" { Write-Host "[INFO] $Message" -ForegroundColor Green }
         "Warning" { Write-Host "[WARNING] $Message" -ForegroundColor Yellow }
@@ -28,7 +28,7 @@ function Write-ColorOutput {
 # Check if Docker is running
 function Test-Docker {
     Write-ColorOutput "Checking if Docker is running..." "Info"
-    
+
     try {
         $dockerInfo = docker info 2>$null
         if ($LASTEXITCODE -eq 0) {
@@ -40,7 +40,7 @@ function Test-Docker {
         Write-ColorOutput "Docker is not running. Please start Docker Desktop first." "Error"
         return $false
     }
-    
+
     Write-ColorOutput "Docker is not running. Please start Docker Desktop first." "Error"
     return $false
 }
@@ -48,19 +48,19 @@ function Test-Docker {
 # Backup current setup
 function Backup-CurrentSetup {
     Write-ColorOutput "Creating backup of current setup..." "Info"
-    
+
     $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
     $backupDir = ".\backup_$timestamp"
-    
+
     # Create backup directory
     New-Item -ItemType Directory -Path $backupDir -Force | Out-Null
-    
+
     # Backup current docker-compose file
     if (Test-Path "docker-compose.yml") {
         Copy-Item "docker-compose.yml" "$backupDir\" -Force
         Write-ColorOutput "Backed up docker-compose.yml" "Info"
     }
-    
+
     # Backup database if running
     $postgresContainer = docker ps --format "{{.Names}}" | Where-Object { $_ -match "postgres" }
     if ($postgresContainer) {
@@ -73,27 +73,25 @@ function Backup-CurrentSetup {
             Write-ColorOutput "Database backup failed" "Warning"
         }
     }
-    
+
     # Save backup directory reference
     $backupDir | Out-File -FilePath ".last_backup" -Encoding UTF8
     Write-ColorOutput "Backup completed in $backupDir" "Success"
-    
-    return $backupDir
 }
 
 # Deploy the scaled setup
 function Deploy-ScaledSetup {
     Write-ColorOutput "Stopping current services..." "Info"
     docker-compose down --timeout 30 2>$null
-    
+
     Write-ColorOutput "Starting scaled services..." "Info"
-    
+
     # Start database and Redis first
     docker-compose up -d postgres redis selenium-chrome
-    
+
     Write-ColorOutput "Waiting for database to be ready..." "Info"
     Start-Sleep -Seconds 15
-    
+
     # Wait for PostgreSQL to be ready
     $maxAttempts = 12
     for ($i = 1; $i -le $maxAttempts; $i++) {
@@ -107,20 +105,20 @@ function Deploy-ScaledSetup {
         catch {
             # Continue waiting
         }
-        
+
         if ($i -eq $maxAttempts) {
             Write-ColorOutput "PostgreSQL failed to start after 2 minutes" "Error"
             exit 1
         }
-        
+
         Write-ColorOutput "Waiting for PostgreSQL... (attempt $i/$maxAttempts)" "Info"
         Start-Sleep -Seconds 10
     }
-    
+
     # Start all API instances and Traefik
     Write-ColorOutput "Starting API instances and load balancer..." "Info"
     docker-compose up -d
-    
+
     Write-ColorOutput "Waiting for services to be ready..." "Info"
     Start-Sleep -Seconds 20
 }
@@ -128,12 +126,12 @@ function Deploy-ScaledSetup {
 # Verify the deployment
 function Test-Deployment {
     Write-ColorOutput "Verifying deployment..." "Info"
-    
+
     # Check if all containers are running
     $services = @("jobtrak-api-1", "jobtrak-api-2", "jobtrak-api-3", "jobtrak-postgres", "jobtrak-redis", "jobtrak-traefik")
-    
+
     $runningContainers = docker ps --format "{{.Names}}"
-    
+
     foreach ($service in $services) {
         if ($runningContainers -contains $service) {
             Write-ColorOutput "$service is running ✓" "Success"
@@ -142,11 +140,11 @@ function Test-Deployment {
             Write-ColorOutput "$service is not running ✗" "Error"
         }
     }
-    
+
     # Test load balancer
     Write-ColorOutput "Testing load balancer..." "Info"
     Start-Sleep -Seconds 10
-    
+
     # Check if Traefik dashboard is accessible
     try {
         $response = Invoke-WebRequest -Uri "http://localhost:8080" -TimeoutSec 5 -UseBasicParsing
@@ -157,7 +155,7 @@ function Test-Deployment {
     catch {
         Write-ColorOutput "Traefik dashboard not accessible" "Warning"
     }
-    
+
     Write-ColorOutput "Deployment verification completed!" "Success"
 }
 
@@ -166,25 +164,25 @@ function Show-Status {
     Write-Host ""
     Write-Host "=== JobTrak Scaling Status ===" -ForegroundColor Cyan
     Write-Host ""
-    
+
     # Show running containers
     Write-Host "Running Containers:" -ForegroundColor Yellow
-    $containers = docker ps --format "table {{.Names}}`t{{.Status}}`t{{.Ports}}" | Where-Object { $_ -match "jobtrak" }
+    $containers = docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" | Where-Object { $_ -match "jobtrak" }
     $containers | ForEach-Object { Write-Host $_ }
     Write-Host ""
-    
+
     # Show service URLs
     Write-Host "Service URLs:" -ForegroundColor Yellow
     Write-Host "• Application: https://jobtrackai.duckdns.org"
     Write-Host "• Traefik Dashboard: http://localhost:8080"
     Write-Host ""
-    
+
     # Show quick resource usage
     Write-Host "Resource Usage:" -ForegroundColor Yellow
-    $stats = docker stats --no-stream --format "table {{.Container}}`t{{.CPUPerc}}`t{{.MemUsage}}" | Where-Object { $_ -match "jobtrak" }
+    $stats = docker stats --no-stream --format "table {{.Container}}\t{{.CPUPerc}}\t{{.MemUsage}}" | Where-Object { $_ -match "jobtrak" }
     $stats | ForEach-Object { Write-Host $_ }
     Write-Host ""
-    
+
     Write-ColorOutput "Your application is now running with 3 API instances!" "Success"
     Write-ColorOutput "Monitor with: docker-compose logs -f" "Info"
 }
@@ -194,7 +192,7 @@ function Invoke-Rollback {
     if (Test-Path ".last_backup") {
         $backupDir = Get-Content ".last_backup" -Raw
         $backupDir = $backupDir.Trim()
-        
+
         if (Test-Path "$backupDir\docker-compose.yml") {
             Write-ColorOutput "Rolling back to previous setup..." "Warning"
             docker-compose down --timeout 30
@@ -214,7 +212,7 @@ function Invoke-Rollback {
 # Show logs
 function Show-Logs {
     param([string]$Service)
-    
+
     if ($Service) {
         docker-compose logs -f $Service
     }
@@ -227,12 +225,12 @@ function Show-Logs {
 function Main {
     # Display banner
     Write-Host ""
-    Write-Host "╔══════════════════════════════════════╗" -ForegroundColor Green
-    Write-Host "║        JobTrak API Scaling           ║" -ForegroundColor Green
-    Write-Host "║    1 → 3 Instances + Load Balancer  ║" -ForegroundColor Green
-    Write-Host "╚══════════════════════════════════════╝" -ForegroundColor Green
+    Write-Host "+==============================================+" -ForegroundColor Green
+    Write-Host "|        JobTrak API Scaling                   |" -ForegroundColor Green
+    Write-Host "|    1 -> 3 Instances + Load Balancer         |" -ForegroundColor Green
+    Write-Host "+==============================================+" -ForegroundColor Green
     Write-Host ""
-    
+
     switch ($Action) {
         "deploy" {
             if (-not (Test-Docker)) { exit 1 }
