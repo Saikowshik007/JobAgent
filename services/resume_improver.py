@@ -424,7 +424,7 @@ class ResumeImprover:
 
             # Create chain
             prompt = ChatPromptTemplate(messages=Prompts.lookup["OBJECTIVE_WRITER"])
-            llm = create_llm(api_key=self.user.api_key, **self.llm_kwargs)
+            llm = create_llm(self.user, **self.llm_kwargs)
             chain = prompt | llm.with_structured_output(schema=ResumeSummarizerOutput)
 
             # Get inputs
@@ -467,7 +467,7 @@ class ResumeImprover:
             from langchain.prompts import ChatPromptTemplate
 
             chain = ChatPromptTemplate(messages=Prompts.lookup["SKILLS_MATCHER"])
-            llm = create_llm(api_key=self.user.api_key, **self.llm_kwargs)
+            llm = create_llm(self.user, **self.llm_kwargs)
 
             # Keep using function_calling method since json_mode requires "json" in prompts
             runnable = chain | llm.with_structured_output(schema=ResumeSkillsMatcherOutput, method="function_calling")
@@ -647,7 +647,7 @@ class ResumeImprover:
             logger.debug(f"Starting rewrite_section for: {section.get('title') or section.get('name', 'Unknown')}")
 
             prompt = ChatPromptTemplate(messages=Prompts.lookup["SECTION_HIGHLIGHTER"])
-            llm = create_llm(api_key=self.user.api_key, **self.llm_kwargs)
+            llm = create_llm(self.user, **self.llm_kwargs)
             chain = prompt | llm.with_structured_output(schema=ResumeSectionHighlighterOutput)
 
             chain_inputs = self._get_formatted_chain_inputs(chain=chain, section=section)
