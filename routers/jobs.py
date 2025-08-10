@@ -39,8 +39,7 @@ async def analyze_job(
         # Initialize ResumeImprover with user's API key and model
         resume_improver = ResumeImprover(
             url=job_url,
-            api_key=user.api_key,
-            model=user.model  # Now we can pass the user's preferred model
+            user = user
         )
         resume_improver.download_and_parse_job_post()
         job_details = resume_improver.parsed_job
