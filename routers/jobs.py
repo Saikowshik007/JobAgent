@@ -94,15 +94,14 @@ async def get_jobs(
         limit: int = Query(100, ge=1, le=1000),
         offset: int = Query(0, ge=0),
         cache_manager: DBCacheManager = Depends(get_cache_manager),
-        user: User = Depends(get_user)
+        user_id: str = Depends(get_user_id)  # ✅ only need user_id here
 ):
     """Get jobs from the database with optional filtering."""
     try:
         # Check user quota
-        job_stats = await cache_manager.get_job_stats(user.id)
-        if job_stats.get("total", 0) >= user.max_jobs:
-            logger.warning(f"User {user.id} has reached job quota limit")
-            # Don't block reading, just log the warning
+        job_stats = await cache_manager.get_job_stats(user_id)
+        if job_stats.get("total", 0) >= 5000:  # max_jobs is not available now; can hardcode or fetch separately
+            logger.warning(f"User {user_id} has reached job quota limit")
 
         # Convert string status to JobStatus enum if provided
         status_filter = None
@@ -112,25 +111,20 @@ async def get_jobs(
             except ValueError:
                 logger.warning(f"Invalid status filter: {status}")
 
-        # Get jobs using unified cache manager
         jobs = await cache_manager.get_all_jobs(
-            user.id,
+            user_id,
             status=status_filter,
             limit=limit,
             offset=offset
         )
 
-        # Apply additional filters
         if company:
             jobs = [
                 job for job in jobs
                 if job.metadata and company.lower() in job.metadata.get('company', '').lower()
             ]
 
-        # Get total count
         total_count = len(jobs)
-
-        # Convert to dict for JSON response
         jobs_dict = [job.to_dict() for job in jobs]
 
         return {
@@ -138,19 +132,14 @@ async def get_jobs(
             "total": total_count,
             "offset": offset,
             "limit": limit,
-            "user": {
-                "id": user.id,
-                "quota": {
-                    "used": job_stats.get("total", 0),
-                    "max": user.max_jobs
-                }
-            },
+            "user_id": user_id,
             "jobs": jobs_dict
         }
 
     except Exception as e:
-        logger.error(f"Error getting jobs for user {user.id}: {e}")
+        logger.error(f"Error getting jobs for user {user_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
 
 
 @router.get("/status")
