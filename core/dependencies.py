@@ -48,58 +48,6 @@ def get_cache_manager(request: Request):
 
     return cache_manager
 
-async def get_user_id(x_user_id: Optional[str] = Header(None)):
-    """Get user_id from header or use default if not provided."""
-    if not x_user_id:
-        logger.warning("No user_id provided in header, using default")
-        return DEFAULT_USER_ID
-    logger.info(f"Received user_id: {x_user_id}")
-    return x_user_id
-
-async def get_user_key(x_api_key: Optional[str] = Header(None)):
-    """Get API key from header."""
-    if not x_api_key:
-        logger.warning("No api_key provided in header")
-        raise HTTPException(
-            status_code=401,
-            detail="No API key provided. Please include X-Api-Key header."
-        )
-    logger.info("Received API key")
-    return x_api_key
-
-async def get_optional_user_key(x_api_key: Optional[str] = Header(None)):
-    """Get API key from header, but don't require it."""
-    if not x_api_key:
-        logger.info("No api_key provided in header (optional)")
-        return None
-    logger.info("Received API key")
-    return x_api_key
-
-async def get_user(
-        x_user_id: str = Header(..., description="User ID"),
-        x_api_key: str = Header(..., description="API Key"),
-        x_model: Optional[str] = Header("gpt-4o", description="AI Model to use")
-) -> User:
-    """
-    Get or create a User object from headers.
-    This function creates a User instance with all provided information.
-    """
-    if not x_user_id:
-        raise HTTPException(status_code=401, detail="User ID is required")
-
-    if not x_api_key:
-        raise HTTPException(status_code=401, detail="API key is required")
-
-    # Create user object with provided information
-    user = User(
-        id=x_user_id,
-        api_key=x_api_key,
-        model=x_model or "gpt-4o"
-    )
-
-    logger.debug(f"User authenticated: {user.id} using model: {user.model}")
-
-    return user
 
 async def get_user_from_form(user: str = Form(...)):
     """

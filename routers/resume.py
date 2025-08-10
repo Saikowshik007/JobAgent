@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Form, Query, File, Upload
 from typing import Optional
 import logging
 
-from core.dependencies import get_cache_manager, get_user_id, get_user_key, get_user
+from core.dependencies import get_cache_manager
 from data.dbcache_manager import DBCacheManager
 from dataModels.api_models import GenerateResumeRequest
 from services.resume_generator import ResumeGenerator
@@ -50,13 +50,14 @@ async def generate_resume(
         logger.error(f"Error generating safe resume for job {request.job_id} for user {request.user.id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/{resume_id}/download")
+@router.get("/{user_id}/{resume_id}/download")
 async def download_resume(
+        user_id: str,
         resume_id: str,
         format: str = Query("yaml", regex="^(yaml)$"),
         force_refresh: bool = Query(False, description="Force refresh from database"),
-        cache_manager: DBCacheManager = Depends(get_cache_manager),
-        user_id: str = Depends(get_user_id)
+        cache_manager: DBCacheManager = Depends(get_cache_manager)
+
 ):
     """Download a generated resume in YAML format for client-side rendering."""
     try:
@@ -96,11 +97,11 @@ async def download_resume(
         logger.error(f"Error downloading resume {resume_id} for user {user_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/{resume_id}/status")
+@router.get("/{user_id}/{resume_id}/status")
 async def check_resume_status(
+        user_id: str,
         resume_id: str,
         cache_manager: DBCacheManager = Depends(get_cache_manager),
-        user_id: str = Depends(get_user_id)
 ):
     """Check the status of a resume generation process using cache."""
     try:
@@ -116,12 +117,13 @@ async def check_resume_status(
         logger.error(f"Error checking resume status for {resume_id} for user {user_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/upload")
+@router.post("/{user_id}/upload")
 async def upload_resume(
+        user_id: str,
         file: UploadFile = File(...),
         job_id: str = Form(None),
-        cache_manager: DBCacheManager = Depends(get_cache_manager),
-        user_id: str = Depends(get_user_id)
+        cache_manager: DBCacheManager = Depends(get_cache_manager)
+
 ):
     """Upload a custom resume."""
     try:
@@ -145,12 +147,12 @@ async def upload_resume(
         logger.error(f"Error uploading resume for user {user_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/{resume_id}/update-yaml")
+@router.post("/{user_id}/{resume_id}/update-yaml")
 async def update_resume_yaml(
+        user_id: str,
         resume_id: str,
         yaml_content: str = Form(...),
         cache_manager: DBCacheManager = Depends(get_cache_manager),
-        user_id: str = Depends(get_user_id)
 ):
     """Update the YAML content of a resume."""
     try:
@@ -179,12 +181,13 @@ async def update_resume_yaml(
         logger.error(f"Error updating resume YAML for {resume_id} for user {user_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.delete("/{resume_id}")
+@router.delete("/{user_id}/{resume_id}")
 async def delete_resume(
+        user_id: str,
         resume_id: str,
         update_job: bool = Query(True, description="Update associated job to remove resume_id reference"),
         cache_manager: DBCacheManager = Depends(get_cache_manager),
-        user_id: str = Depends(get_user_id)
+
 ):
     """Delete a resume and optionally update the associated job."""
     try:
@@ -230,13 +233,13 @@ async def delete_resume(
         logger.error(f"Error deleting resume {resume_id} for user {user_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/")
+@router.get("/{user_id}/")
 async def get_user_resumes(
+        user_id: str,
         job_id: Optional[str] = Query(None, description="Filter by job ID"),
         limit: int = Query(100, ge=1, le=1000),
         offset: int = Query(0, ge=0),
-        cache_manager: DBCacheManager = Depends(get_cache_manager),
-        user_id: str = Depends(get_user_id)
+        cache_manager: DBCacheManager = Depends(get_cache_manager)
 ):
     """Get all resumes for a user with optional filtering."""
     try:
@@ -258,10 +261,10 @@ async def get_user_resumes(
         logger.error(f"Error getting resumes for user {user_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/active")
+@router.get("/{user_id}/active")
 async def get_active_resume_generations(
-        cache_manager: DBCacheManager = Depends(get_cache_manager),
-        user_id: str = Depends(get_user_id)
+        user_id: str,
+        cache_manager: DBCacheManager = Depends(get_cache_manager)
 ):
     """Get all active resume generations for a user."""
     try:

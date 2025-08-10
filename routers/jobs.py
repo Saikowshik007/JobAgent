@@ -7,7 +7,7 @@ from datetime import datetime
 import hashlib
 import logging
 
-from core.dependencies import get_cache_manager, get_user_id, get_user_key, get_user_from_form
+from core.dependencies import get_cache_manager, get_user_from_form
 from data.dbcache_manager import DBCacheManager
 from dataModels.api_models import JobStatusUpdateRequest
 from dataModels.data_models import JobStatus, Job
@@ -21,7 +21,7 @@ async def analyze_job(
         job_url: str = Form(...),
         status: Optional[str] = Form(None),
         cache_manager: DBCacheManager = Depends(get_cache_manager),
-        user: User = Depends(get_user_from_form) # Now using User object
+        user: User = Depends(get_user_from_form)
 ):
     """Analyze a job posting from a URL."""
     try:
@@ -87,14 +87,15 @@ async def analyze_job(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/")
+@router.get("/{user_id}")
 async def get_jobs(
+        user_id: str,
         status: Optional[str] = None,
         company: Optional[str] = None,
         limit: int = Query(100, ge=1, le=1000),
         offset: int = Query(0, ge=0),
-        cache_manager: DBCacheManager = Depends(get_cache_manager),
-        user_id: str = Depends(get_user_id)  # ✅ only need user_id here
+        cache_manager: DBCacheManager = Depends(get_cache_manager)
+
 ):
     """Get jobs from the database with optional filtering."""
     try:
@@ -142,10 +143,11 @@ async def get_jobs(
 
 
 
-@router.get("/status")
+@router.get("/{user_id}/status")
 async def get_job_stats(
-        cache_manager: DBCacheManager = Depends(get_cache_manager),
-        user_id: str = Depends(get_user_id)
+        user_id: str,
+        cache_manager: DBCacheManager = Depends(get_cache_manager)
+
 ):
     """Get detailed job statistics including resume information."""
     try:
@@ -206,11 +208,11 @@ async def get_job_stats(
         logger.error(f"Error getting detailed job stats for user {user_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
     
-@router.get("/{job_id}")
+@router.get("/{user_id}/{job_id}")
 async def get_job(
+        user_id:str,
         job_id: str,
-        cache_manager: DBCacheManager = Depends(get_cache_manager),
-        user_id: str = Depends(get_user_id)
+        cache_manager: DBCacheManager = Depends(get_cache_manager)
 ):
     """Get a specific job by ID."""
     try:
@@ -227,12 +229,12 @@ async def get_job(
         logger.error(f"Error getting job {job_id} for user {user_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.put("/{job_id}/status")
+@router.put("/{user_id}/{job_id}/status")
 async def update_job_status(
+        user_id:str,
         job_id: str,
         request: JobStatusUpdateRequest,
-        cache_manager: DBCacheManager = Depends(get_cache_manager),
-        user_id: str = Depends(get_user_id)
+        cache_manager: DBCacheManager = Depends(get_cache_manager)
 ):
     """Update the status of a job."""
     try:
@@ -271,12 +273,12 @@ async def update_job_status(
         logger.error(f"Error updating job status for {job_id} for user {user_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.delete("/{job_id}")
+@router.delete("/{user_id}/{job_id}")
 async def delete_job(
+        user_id:str,
         job_id: str,
         cascade_resumes: bool = Query(False, description="Also delete associated resumes"),
-        cache_manager: DBCacheManager = Depends(get_cache_manager),
-        user_id: str = Depends(get_user_id)
+        cache_manager: DBCacheManager = Depends(get_cache_manager)
 ):
     """Delete a job and optionally its associated resumes."""
     try:
@@ -316,12 +318,12 @@ async def delete_job(
         logger.error(f"Error deleting job {job_id} for user {user_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.delete("/batch")
+@router.delete("/{user_id}/batch")
 async def delete_jobs_batch(
+        user_id,
         job_ids: List[str],
         cascade_resumes: bool = Query(False, description="Also delete associated resumes"),
         cache_manager: DBCacheManager = Depends(get_cache_manager),
-        user_id: str = Depends(get_user_id)
 ):
     """Delete multiple jobs in a batch operation."""
     try:
@@ -377,11 +379,11 @@ async def delete_jobs_batch(
         logger.error(f"Error in batch job deletion for user {user_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/{job_id}/resumes")
+@router.get("/{user_id}/{job_id}/resumes")
 async def get_job_resumes(
+        user_id:str,
         job_id: str,
-        cache_manager: DBCacheManager = Depends(get_cache_manager),
-        user_id: str = Depends(get_user_id)
+        cache_manager: DBCacheManager = Depends(get_cache_manager)
 ):
     """Get all resumes associated with a specific job."""
     try:
@@ -413,8 +415,7 @@ async def analyze_job_description(
         job_description: str = Form(...),
         status: Optional[str] = Form(None),
         cache_manager: DBCacheManager = Depends(get_cache_manager),
-        user_id: str = Depends(get_user_id),
-        api_key: str = Depends(get_user_key)
+        user:User = Depends(get_user_from_form)
 ):
     """Analyze a job posting from a description text."""
     try:
@@ -429,17 +430,17 @@ async def analyze_job_description(
         pseudo_url = f"description://{description_hash}"
 
         # Check if this exact description already exists
-        job_exist = await cache_manager.job_exists(url=pseudo_url, user_id=user_id)
+        job_exist = await cache_manager.job_exists(url=pseudo_url, user_id=user.id)
         if job_exist:
             raise HTTPException(status_code=409, detail="Job with this description already exists!")
 
         # Parse the job description using your existing JobPost class
         from dataModels.job_post import JobPost
-        job_post = JobPost(job_description, api_key)
+        job_post = JobPost(job_description, user)
         job_details = job_post.parse_job_post(verbose=True)
 
         # Create a job ID
-        job_id = hashlib.md5(f"{user_id}|{pseudo_url}|{datetime.now().isoformat()}".encode()).hexdigest()
+        job_id = hashlib.md5(f"{user.id}|{pseudo_url}|{datetime.now().isoformat()}".encode()).hexdigest()
 
         # Handle status if provided
         job_status = JobStatus.NEW
@@ -465,13 +466,13 @@ async def analyze_job_description(
         )
 
         # Save job using the unified cache manager
-        await cache_manager.save_job(job, user_id)
+        await cache_manager.save_job(job, user.id)
 
         return {
             "message": "Job description analyzed successfully",
             "job_id": job_id,
             "job_url": pseudo_url,
-            "user_id": user_id,
+            "user_id": user.id,
             "input_method": "description",
             "job_details": job.to_dict()
         }
@@ -479,5 +480,5 @@ async def analyze_job_description(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error analyzing job description for user {user_id}: {e}")
+        logger.error(f"Error analyzing job description for user {user.id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))

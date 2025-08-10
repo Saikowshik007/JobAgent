@@ -6,7 +6,7 @@ from datetime import datetime
 import logging
 import traceback
 
-from core.dependencies import get_cache_manager, get_user_id
+from core.dependencies import get_cache_manager
 from data.dbcache_manager import DBCacheManager
 
 logger = logging.getLogger(__name__)
@@ -17,11 +17,11 @@ async def options_handler(full_path: str):
     """Handle all OPTIONS requests explicitly"""
     return {"message": "OK"}
 
-@router.get("/status")
+@router.get("/{user_id}/status")
 async def get_system_status(
+        user_id: str,
         request: Request,
-        cache_manager: DBCacheManager = Depends(get_cache_manager),
-        user_id: str = Depends(get_user_id)
+        cache_manager: DBCacheManager = Depends(get_cache_manager)
 ):
     """Get the overall status of the job tracking system."""
     try:
@@ -70,11 +70,11 @@ async def get_system_status(
         logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"System status error: {str(e)}")
 
-@router.delete("/cache/clear")
+@router.delete("/{user_id}/cache/clear")
 async def clear_cache(
+        user_id: str,
         request: Request,
         cache_manager: DBCacheManager = Depends(get_cache_manager),
-        user_id: str = Depends(get_user_id)
 ):
     """Clear user's cache data."""
     try:
@@ -94,11 +94,11 @@ async def clear_cache(
         logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Cache clear error: {str(e)}")
 
-@router.post("/cache/cleanup")
+@router.post("/{user_id}/cache/cleanup")
 async def cleanup_cache(
+        user_id: str,
         request: Request,
-        cache_manager: DBCacheManager = Depends(get_cache_manager),
-        user_id: str = Depends(get_user_id)
+        cache_manager: DBCacheManager = Depends(get_cache_manager)
 ):
     """Clean up expired cache entries."""
     try:
@@ -117,11 +117,11 @@ async def cleanup_cache(
         logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Cache cleanup error: {str(e)}")
 
-@router.get("/cache/stats")
+@router.get("/{user_id}/cache/stats")
 async def get_cache_stats(
+        user_id: str,
         request: Request,
-        cache_manager: DBCacheManager = Depends(get_cache_manager),
-        user_id: str = Depends(get_user_id)
+        cache_manager: DBCacheManager = Depends(get_cache_manager)
 ):
     """Get detailed cache statistics."""
     try:

@@ -1,12 +1,11 @@
 """
 Simplify.jobs integration routes for session management and resume uploads.
 """
-from fastapi import APIRouter, Depends, HTTPException, Form, File, UploadFile
+from fastapi import APIRouter, HTTPException, Form, File, UploadFile
 from datetime import datetime
 import requests
 import logging
 
-from core.dependencies import get_user_id
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -14,12 +13,12 @@ router = APIRouter()
 # Global user sessions storage (in production, consider using Redis or database)
 user_sessions = {}
 
-@router.post("/upload-resume-pdf")
+@router.post("/{user_id}/upload-resume-pdf")
 async def upload_resume_pdf_to_simplify(
+        user_id: str,
         resume_pdf: UploadFile = File(...),
         resume_id: str = Form(...),
-        job_id: str = Form(None),
-        user_id: str = Depends(get_user_id)
+        job_id: str = Form(None)
 ):
     """Upload a PDF resume to Simplify using stored session data"""
     try:
@@ -121,8 +120,8 @@ async def upload_resume_pdf_to_simplify(
         logger.error(f"Error uploading PDF resume to Simplify: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/get-tokens")
-async def get_simplify_tokens(user_id: str = Depends(get_user_id)):
+@router.get("/{user_id}/get-tokens")
+async def get_simplify_tokens(user_id: str):
     """Get stored Simplify tokens for the user"""
     try:
         if user_id not in user_sessions:
@@ -147,8 +146,8 @@ async def get_simplify_tokens(user_id: str = Depends(get_user_id)):
         logger.error(f"Error getting stored tokens for user {user_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/check-session")
-async def check_simplify_session(user_id: str = Depends(get_user_id)):
+@router.get("/{user_id}/check-session")
+async def check_simplify_session(user_id: str):
     """Check if user has a valid Simplify session and validate tokens"""
     has_session = user_id in user_sessions
     session_age = None
@@ -249,10 +248,10 @@ async def check_simplify_session(user_id: str = Depends(get_user_id)):
         "message": "Session validated with Simplify API" if is_valid else "Session invalid or validation failed"
     }
 
-@router.post("/store-tokens")
+@router.post("/{user_id}/store-tokens")
 async def store_simplify_tokens(
-        request_data: dict,
-        user_id: str = Depends(get_user_id)
+        user_id: str,
+        request_data: dict
 ):
     """Store both CSRF and authorization tokens for Simplify with immediate validation"""
     try:
