@@ -16,28 +16,21 @@ logger = config.getLogger("Resume Generator")
 
 class ResumeGenerator:
     """
-    Resume Generator using unified cache manager for all operations.
-    Simplified - just manages async jobs, ResumeImprover does the work.
+    Resume Generator using cumulative approach for ATS optimization.
+    Maintains existing API but uses sequential generation with context building.
     """
 
     def __init__(self, cache_manager):
         """Initialize the ResumeGenerator with unified cache manager and user ID."""
         self.cache_manager = cache_manager
-        self.thread_pool = concurrent.futures.ThreadPoolExecutor(max_workers=4)
+        self.thread_pool = concurrent.futures.ThreadPoolExecutor(max_workers=2)  # Reduced for sequential approach
 
     async def generate_resume(self, job_id: str, user: User, template: str = "standard",
                               customize: bool = True, resume_data: Optional[Dict[str, Any]] = None,
                               handle_existing: str = "replace", include_objective: bool = True) -> Dict[str, Any]:
         """
-        Generate a tailored resume for a specific job with orphaning prevention.
-
-        Args:
-            job_id: Job ID to generate resume for
-            template: Resume template to use
-            customize: Whether to customize resume for the job
-            resume_data: User's resume data
-            handle_existing: How to handle existing resumes - "replace", "keep_both", "error"
-            include_objective: Whether to include an objective section in the resume
+        Generate a tailored resume for a specific job with ATS optimization using cumulative approach.
+        API contract preserved - same parameters and return format.
         """
         # Get the job from database
         job_dict = await self.cache_manager.get_job(job_id, user.id)
@@ -58,14 +51,14 @@ class ResumeGenerator:
             resume_id, user.id, ResumeGenerationStatus.PENDING
         )
 
-        # Start background generation (non-blocking)
+        # Start background generation (non-blocking) - now using cumulative approach
         asyncio.create_task(self._generate_resume_background(
             job_dict, resume_id, user, template, customize, resume_data, existing_resumes, handle_existing, include_objective
         ))
 
         return {
             "status": "generating",
-            "message": f"Resume generation started for job {job_dict.get('job_title', 'Unknown')} at {job_dict.get('company', 'Unknown')}",
+            "message": f"Resume generation started (ATS-optimized) for job {job_dict.get('job_title', 'Unknown')} at {job_dict.get('company', 'Unknown')}",
             "resume_id": resume_id,
             "job_id": job_id,
             "user_id": user.id,
@@ -73,27 +66,28 @@ class ResumeGenerator:
             "existing_resumes_count": len(existing_resumes),
             "handle_existing": handle_existing,
             "include_objective": include_objective,
-            "estimated_completion_seconds": 60
+            "estimated_completion_seconds": 120  # Increased for cumulative approach
         }
+
     async def _generate_resume_background(self, job_dict: dict, resume_id: str, user: User, template: str,
                                           customize: bool, resume_data: Optional[Dict[str, Any]],
                                           existing_resumes: List = None, handle_existing: str = "replace",
                                           include_objective: bool = True):
-        """Background task to generate resume with orphaning prevention."""
+        """Background task to generate resume with cumulative ATS optimization approach."""
         try:
-            logger.info(f"Starting resume generation for job {job_dict.get('id')} for user {user.id} with model : {user.model}")
+            logger.info(f"Starting cumulative ATS-optimized resume generation for job {job_dict.get('id')} for user {user.id} with model: {user.model}")
 
             # Update status to in progress
             await self.cache_manager.set_resume_status(
                 resume_id, user.id, ResumeGenerationStatus.IN_PROGRESS
             )
 
-            # Run the blocking resume generation in thread pool
+            # Run the cumulative resume generation in thread pool
             loop = asyncio.get_event_loop()
             yaml_content = await loop.run_in_executor(
                 self.thread_pool,
-                self._generate_resume_sync,
-                job_dict, user, resume_data, include_objective  # Pass include_objective here
+                self._generate_resume_sync,  # Same function name, new implementation
+                job_dict, user, resume_data, include_objective
             )
 
             # Create the resume object
@@ -114,13 +108,12 @@ class ResumeGenerator:
                 if handle_existing == "replace":
                     logger.info(f"Replacing {len(existing_resumes)} existing resume(s) for job {job_dict.get('id')}")
 
-                    # Delete old resumes (but don't update the job yet since we're about to set the new one)
+                    # Delete old resumes
                     for old_resume in existing_resumes:
                         try:
                             success = await self.cache_manager.delete_resume(old_resume.id, user.id)
                             if success:
                                 logger.info(f"Deleted old resume {old_resume.id} for job {job_dict.get('id')}")
-                                # Remove from generation cache too
                                 await self.cache_manager.remove_resume_status(old_resume.id, user.id)
                             else:
                                 logger.warning(f"Failed to delete old resume {old_resume.id}")
@@ -129,10 +122,8 @@ class ResumeGenerator:
 
                 elif handle_existing == "keep_both":
                     logger.info(f"Keeping {len(existing_resumes)} existing resume(s) alongside new resume for job {job_dict.get('id')}")
-                    # Don't delete anything, just add the new resume
-                    # Note: Only the newest resume will be linked to the job
 
-            # Update the job with the NEW resume_id (this is always done, regardless of handle_existing)
+            # Update the job with the NEW resume_id
             await self._update_job_with_resume_id(job_dict.get('id'), user.id, resume_id)
 
             # Update cache with completed status
@@ -141,12 +132,12 @@ class ResumeGenerator:
                 data={"yaml_content": yaml_content}
             )
 
-            # Update job status to RESUME_GENERATED after everything is complete
+            # Update job status to RESUME_GENERATED
             await self.cache_manager.update_job_status(
                 job_dict.get('id'), user.id, JobStatus.RESUME_GENERATED
             )
 
-            logger.info(f"Resume generation completed for job {job_dict.get('id')} for user {user.id}")
+            logger.info(f"Cumulative resume generation completed for job {job_dict.get('id')} for user {user.id}")
 
         except Exception as e:
             logger.error(f"Error generating resume for job {job_dict.get('id')} for user {user.id}: {e}")
@@ -156,10 +147,42 @@ class ResumeGenerator:
                 resume_id, user.id, ResumeGenerationStatus.FAILED,
                 error=str(e)
             )
-    async def _update_job_with_resume_id(self, job_id: str, user_id:str, resume_id: str):
+
+    def _generate_resume_sync(self, job_dict: dict, user: User, resume_data: Optional[Dict[str, Any]], include_objective: bool = True) -> str:
+        """
+        Synchronous resume generation using cumulative approach for ATS optimization.
+        Completely rewritten to use sequential generation with context building.
+        """
+        try:
+            job_url = job_dict.get('job_url')
+            parsed_job = job_dict.get("metadata")
+            if not job_url:
+                raise ValueError("Job URL not found in job data")
+
+            # Initialize ResumeImprover with cumulative capabilities
+            resume_improver = ResumeImprover(
+                url=job_url,
+                parsed_job=parsed_job,
+                user=user
+            )
+
+            # Set up resume data if provided
+            if resume_data:
+                logger.info(f"Using user-provided resume data for job {job_dict.get('id')}")
+                self._setup_resume_data(resume_improver, resume_data)
+            else:
+                logger.info(f"Using default resume template for job {job_dict.get('id')}")
+
+            # NEW: Use cumulative approach instead of parallel
+            return resume_improver.create_cumulative_tailored_resume(include_objective)
+
+        except Exception as e:
+            logger.error(f"Synchronous cumulative resume generation failed: {e}")
+            raise
+
+    async def _update_job_with_resume_id(self, job_id: str, user_id: str, resume_id: str):
         """Update the job record with the generated resume ID."""
         try:
-            # Use the new cache manager method to update job's resume_id
             success = await self.cache_manager.update_job_resume_id(job_id, user_id, resume_id)
 
             if success:
@@ -169,36 +192,6 @@ class ResumeGenerator:
 
         except Exception as e:
             logger.error(f"Error updating job {job_id} with resume_id {resume_id}: {e}")
-
-    def _generate_resume_sync(self, job_dict: dict, user:User, resume_data: Optional[Dict[str, Any]], include_objective: bool = True) -> str:
-        """Synchronous resume generation that runs in thread pool."""
-        try:
-            job_url = job_dict.get('job_url')
-            parsed_job = job_dict.get("metadata")
-            if not job_url:
-                raise ValueError("Job URL not found in job data")
-
-            # Initialize ResumeImprover - it does ALL the work
-            resume_improver = ResumeImprover(
-                url=job_url,
-                parsed_job=parsed_job,
-                user = user
-            )
-
-            # Set up resume data if provided
-            if resume_data:
-                logger.info(f"Using user-provided resume data for job {job_dict.get('id')}")
-                self._setup_resume_data(resume_improver, resume_data)
-            else:
-                logger.info(f"Using default resume template for job {job_dict.get('id')}")
-                # You'll need to provide default data or handle this case
-
-            # Let ResumeImprover do all the work with include_objective flag
-            return resume_improver.create_complete_tailored_resume(include_objective)
-
-        except Exception as e:
-            logger.error(f"Synchronous resume generation failed: {e}")
-            raise
 
     def _setup_resume_data(self, resume_improver: ResumeImprover, resume_data: Dict[str, Any]):
         """Set up resume data in the improver"""
@@ -211,7 +204,7 @@ class ResumeGenerator:
         resume_improver.objective = self.get_dict_field("objective", resume_data)
         resume_improver.degrees = resume_improver._get_degrees(resume_data)
 
-    async def check_resume_status(self, resume_id: str, user_id:str) -> Dict[str, Any]:
+    async def check_resume_status(self, resume_id: str, user_id: str) -> Dict[str, Any]:
         """Check the status of a resume generation process."""
         # First check cache
         cache_entry = await self.cache_manager.get_resume_status(resume_id, user_id)
@@ -230,7 +223,6 @@ class ResumeGenerator:
                 response["error"] = cache_entry["error"]
 
             if status == ResumeGenerationStatus.COMPLETED.value:
-                # If completed, also get job info from database
                 try:
                     resume = await self.cache_manager.get_resume(resume_id, user_id)
                     if resume and resume.job_id:
@@ -262,9 +254,8 @@ class ResumeGenerator:
             "job": job_dict
         }
 
-    async def get_resume_content(self, resume_id: str, user_id:str, force_refresh: bool = False) -> str:
+    async def get_resume_content(self, resume_id: str, user_id: str, force_refresh: bool = False) -> str:
         """Get the resume content."""
-        # If force_refresh, skip cache entirely
         if force_refresh:
             resume = await self.cache_manager.get_resume(resume_id, user_id)
             if not resume:
@@ -293,16 +284,12 @@ class ResumeGenerator:
 
         return resume.yaml_content
 
-    async def upload_resume(self, file_path: str, user_id:str, file_content: bytes, job_id: str = None, ) -> Dict[str, Any]:
+    async def upload_resume(self, file_path: str, user_id: str, file_content: bytes, job_id: str = None) -> Dict[str, Any]:
         """Upload a custom resume."""
         try:
-            # Generate a unique ID for the resume
             resume_id = str(uuid.uuid4())
-
-            # Convert file content to string (assuming it's YAML/text)
             yaml_content = file_content.decode('utf-8')
 
-            # Create the resume object
             resume = Resume(
                 id=resume_id,
                 job_id=job_id,
@@ -312,13 +299,11 @@ class ResumeGenerator:
                 uploaded_to_simplify=False
             )
 
-            # Save resume to database
             success = await self.cache_manager.save_resume(resume, user_id)
 
             if not success:
                 raise ValueError("Failed to save uploaded resume")
 
-            # If this resume is for a specific job, update the job's resume_id
             if job_id:
                 await self._update_job_with_resume_id(job_id, user_id, resume_id)
 
@@ -326,7 +311,7 @@ class ResumeGenerator:
                 "message": "Resume uploaded successfully",
                 "resume_id": resume_id,
                 "job_id": job_id,
-                "user_id":user_id,
+                "user_id": user_id,
                 "file_path": file_path
             }
 
@@ -361,38 +346,33 @@ class ResumeGenerator:
         if hasattr(self, 'thread_pool'):
             self.thread_pool.shutdown(wait=False)
 
-    async def replace_job_resume(self, job_id: str, user_id:str, new_resume_id: str) -> Dict[str, Any]:
+    # Keep all other existing methods unchanged
+    async def replace_job_resume(self, job_id: str, user_id: str, new_resume_id: str) -> Dict[str, Any]:
         """Replace the current resume for a job with a new one, handling orphaning properly."""
         try:
-            # Verify the job exists
             job_dict = await self.cache_manager.get_job(job_id, user_id)
             if not job_dict:
                 raise ValueError(f"Job not found with ID: {job_id} for user: {user_id}")
 
-            # Verify the new resume exists and belongs to this user
             new_resume = await self.cache_manager.get_resume(new_resume_id, user_id)
             if not new_resume:
                 raise ValueError(f"Resume not found with ID: {new_resume_id} for user: {user_id}")
 
-            # Get current resume(s) for this job
             current_resumes = await self.cache_manager.get_resumes_for_job(job_id, user_id)
 
-            # Update the job to point to the new resume
             success = await self.cache_manager.update_job_resume_id(job_id, user_id, new_resume_id)
 
             if not success:
                 raise ValueError("Failed to update job with new resume ID")
 
-            # Update the new resume to point to this job (if it wasn't already)
             if new_resume.job_id != job_id:
                 new_resume.job_id = job_id
                 await self.cache_manager.save_resume(new_resume, user_id)
 
-            # Optionally orphan the old resumes (don't delete them, just clear their job_id)
             orphaned_resumes = []
             for old_resume in current_resumes:
-                if old_resume.id != new_resume_id:  # Don't orphan the new resume we just linked
-                    old_resume.job_id = None  # Orphan it
+                if old_resume.id != new_resume_id:
+                    old_resume.job_id = None
                     await self.cache_manager.save_resume(old_resume, user_id)
                     orphaned_resumes.append(old_resume.id)
 
@@ -413,10 +393,8 @@ class ResumeGenerator:
         target_user_id = user_id
 
         try:
-            # Get all resumes for the user
             all_resumes = await self.cache_manager.get_all_resumes(target_user_id)
 
-            # Find orphaned resumes (job_id is None or points to non-existent job)
             orphaned_resumes = []
             for resume in all_resumes:
                 if not resume.job_id:
@@ -426,7 +404,6 @@ class ResumeGenerator:
                         "date_created": resume.date_created.isoformat() if resume.date_created else None
                     })
                 else:
-                    # Check if the job still exists
                     job = await self.cache_manager.get_job(resume.job_id, target_user_id)
                     if not job:
                         orphaned_resumes.append({
