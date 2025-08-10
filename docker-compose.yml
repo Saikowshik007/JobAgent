@@ -334,64 +334,44 @@ services:
       - jobtrak-network
     restart: unless-stopped
 
-  # Logging Services
-  elasticsearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
-    container_name: jobtrak-elasticsearch
-    environment:
-      - discovery.type=single-node
-      - ES_JAVA_OPTS=-Xms512m -Xmx512m
-      - xpack.security.enabled=false
-      - xpack.security.enrollment.enabled=false
+  # Simplified Logging with Grafana Loki (lighter alternative)
+  loki:
+    image: grafana/loki:2.9.0
+    container_name: jobtrak-loki
     ports:
-      - "9200:9200"
-    volumes:
-      - elasticsearch_data:/usr/share/elasticsearch/data
+      - "3100:3100"
+    command: -config.file=/etc/loki/local-config.yaml
     networks:
       - jobtrak-network
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
+    volumes:
+      - loki_data:/loki
 
-  kibana:
-    image: docker.elastic.co/kibana/kibana:8.11.0
-    container_name: jobtrak-kibana
-    environment:
-      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
-      - SERVER_NAME=kibana
-      - SERVER_HOST=0.0.0.0
+  grafana:
+    image: grafana/grafana:latest
+    container_name: jobtrak-grafana
     ports:
-      - "5601:5601"
-    depends_on:
-      elasticsearch:
-        condition: service_healthy
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin123
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana_data:/var/lib/grafana
     networks:
       - jobtrak-network
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:5601/api/status"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
 
-  filebeat:
-    image: docker.elastic.co/beats/filebeat:8.11.0
-    container_name: jobtrak-filebeat
-    user: root
-    command: filebeat -e -strict.perms=false
+  promtail:
+    image: grafana/promtail:2.9.0
+    container_name: jobtrak-promtail
     volumes:
-      - ./logging/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
       - ./logs:/var/log/jobtrak:ro
       - /var/lib/docker/containers:/var/lib/docker/containers:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
-    environment:
-      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - ./logging/promtail-config.yml:/etc/promtail/config.yml:ro
+    command: -config.file=/etc/promtail/config.yml
     depends_on:
-      elasticsearch:
-        condition: service_healthy
+      - loki
     networks:
       - jobtrak-network
     restart: unless-stopped
@@ -408,6 +388,9 @@ volumes:
   redis_data:
     driver: local
     name: jobtrak-redis-data
-  elasticsearch_data:
+  loki_data:
     driver: local
-    name: jobtrak-elasticsearch-data
+    name: jobtrak-loki-data
+  grafana_data:
+    driver: local
+    name: jobtrak-grafana-data
