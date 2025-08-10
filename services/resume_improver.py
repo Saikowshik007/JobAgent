@@ -416,7 +416,7 @@ class ResumeImprover:
 
     def _rewrite_section_with_context(self, section: Dict, context: Dict) -> List:
         """
-        NEW: Enhanced section rewriting with cumulative context and ATS optimization.
+        Enhanced section rewriting with cumulative context and ATS optimization.
         """
         try:
             from prompts import Prompts
@@ -453,7 +453,17 @@ class ResumeImprover:
                     return section.get("highlights", [])
 
                 if highlights:
-                    sorted_highlights = sorted(highlights, key=lambda d: getattr(d, 'relevance', d.get('relevance', 0)) * -1)
+                    def get_relevance(highlight):
+                        if hasattr(highlight, 'relevance'):
+                            # Pydantic object
+                            return highlight.relevance
+                        elif isinstance(highlight, dict):
+                            # Dictionary
+                            return highlight.get('relevance', 0)
+                        else:
+                            return 0
+
+                    sorted_highlights = sorted(highlights, key=lambda d: get_relevance(d) * -1)
 
                     # Determine limit based on section type
                     section_type = context.get('section_type', self._determine_section_type(section))
@@ -461,10 +471,18 @@ class ResumeImprover:
 
                     limited_highlights = sorted_highlights[:limit]
 
-                    if hasattr(limited_highlights[0], 'highlight'):
-                        result = [s.highlight for s in limited_highlights]
-                    else:
-                        result = [s.get("highlight", "") for s in limited_highlights]
+                    # Extract highlight text properly
+                    result = []
+                    for highlight_obj in limited_highlights:
+                        if hasattr(highlight_obj, 'highlight'):
+                            # Pydantic object
+                            result.append(highlight_obj.highlight)
+                        elif isinstance(highlight_obj, dict):
+                            # Dictionary
+                            result.append(highlight_obj.get("highlight", ""))
+                        else:
+                            # Fallback
+                            result.append(str(highlight_obj))
 
                     logger.debug(f"Generated {len(result)} contextual highlights")
                     return result
