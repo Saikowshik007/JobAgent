@@ -81,7 +81,7 @@ class ResumeGenerator:
                                           include_objective: bool = True):
         """Background task to generate resume with orphaning prevention."""
         try:
-            logger.info(f"Starting resume generation for job {job_dict.get('id')} for user {user.id}")
+            logger.info(f"Starting resume generation for job {job_dict.get('id')} for user {user.id} with model : {user.model}")
 
             # Update status to in progress
             await self.cache_manager.set_resume_status(
