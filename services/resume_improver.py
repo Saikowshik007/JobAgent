@@ -63,7 +63,7 @@ class ResumeImprover:
                     loop = asyncio.get_event_loop()
                     if loop.is_running():
                         # We're in an async context, use thread-based approach
-                        logger.info("Using thread-based parallel approach (async context detected)")
+                        logger.info(f'Using thread-based parallel approach (async context detected) using model: {self.user.model}')
                         results = self._generate_content_parallel_threads(include_objective)
                     else:
                         # No active loop, safe to use asyncio.run
