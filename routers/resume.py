@@ -8,7 +8,6 @@ import logging
 from core.dependencies import get_cache_manager, get_user_id, get_user_key, get_user
 from data.dbcache_manager import DBCacheManager
 from dataModels.api_models import GenerateResumeRequest
-from dataModels.user_model import User
 from services.resume_generator import ResumeGenerator
 
 logger = logging.getLogger(__name__)
@@ -32,9 +31,10 @@ async def generate_resume(
 
         logger.info(f"Resume generation request for job {request.job_id}, include_objective={include_objective}")
 
-        resume_generator = ResumeGenerator(cache_manager, request.user)
+        resume_generator = ResumeGenerator(cache_manager)
         resume_info = await resume_generator.generate_resume(
             job_id=request.job_id,
+            user= request.user,
             template=request.template or "standard",
             customize=request.customize,
             resume_data=request.resume_data,
@@ -61,7 +61,7 @@ async def download_resume(
     """Download a generated resume in YAML format for client-side rendering."""
     try:
         # Initialize resume generator with unified cache manager
-        resume_generator = ResumeGenerator(cache_manager, user_id)
+        resume_generator = ResumeGenerator(cache_manager)
 
         # If force_refresh is True, bypass cache and get directly from database
         if force_refresh:
@@ -78,10 +78,10 @@ async def download_resume(
                 yaml_content = resume.yaml_content
             else:
                 # Fallback to cache manager method
-                yaml_content = await resume_generator.get_resume_content(resume_id)
+                yaml_content = await resume_generator.get_resume_content(resume_id, user_id)
         else:
             # Normal flow - uses cache first, then database
-            yaml_content = await resume_generator.get_resume_content(resume_id)
+            yaml_content = await resume_generator.get_resume_content(resume_id, user_id)
 
         # Return the YAML content directly
         return {
@@ -105,10 +105,10 @@ async def check_resume_status(
     """Check the status of a resume generation process using cache."""
     try:
         # Initialize resume generator with unified cache manager
-        resume_generator = ResumeGenerator(cache_manager, user_id)
+        resume_generator = ResumeGenerator(cache_manager)
 
         # Check resume status (uses cache first, much faster)
-        return await resume_generator.check_resume_status(resume_id)
+        return await resume_generator.check_resume_status(resume_id, user_id)
 
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -126,7 +126,7 @@ async def upload_resume(
     """Upload a custom resume."""
     try:
         # Initialize resume generator with unified cache manager
-        resume_generator = ResumeGenerator(cache_manager, user_id)
+        resume_generator = ResumeGenerator(cache_manager)
 
         # Read file content
         content = await file.read()
@@ -134,6 +134,7 @@ async def upload_resume(
         # Upload the resume
         return await resume_generator.upload_resume(
             file_path=file.filename,
+            user_id=user_id,
             file_content=content,
             job_id=job_id
         )
