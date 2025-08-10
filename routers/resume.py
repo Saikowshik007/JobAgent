@@ -61,7 +61,7 @@ async def download_resume(
     """Download a generated resume in YAML format for client-side rendering."""
     try:
         # Initialize resume generator with unified cache manager
-        resume_generator = ResumeGenerator(cache_manager, user_id, "")
+        resume_generator = ResumeGenerator(cache_manager, user_id)
 
         # If force_refresh is True, bypass cache and get directly from database
         if force_refresh:
@@ -105,7 +105,7 @@ async def check_resume_status(
     """Check the status of a resume generation process using cache."""
     try:
         # Initialize resume generator with unified cache manager
-        resume_generator = ResumeGenerator(cache_manager, user_id, "")
+        resume_generator = ResumeGenerator(cache_manager, user_id)
 
         # Check resume status (uses cache first, much faster)
         return await resume_generator.check_resume_status(resume_id)
@@ -126,7 +126,7 @@ async def upload_resume(
     """Upload a custom resume."""
     try:
         # Initialize resume generator with unified cache manager
-        resume_generator = ResumeGenerator(cache_manager, user_id, "")
+        resume_generator = ResumeGenerator(cache_manager, user_id)
 
         # Read file content
         content = await file.read()
