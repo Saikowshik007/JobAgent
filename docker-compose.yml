@@ -300,6 +300,22 @@ services:
       timeout: 3s
       retries: 3
 
+  # Keep your existing Selenium
+  selenium-chrome:
+    image: selenium/standalone-chrome:4.15.0-20231129
+    container_name: jobtrak-selenium
+    ports:
+      - "4444:4444"
+    environment:
+      - SE_VNC_NO_PASSWORD=1
+      - SE_NODE_MAX_INSTANCES=5
+      - SE_NODE_MAX_SESSIONS=5
+    volumes:
+      - /dev/shm:/dev/shm
+    networks:
+      - jobtrak-network
+    restart: unless-stopped
+
 networks:
   jobtrak-network:
     driver: bridge
