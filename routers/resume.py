@@ -5,9 +5,10 @@ from fastapi import APIRouter, Depends, HTTPException, Form, Query, File, Upload
 from typing import Optional
 import logging
 
-from core.dependencies import get_cache_manager, get_user_id, get_user_key
+from core.dependencies import get_cache_manager, get_user_id, get_user_key, get_user
 from data.dbcache_manager import DBCacheManager
 from dataModels.api_models import GenerateResumeRequest
+from dataModels.user_model import User
 from services.resume_generator import ResumeGenerator
 
 logger = logging.getLogger(__name__)
@@ -21,8 +22,7 @@ async def generate_resume(
         handle_existing: str = Query("replace", regex="^(replace|keep_both|error)$",
                                      description="How to handle existing resumes: replace, keep_both, or error"),
         cache_manager: DBCacheManager = Depends(get_cache_manager),
-        user_id: str = Depends(get_user_id),
-        api_key: str = Depends(get_user_key)
+        user:User  = Depends(get_user),
 ):
     """Generate a tailored resume with orphaning prevention."""
     try:
@@ -33,7 +33,7 @@ async def generate_resume(
 
         logger.info(f"Resume generation request for job {request.job_id}, include_objective={include_objective}")
 
-        resume_generator = ResumeGenerator(cache_manager, user_id, api_key)
+        resume_generator = ResumeGenerator(cache_manager, user)
         resume_info = await resume_generator.generate_resume(
             job_id=request.job_id,
             template=request.template or "standard",
@@ -48,7 +48,7 @@ async def generate_resume(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        logger.error(f"Error generating safe resume for job {request.job_id} for user {user_id}: {e}")
+        logger.error(f"Error generating safe resume for job {request.job_id} for user {user.id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/{resume_id}/download")
