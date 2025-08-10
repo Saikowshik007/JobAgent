@@ -1,4 +1,6 @@
-# Fixed version - simplified routing rules
+# Simple JobTrak Scaling - Multiple API Instances with Load Balancing
+version: '3.8'
+
 services:
   traefik:
     image: traefik:v3.0
@@ -31,13 +33,12 @@ services:
       - jobtrak-network
     restart: unless-stopped
 
-  jobtrak-api:
+  # API Instance 1
+  jobtrak-api-1:
     build:
       context: .
       dockerfile: Dockerfile.api
-    container_name: jobtrak-api
-    ports:
-      - "8000:8000"
+    container_name: jobtrak-api-1
     volumes:
       - .:/app
       - ./database:/app/database
@@ -46,7 +47,7 @@ services:
     restart: unless-stopped
     networks:
       - jobtrak-network
-    environment:
+    environment: &api-environment
       # Application settings
       - PYTHONPATH=/app
       - PYTHONUNBUFFERED=1
@@ -96,23 +97,95 @@ services:
       retries: 3
     labels:
       - "traefik.enable=true"
-
-      # SIMPLIFIED: Just route everything to the API
       - "traefik.http.routers.api.rule=Host(`jobtrackai.duckdns.org`)"
       - "traefik.http.routers.api.entrypoints=websecure"
       - "traefik.http.routers.api.tls.certresolver=letsencrypt"
       - "traefik.http.services.api.loadbalancer.server.port=8000"
 
-      # Remove CORS from Traefik - let FastAPI handle it
-      # - "traefik.http.routers.api.middlewares=" # No middlewares
+      # Load balancer health checks
+      - "traefik.http.services.api.loadbalancer.healthcheck.path=/health"
+      - "traefik.http.services.api.loadbalancer.healthcheck.interval=10s"
 
-      # HTTP to HTTPS redirect - separate from CORS
+      # HTTP to HTTPS redirect
       - "traefik.http.routers.api-http.rule=Host(`jobtrackai.duckdns.org`)"
       - "traefik.http.routers.api-http.entrypoints=web"
       - "traefik.http.middlewares.https-redirect.redirectscheme.scheme=https"
       - "traefik.http.middlewares.https-redirect.redirectscheme.permanent=true"
       - "traefik.http.routers.api-http.middlewares=https-redirect"
 
+  # API Instance 2
+  jobtrak-api-2:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: jobtrak-api-2
+    volumes:
+      - .:/app
+      - ./database:/app/database
+      - ./output:/app/output
+      - ./logs:/app/logs
+    restart: unless-stopped
+    networks:
+      - jobtrak-network
+    environment:
+      <<: *api-environment
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 40s
+      retries: 3
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.api.rule=Host(`jobtrackai.duckdns.org`)"
+      - "traefik.http.routers.api.entrypoints=websecure"
+      - "traefik.http.routers.api.tls.certresolver=letsencrypt"
+      - "traefik.http.services.api.loadbalancer.server.port=8000"
+      - "traefik.http.services.api.loadbalancer.healthcheck.path=/health"
+      - "traefik.http.services.api.loadbalancer.healthcheck.interval=10s"
+
+  # API Instance 3
+  jobtrak-api-3:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: jobtrak-api-3
+    volumes:
+      - .:/app
+      - ./database:/app/database
+      - ./output:/app/output
+      - ./logs:/app/logs
+    restart: unless-stopped
+    networks:
+      - jobtrak-network
+    environment:
+      <<: *api-environment
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 40s
+      retries: 3
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.api.rule=Host(`jobtrackai.duckdns.org`)"
+      - "traefik.http.routers.api.entrypoints=websecure"
+      - "traefik.http.routers.api.tls.certresolver=letsencrypt"
+      - "traefik.http.services.api.loadbalancer.server.port=8000"
+      - "traefik.http.services.api.loadbalancer.healthcheck.path=/health"
+      - "traefik.http.services.api.loadbalancer.healthcheck.interval=10s"
+
+  # Keep your existing single database
   postgres:
     image: postgres:15-alpine
     container_name: jobtrak-postgres
@@ -135,6 +208,7 @@ services:
       timeout: 5s
       retries: 5
 
+  # Keep your existing single Redis
   redis:
     image: redis:7-alpine
     container_name: jobtrak-redis
@@ -156,6 +230,22 @@ services:
       timeout: 3s
       retries: 3
 
+  # Keep your existing Selenium
+  selenium-chrome:
+    image: selenium/standalone-chrome:4.15.0-20231129
+    container_name: jobtrak-selenium
+    ports:
+      - "4444:4444"
+    environment:
+      - SE_VNC_NO_PASSWORD=1
+      - SE_NODE_MAX_INSTANCES=5
+      - SE_NODE_MAX_SESSIONS=5
+    volumes:
+      - /dev/shm:/dev/shm
+    networks:
+      - jobtrak-network
+    restart: unless-stopped
+
 networks:
   jobtrak-network:
     driver: bridge
@@ -168,5 +258,3 @@ volumes:
   redis_data:
     driver: local
     name: jobtrak-redis-data
-  letsencrypt:
-    driver: local
