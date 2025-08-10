@@ -1,4 +1,4 @@
-# Simple JobTrak Scaling - Multiple API Instances with Load Balancing
+# Simple JobTrak Scaling - Multiple API Instances with Load Balancing + Logging
 version: '3.8'
 
 services:
@@ -47,13 +47,19 @@ services:
     restart: unless-stopped
     networks:
       - jobtrak-network
-    environment: &api-environment
+    environment:
       # Application settings
       - PYTHONPATH=/app
       - PYTHONUNBUFFERED=1
       - PYTHONDONTWRITEBYTECODE=1
       - API_DEBUG=1
       - HOST_IP=${HOST_IP:-auto-detect}
+
+      # Logging configuration
+      - LOG_LEVEL=INFO
+      - LOG_FILE=/app/logs/api.log
+      - ACCESS_LOG_FILE=/app/logs/access.log
+      - ERROR_LOG_FILE=/app/logs/error.log
 
       # External services
       - SELENIUM_REMOTE_URL=http://selenium-chrome:4444/wd/hub
@@ -135,6 +141,12 @@ services:
       - API_DEBUG=1
       - HOST_IP=${HOST_IP:-auto-detect}
 
+      # Logging configuration
+      - LOG_LEVEL=INFO
+      - LOG_FILE=/app/logs/api.log
+      - ACCESS_LOG_FILE=/app/logs/access.log
+      - ERROR_LOG_FILE=/app/logs/error.log
+
       # External services
       - SELENIUM_REMOTE_URL=http://selenium-chrome:4444/wd/hub
       - SIMPLIFY_JOBS_API_URL=https://api.simplify.jobs/v2
@@ -206,6 +218,12 @@ services:
       - API_DEBUG=1
       - HOST_IP=${HOST_IP:-auto-detect}
 
+      # Logging configuration
+      - LOG_LEVEL=INFO
+      - LOG_FILE=/app/logs/api.log
+      - ACCESS_LOG_FILE=/app/logs/access.log
+      - ERROR_LOG_FILE=/app/logs/error.log
+
       # External services
       - SELENIUM_REMOTE_URL=http://selenium-chrome:4444/wd/hub
       - SIMPLIFY_JOBS_API_URL=https://api.simplify.jobs/v2
@@ -255,7 +273,7 @@ services:
       - "traefik.http.services.api.loadbalancer.healthcheck.path=/health"
       - "traefik.http.services.api.loadbalancer.healthcheck.interval=10s"
 
-  # Keep your existing single database
+  # PostgreSQL Database
   postgres:
     image: postgres:15-alpine
     container_name: jobtrak-postgres
@@ -278,7 +296,7 @@ services:
       timeout: 5s
       retries: 5
 
-  # Keep your existing single Redis
+  # Redis Cache
   redis:
     image: redis:7-alpine
     container_name: jobtrak-redis
@@ -300,7 +318,7 @@ services:
       timeout: 3s
       retries: 3
 
-  # Keep your existing Selenium
+  # Selenium Chrome
   selenium-chrome:
     image: selenium/standalone-chrome:4.15.0-20231129
     container_name: jobtrak-selenium
@@ -312,6 +330,68 @@ services:
       - SE_NODE_MAX_SESSIONS=5
     volumes:
       - /dev/shm:/dev/shm
+    networks:
+      - jobtrak-network
+    restart: unless-stopped
+
+  # Logging Services
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
+    container_name: jobtrak-elasticsearch
+    environment:
+      - discovery.type=single-node
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+      - xpack.security.enabled=false
+      - xpack.security.enrollment.enabled=false
+    ports:
+      - "9200:9200"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    networks:
+      - jobtrak-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.11.0
+    container_name: jobtrak-kibana
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - SERVER_NAME=kibana
+      - SERVER_HOST=0.0.0.0
+    ports:
+      - "5601:5601"
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    networks:
+      - jobtrak-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:5601/api/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  filebeat:
+    image: docker.elastic.co/beats/filebeat:8.11.0
+    container_name: jobtrak-filebeat
+    user: root
+    command: filebeat -e -strict.perms=false
+    volumes:
+      - ./logging/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
+      - ./logs:/var/log/jobtrak:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
     networks:
       - jobtrak-network
     restart: unless-stopped
@@ -328,3 +408,6 @@ volumes:
   redis_data:
     driver: local
     name: jobtrak-redis-data
+  elasticsearch_data:
+    driver: local
+    name: jobtrak-elasticsearch-data

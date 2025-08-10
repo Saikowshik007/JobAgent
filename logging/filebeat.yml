@@ -1,0 +1,175 @@
+# Filebeat configuration for JobTrak log collection
+# File: logging/filebeat.yml
+
+filebeat.inputs:
+  # Application logs from mounted volume
+  - type: log
+    enabled: true
+    paths:
+      - /var/log/jobtrak/*.log
+      - /var/log/jobtrak/**/*.log
+    fields:
+      service: jobtrak-application
+      environment: production
+    fields_under_root: true
+    multiline.pattern: '^\d{4}-\d{2}-\d{2}'
+    multiline.negate: true
+    multiline.match: after
+
+  # Docker container logs
+  - type: container
+    enabled: true
+    paths:
+      - '/var/lib/docker/containers/*/*.log'
+    processors:
+      - add_docker_metadata:
+          host: "unix:///var/run/docker.sock"
+      - decode_json_fields:
+          fields: ["message"]
+          target: ""
+          overwrite_keys: true
+      - drop_fields:
+          fields: ["host", "agent", "ecs", "input"]
+
+  # FastAPI access logs
+  - type: log
+    enabled: true
+    paths:
+      - /var/log/jobtrak/access.log
+    fields:
+      log_type: access
+      service: jobtrak-api
+    json.keys_under_root: true
+    json.add_error_key: true
+
+  # Error logs
+  - type: log
+    enabled: true
+    paths:
+      - /var/log/jobtrak/error.log
+      - /var/log/jobtrak/errors/*.log
+    fields:
+      log_type: error
+      service: jobtrak-api
+      severity: error
+    multiline.pattern: '^Traceback'
+    multiline.negate: true
+    multiline.match: after
+
+  # Database logs (if available)
+  - type: log
+    enabled: true
+    paths:
+      - /var/log/jobtrak/db.log
+    fields:
+      log_type: database
+      service: postgresql
+
+  # Job processing logs
+  - type: log
+    enabled: true
+    paths:
+      - /var/log/jobtrak/jobs/*.log
+    fields:
+      log_type: job_processing
+      service: jobtrak-worker
+
+processors:
+  # Add timestamp if not present
+  - timestamp:
+      field: "@timestamp"
+      layouts:
+        - '2006-01-02T15:04:05.000Z'
+        - '2006-01-02 15:04:05'
+      test:
+        - '2023-12-01T10:30:45.123Z'
+        - '2023-12-01 10:30:45'
+
+  # Add hostname
+  - add_host_metadata:
+      when.not.contains.tags: forwarded
+
+  # Clean up log messages
+  - dissect:
+      tokenizer: '%{timestamp} [%{level}] %{message}'
+      field: "message"
+      target_prefix: "log"
+      when:
+        regexp:
+          message: '^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}'
+
+  # Parse JSON logs
+  - decode_json_fields:
+      fields: ["message"]
+      process_array: false
+      max_depth: 1
+      target: ""
+      overwrite_keys: false
+      add_error_key: true
+      when:
+        regexp:
+          message: '^[\{\[]'
+
+  # Add service tags based on container names
+  - add_tags:
+      tags: [api]
+      when:
+        contains:
+          container.name: "jobtrak-api"
+
+  - add_tags:
+      tags: [database]
+      when:
+        contains:
+          container.name: "postgres"
+
+  - add_tags:
+      tags: [cache]
+      when:
+        contains:
+          container.name: "redis"
+
+  - add_tags:
+      tags: [loadbalancer]
+      when:
+        contains:
+          container.name: "traefik"
+
+  # Drop empty messages
+  - drop_event:
+      when:
+        equals:
+          message: ""
+
+output.elasticsearch:
+  hosts: ["${ELASTICSEARCH_HOSTS:http://elasticsearch:9200}"]
+  index: "jobtrak-logs-%{+yyyy.MM.dd}"
+  template.name: "jobtrak"
+  template.pattern: "jobtrak-*"
+  template.settings:
+    index.number_of_shards: 1
+    index.number_of_replicas: 0
+    index.refresh_interval: "5s"
+
+# Kibana dashboard configuration
+setup.dashboards.enabled: true
+setup.kibana:
+  host: "http://kibana:5601"
+
+# Index lifecycle management
+setup.ilm.enabled: true
+setup.ilm.rollover_alias: "jobtrak-logs"
+setup.ilm.pattern: "jobtrak-logs-%{+yyyy.MM.dd}"
+setup.ilm.policy: "jobtrak-policy"
+
+# Logging configuration
+logging.level: info
+logging.to_files: true
+logging.files:
+  path: /var/log/filebeat
+  name: filebeat
+  keepfiles: 7
+  permissions: 0644
+
+# Monitoring
+monitoring.enabled: true

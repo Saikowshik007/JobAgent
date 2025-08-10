@@ -77,8 +77,19 @@ function Deploy-ScaledSetup {
     Write-ColorOutput "Stopping current services..." "Info"
     docker-compose down --timeout 30 2>$null
 
-    Write-ColorOutput "Starting scaled services..." "Info"
+    Write-ColorOutput "Creating logging directory..." "Info"
+    if (-not (Test-Path "logging")) {
+        New-Item -ItemType Directory -Path "logging" -Force | Out-Null
+    }
+
+    Write-ColorOutput "Starting core services..." "Info"
     docker-compose up -d postgres redis selenium-chrome
+
+    Write-ColorOutput "Starting logging services..." "Info"
+    docker-compose up -d elasticsearch
+    Start-Sleep -Seconds 30
+
+    docker-compose up -d kibana filebeat
 
     Write-ColorOutput "Waiting for database to be ready..." "Info"
     Start-Sleep -Seconds 15
@@ -115,7 +126,7 @@ function Deploy-ScaledSetup {
 function Test-Deployment {
     Write-ColorOutput "Verifying deployment..." "Info"
 
-    $services = @("jobtrak-api-1", "jobtrak-api-2", "jobtrak-api-3", "jobtrak-postgres", "jobtrak-redis", "jobtrak-traefik")
+    $services = @("jobtrak-api-1", "jobtrak-api-2", "jobtrak-api-3", "jobtrak-postgres", "jobtrak-redis", "jobtrak-traefik", "jobtrak-elasticsearch", "jobtrak-kibana")
     $runningContainers = docker ps --format "{{.Names}}"
 
     foreach ($service in $services) {
@@ -127,7 +138,7 @@ function Test-Deployment {
         }
     }
 
-    Write-ColorOutput "Testing load balancer..." "Info"
+    Write-ColorOutput "Testing dashboards..." "Info"
     Start-Sleep -Seconds 10
 
     try {
@@ -138,6 +149,16 @@ function Test-Deployment {
     }
     catch {
         Write-ColorOutput "Traefik dashboard not accessible" "Warning"
+    }
+
+    try {
+        $response = Invoke-WebRequest -Uri "http://localhost:5601" -TimeoutSec 10 -UseBasicParsing
+        if ($response.StatusCode -eq 200) {
+            Write-ColorOutput "Kibana dashboard accessible" "Success"
+        }
+    }
+    catch {
+        Write-ColorOutput "Kibana dashboard not accessible (may still be starting)" "Warning"
     }
 
     Write-ColorOutput "Deployment verification completed!" "Success"
@@ -156,6 +177,8 @@ function Show-Status {
     Write-Host "Service URLs:" -ForegroundColor Yellow
     Write-Host "- Application: https://jobtrackai.duckdns.org"
     Write-Host "- Traefik Dashboard: http://localhost:8080"
+    Write-Host "- Kibana Logs Dashboard: http://localhost:5601"
+    Write-Host "- Elasticsearch: http://localhost:9200"
     Write-Host ""
 
     Write-Host "Resource Usage:" -ForegroundColor Yellow
