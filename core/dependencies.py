@@ -5,6 +5,8 @@ from fastapi import HTTPException, Header, Request
 from typing import Optional
 import logging
 
+from dataModels.user_model import User
+
 logger = logging.getLogger(__name__)
 
 # Default user ID if none provided
