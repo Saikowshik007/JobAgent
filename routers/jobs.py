@@ -15,28 +15,39 @@ from services.resume_improver import ResumeImprover
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
-
 @router.post("/analyze")
 async def analyze_job(
         job_url: str = Form(...),
         status: Optional[str] = Form(None),
         cache_manager: DBCacheManager = Depends(get_cache_manager),
-        user_id: str = Depends(get_user_id),
-        api_key: str = Depends(get_user_key)
+        user: User = Depends(get_user)  # Now using User object
 ):
     """Analyze a job posting from a URL."""
     try:
-        job_exist = await cache_manager.job_exists(url=job_url, user_id=user_id)
+        # Check if user has permission for this feature
+        if not user.has_feature("advanced_parsing"):
+            raise HTTPException(
+                status_code=403,
+                detail="Advanced parsing feature not enabled for this user"
+            )
+
+        job_exist = await cache_manager.job_exists(url=job_url, user_id=user.id)
         if job_exist:
             raise HTTPException(status_code=409, detail="Job already exists!!")
 
-        # Initialize ResumeImprover with the job URL
-        resume_improver = ResumeImprover(url=job_url, api_key=api_key)
+        # Initialize ResumeImprover with user's API key and model
+        resume_improver = ResumeImprover(
+            url=job_url,
+            api_key=user.api_key,
+            model=user.model  # Now we can pass the user's preferred model
+        )
         resume_improver.download_and_parse_job_post()
         job_details = resume_improver.parsed_job
 
         # Create a job ID
-        job_id = hashlib.md5(f"{user_id}|{job_url}|{datetime.now().isoformat()}".encode()).hexdigest()
+        job_id = hashlib.md5(
+            f"{user.id}|{job_url}|{datetime.now().isoformat()}".encode()
+        ).hexdigest()
 
         # Handle status if provided
         job_status = JobStatus.NEW
@@ -51,23 +62,30 @@ async def analyze_job(
             job_url=job_url,
             status=job_status,
             date_found=datetime.now(),
-            metadata=job_details
+            metadata={
+                **job_details,
+                "analyzed_with_model": user.model  # Track which model was used
+            }
         )
 
         # Save job using the unified cache manager
-        await cache_manager.save_job(job, user_id)
+        await cache_manager.save_job(job, user.id)
 
         return {
             "message": "Job analyzed successfully",
             "job_id": job_id,
             "job_url": job_url,
-            "user_id": user_id,
+            "user": {
+                "id": user.id,
+                "model": user.model
+            },
             "job_details": job.to_dict()
         }
 
     except Exception as e:
-        logger.error(f"Error analyzing job for user {user_id}: {e}")
+        logger.error(f"Error analyzing job for user {user.id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @router.get("/")
 async def get_jobs(
@@ -76,10 +94,16 @@ async def get_jobs(
         limit: int = Query(100, ge=1, le=1000),
         offset: int = Query(0, ge=0),
         cache_manager: DBCacheManager = Depends(get_cache_manager),
-        user_id: str = Depends(get_user_id)
+        user: User = Depends(get_user)
 ):
     """Get jobs from the database with optional filtering."""
     try:
+        # Check user quota
+        job_stats = await cache_manager.get_job_stats(user.id)
+        if job_stats.get("total", 0) >= user.max_jobs:
+            logger.warning(f"User {user.id} has reached job quota limit")
+            # Don't block reading, just log the warning
+
         # Convert string status to JobStatus enum if provided
         status_filter = None
         if status:
@@ -89,11 +113,19 @@ async def get_jobs(
                 logger.warning(f"Invalid status filter: {status}")
 
         # Get jobs using unified cache manager
-        jobs = await cache_manager.get_all_jobs(user_id, status=status_filter, limit=limit, offset=offset)
+        jobs = await cache_manager.get_all_jobs(
+            user.id,
+            status=status_filter,
+            limit=limit,
+            offset=offset
+        )
 
         # Apply additional filters
         if company:
-            jobs = [job for job in jobs if job.metadata and company.lower() in job.metadata.get('company', '').lower()]
+            jobs = [
+                job for job in jobs
+                if job.metadata and company.lower() in job.metadata.get('company', '').lower()
+            ]
 
         # Get total count
         total_count = len(jobs)
@@ -106,13 +138,21 @@ async def get_jobs(
             "total": total_count,
             "offset": offset,
             "limit": limit,
-            "user_id": user_id,
+            "user": {
+                "id": user.id,
+                "quota": {
+                    "used": job_stats.get("total", 0),
+                    "max": user.max_jobs
+                }
+            },
             "jobs": jobs_dict
         }
 
     except Exception as e:
-        logger.error(f"Error getting jobs for user {user_id}: {e}")
+        logger.error(f"Error getting jobs for user {user.id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/status")
 async def get_job_stats(
         cache_manager: DBCacheManager = Depends(get_cache_manager),

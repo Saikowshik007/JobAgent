@@ -21,7 +21,7 @@ class ResumeImprover:
     Parallel ResumeImprover using asyncio.gather with run_in_executor for true HTTP parallelism.
     """
 
-    def __init__(self, url, api_key, parsed_job=None, llm_kwargs: dict = None, timeout: int = 500):
+    def __init__(self, url, user, parsed_job=None, llm_kwargs: dict = None, timeout: int = 500):
         """Initialize ResumeImprover with the job post URL and optional resume location."""
         super().__init__()
         self.job_post_html_data = None
@@ -30,7 +30,7 @@ class ResumeImprover:
         self.job_post = None
         self.parsed_job = parsed_job
         self.llm_kwargs = llm_kwargs or {}
-        self.api_key = api_key
+        self.user = user
         self.url = url
         self.timeout = timeout
 
@@ -350,7 +350,7 @@ class ResumeImprover:
             self.url = url
         self._download_url()
         self._extract_html_data()
-        self.job_post = JobPost(self.job_post_raw, self.api_key)
+        self.job_post = JobPost(self.job_post_raw, self.user)
         self.parsed_job = self.job_post.parse_job_post(verbose=True)
 
     def _extract_html_data(self):
@@ -424,7 +424,7 @@ class ResumeImprover:
 
             # Create chain
             prompt = ChatPromptTemplate(messages=Prompts.lookup["OBJECTIVE_WRITER"])
-            llm = create_llm(api_key=self.api_key, **self.llm_kwargs)
+            llm = create_llm(api_key=self.user.api_key, **self.llm_kwargs)
             chain = prompt | llm.with_structured_output(schema=ResumeSummarizerOutput)
 
             # Get inputs
@@ -467,7 +467,7 @@ class ResumeImprover:
             from langchain.prompts import ChatPromptTemplate
 
             chain = ChatPromptTemplate(messages=Prompts.lookup["SKILLS_MATCHER"])
-            llm = create_llm(api_key=self.api_key, **self.llm_kwargs)
+            llm = create_llm(api_key=self.user.api_key, **self.llm_kwargs)
 
             # Keep using function_calling method since json_mode requires "json" in prompts
             runnable = chain | llm.with_structured_output(schema=ResumeSkillsMatcherOutput, method="function_calling")
@@ -647,7 +647,7 @@ class ResumeImprover:
             logger.debug(f"Starting rewrite_section for: {section.get('title') or section.get('name', 'Unknown')}")
 
             prompt = ChatPromptTemplate(messages=Prompts.lookup["SECTION_HIGHLIGHTER"])
-            llm = create_llm(api_key=self.api_key, **self.llm_kwargs)
+            llm = create_llm(api_key=self.user.api_key, **self.llm_kwargs)
             chain = prompt | llm.with_structured_output(schema=ResumeSectionHighlighterOutput)
 
             chain_inputs = self._get_formatted_chain_inputs(chain=chain, section=section)

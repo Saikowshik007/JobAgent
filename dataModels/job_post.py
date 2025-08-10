@@ -54,15 +54,15 @@ class JobDescription(BaseModel):
 
 
 class JobPost:
-    def __init__(self, posting: str, api_key:str):
+    def __init__(self, posting: str, user):
         """Initialize JobPost with the job posting string."""
         self.posting = posting
         self.extractor_llm = services.langchain_helpers.create_llm(
             chat_model=ChatOpenAI,
-            model_name=config.get("model.name"),
-            temperature=config.config.get("model.temperature"),
+            model_name=user.model,
+            temperature=user.preferences.get("temperature"),
             cache=True,
-            api_key=api_key
+            api_key=user.api_key
         )
         self.parsed_job = None
 

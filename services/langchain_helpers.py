@@ -11,34 +11,17 @@ langchain.llm_cache = InMemoryCache()
 logger = config.getLogger("langchain_helper")  # Get the logger from config
 
 
-def create_llm(**kwargs):
+def create_llm(user, **kwargs):
     """Create an LLM instance with specified parameters."""
     chat_model = kwargs.pop("chat_model", ChatOpenAI)
-    model_name = kwargs.get("model_name", config.get("model.name"))
-
-
-    # Check if api_key exists in kwargs and use it
-    if "api_key" in kwargs:
-        api_key = kwargs.pop("api_key")
-        logger.debug("Using provided API key for LLM")
-        # Ensure it's directly passed as a separate parameter
-        kwargs.setdefault("model_name", config.get("model.name"))
-        kwargs.setdefault("cache", False)
-        try:
-            return chat_model(api_key=api_key, **kwargs)
-        except Exception as e:
-            logger.error(f"Failed to create LLM with provided API key: {str(e)}")
-            raise
-    else:
-        # No API key provided, fallback to environment variable
-        logger.debug("No API key provided, falling back to environment variable")
-        kwargs.setdefault("model_name", config.get("model.name"))
-        kwargs.setdefault("cache", False)
-        try:
-            return chat_model(**kwargs)
-        except Exception as e:
-            logger.error(f"Failed to create LLM with environment API key: {str(e)}")
-            raise
+    kwargs.setdefault("model_name", user.model)
+    kwargs.setdefault("cache", False)
+    kwargs.setdefault("api_key",user.api_key)
+    try:
+        return chat_model(**kwargs)
+    except Exception as e:
+        logger.error(f"Failed to create LLM with environment API key: {str(e)}")
+        raise
 
 
 def format_list_as_string(lst: list, list_sep: str = "\n- ") -> str:

@@ -70,3 +70,29 @@ async def get_optional_user_key(x_api_key: Optional[str] = Header(None)):
         return None
     logger.info("Received API key")
     return x_api_key
+
+async def get_user(
+        x_user_id: str = Header(..., description="User ID"),
+        x_api_key: str = Header(..., description="API Key"),
+        x_model: Optional[str] = Header("gpt-4o", description="AI Model to use")
+) -> User:
+    """
+    Get or create a User object from headers.
+    This function creates a User instance with all provided information.
+    """
+    if not x_user_id:
+        raise HTTPException(status_code=401, detail="User ID is required")
+
+    if not x_api_key:
+        raise HTTPException(status_code=401, detail="API key is required")
+
+    # Create user object with provided information
+    user = User(
+        id=x_user_id,
+        api_key=x_api_key,
+        model=x_model or "gpt-4o"
+    )
+
+    logger.debug(f"User authenticated: {user.id} using model: {user.model}")
+
+    return user
