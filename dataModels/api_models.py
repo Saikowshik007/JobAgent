@@ -4,6 +4,8 @@ from typing import Optional, List, Dict, Any
 
 from pydantic import BaseModel, Field
 
+from dataModels.user_model import User
+
 
 class JobStatusEnum(str, Enum):
     """Enum for job status values matching the JobStatus class."""
@@ -43,6 +45,7 @@ class GenerateResumeRequest(BaseModel):
     customize: Optional[bool] = Field(True, description="Whether to customize resume for the job")
     resume_data: Optional[Dict[str, Any]] = Field(None, description="User's resume data in YAML format")
     include_objective: Optional[bool] = Field(True, description="Whether to include an objective section")
+    user: User = Field(..., description="User object")
 
 class UploadToSimplifyRequest(BaseModel):
     """Resume upload to Simplify request model."""

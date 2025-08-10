@@ -19,7 +19,7 @@ class ResumeGenerator:
     Simplified - just manages async jobs, ResumeImprover does the work.
     """
 
-    def __init__(self, cache_manager, user: str):
+    def __init__(self, cache_manager, user):
         """Initialize the ResumeGenerator with unified cache manager and user ID."""
         self.cache_manager = cache_manager
         self.user = user

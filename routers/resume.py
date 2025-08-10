@@ -22,7 +22,6 @@ async def generate_resume(
         handle_existing: str = Query("replace", regex="^(replace|keep_both|error)$",
                                      description="How to handle existing resumes: replace, keep_both, or error"),
         cache_manager: DBCacheManager = Depends(get_cache_manager),
-        user:User  = Depends(get_user),
 ):
     """Generate a tailored resume with orphaning prevention."""
     try:
@@ -33,7 +32,7 @@ async def generate_resume(
 
         logger.info(f"Resume generation request for job {request.job_id}, include_objective={include_objective}")
 
-        resume_generator = ResumeGenerator(cache_manager, user)
+        resume_generator = ResumeGenerator(cache_manager, request.user)
         resume_info = await resume_generator.generate_resume(
             job_id=request.job_id,
             template=request.template or "standard",
@@ -48,7 +47,7 @@ async def generate_resume(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        logger.error(f"Error generating safe resume for job {request.job_id} for user {user.id}: {e}")
+        logger.error(f"Error generating safe resume for job {request.job_id} for user {request.user.id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/{resume_id}/download")

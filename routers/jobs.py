@@ -1,11 +1,14 @@
 """
 Job management routes for analyzing, retrieving, updating, and deleting jobs.
 """
+
 from fastapi import APIRouter, Depends, HTTPException, Form, Query
 from typing import Optional, List
 from datetime import datetime
 import hashlib
 import logging
+
+from pydantic import Field
 
 from core.dependencies import get_cache_manager, get_user_id, get_user_key, get_user
 from data.dbcache_manager import DBCacheManager
@@ -21,7 +24,7 @@ async def analyze_job(
         job_url: str = Form(...),
         status: Optional[str] = Form(None),
         cache_manager: DBCacheManager = Depends(get_cache_manager),
-        user: User = Depends(get_user)  # Now using User object
+        user: User  = Field(..., description="User object")
 ):
     """Analyze a job posting from a URL."""
     try:
