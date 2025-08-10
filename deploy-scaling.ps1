@@ -10,7 +10,6 @@ param(
     [string]$ServiceName = ""
 )
 
-# Function to write colored output
 function Write-ColorOutput {
     param(
         [string]$Message,
@@ -25,43 +24,39 @@ function Write-ColorOutput {
     }
 }
 
-# Check if Docker is running
 function Test-Docker {
     Write-ColorOutput "Checking if Docker is running..." "Info"
 
     try {
-        $dockerInfo = docker info 2>$null
+        $null = docker info 2>$null
         if ($LASTEXITCODE -eq 0) {
-            Write-ColorOutput "Docker is running ✓" "Success"
+            Write-ColorOutput "Docker is running" "Success"
             return $true
+        }
+        else {
+            Write-ColorOutput "Docker is not running. Please start Docker Desktop first." "Error"
+            return $false
         }
     }
     catch {
         Write-ColorOutput "Docker is not running. Please start Docker Desktop first." "Error"
         return $false
     }
-
-    Write-ColorOutput "Docker is not running. Please start Docker Desktop first." "Error"
-    return $false
 }
 
-# Backup current setup
 function Backup-CurrentSetup {
     Write-ColorOutput "Creating backup of current setup..." "Info"
 
     $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
     $backupDir = ".\backup_$timestamp"
 
-    # Create backup directory
     New-Item -ItemType Directory -Path $backupDir -Force | Out-Null
 
-    # Backup current docker-compose file
     if (Test-Path "docker-compose.yml") {
         Copy-Item "docker-compose.yml" "$backupDir\" -Force
         Write-ColorOutput "Backed up docker-compose.yml" "Info"
     }
 
-    # Backup database if running
     $postgresContainer = docker ps --format "{{.Names}}" | Where-Object { $_ -match "postgres" }
     if ($postgresContainer) {
         Write-ColorOutput "Creating database backup..." "Info"
@@ -74,31 +69,26 @@ function Backup-CurrentSetup {
         }
     }
 
-    # Save backup directory reference
     $backupDir | Out-File -FilePath ".last_backup" -Encoding UTF8
     Write-ColorOutput "Backup completed in $backupDir" "Success"
 }
 
-# Deploy the scaled setup
 function Deploy-ScaledSetup {
     Write-ColorOutput "Stopping current services..." "Info"
     docker-compose down --timeout 30 2>$null
 
     Write-ColorOutput "Starting scaled services..." "Info"
-
-    # Start database and Redis first
     docker-compose up -d postgres redis selenium-chrome
 
     Write-ColorOutput "Waiting for database to be ready..." "Info"
     Start-Sleep -Seconds 15
 
-    # Wait for PostgreSQL to be ready
     $maxAttempts = 12
     for ($i = 1; $i -le $maxAttempts; $i++) {
         try {
-            $result = docker exec jobtrak-postgres pg_isready -U jobtrak_user -d jobtrak 2>$null
+            $null = docker exec jobtrak-postgres pg_isready -U jobtrak_user -d jobtrak 2>$null
             if ($LASTEXITCODE -eq 0) {
-                Write-ColorOutput "PostgreSQL is ready ✓" "Success"
+                Write-ColorOutput "PostgreSQL is ready" "Success"
                 break
             }
         }
@@ -115,7 +105,6 @@ function Deploy-ScaledSetup {
         Start-Sleep -Seconds 10
     }
 
-    # Start all API instances and Traefik
     Write-ColorOutput "Starting API instances and load balancer..." "Info"
     docker-compose up -d
 
@@ -123,33 +112,28 @@ function Deploy-ScaledSetup {
     Start-Sleep -Seconds 20
 }
 
-# Verify the deployment
 function Test-Deployment {
     Write-ColorOutput "Verifying deployment..." "Info"
 
-    # Check if all containers are running
     $services = @("jobtrak-api-1", "jobtrak-api-2", "jobtrak-api-3", "jobtrak-postgres", "jobtrak-redis", "jobtrak-traefik")
-
     $runningContainers = docker ps --format "{{.Names}}"
 
     foreach ($service in $services) {
         if ($runningContainers -contains $service) {
-            Write-ColorOutput "$service is running ✓" "Success"
+            Write-ColorOutput "$service is running" "Success"
         }
         else {
-            Write-ColorOutput "$service is not running ✗" "Error"
+            Write-ColorOutput "$service is not running" "Error"
         }
     }
 
-    # Test load balancer
     Write-ColorOutput "Testing load balancer..." "Info"
     Start-Sleep -Seconds 10
 
-    # Check if Traefik dashboard is accessible
     try {
         $response = Invoke-WebRequest -Uri "http://localhost:8080" -TimeoutSec 5 -UseBasicParsing
         if ($response.StatusCode -eq 200) {
-            Write-ColorOutput "Traefik dashboard accessible ✓" "Success"
+            Write-ColorOutput "Traefik dashboard accessible" "Success"
         }
     }
     catch {
@@ -159,39 +143,33 @@ function Test-Deployment {
     Write-ColorOutput "Deployment verification completed!" "Success"
 }
 
-# Show status
 function Show-Status {
     Write-Host ""
     Write-Host "=== JobTrak Scaling Status ===" -ForegroundColor Cyan
     Write-Host ""
 
-    # Show running containers
     Write-Host "Running Containers:" -ForegroundColor Yellow
-    $containers = docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" | Where-Object { $_ -match "jobtrak" }
-    $containers | ForEach-Object { Write-Host $_ }
+    $containers = docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+    $containers | Where-Object { $_ -match "jobtrak" } | ForEach-Object { Write-Host $_ }
     Write-Host ""
 
-    # Show service URLs
     Write-Host "Service URLs:" -ForegroundColor Yellow
-    Write-Host "• Application: https://jobtrackai.duckdns.org"
-    Write-Host "• Traefik Dashboard: http://localhost:8080"
+    Write-Host "- Application: https://jobtrackai.duckdns.org"
+    Write-Host "- Traefik Dashboard: http://localhost:8080"
     Write-Host ""
 
-    # Show quick resource usage
     Write-Host "Resource Usage:" -ForegroundColor Yellow
-    $stats = docker stats --no-stream --format "table {{.Container}}\t{{.CPUPerc}}\t{{.MemUsage}}" | Where-Object { $_ -match "jobtrak" }
-    $stats | ForEach-Object { Write-Host $_ }
+    $stats = docker stats --no-stream --format "table {{.Container}}\t{{.CPUPerc}}\t{{.MemUsage}}"
+    $stats | Where-Object { $_ -match "jobtrak" } | ForEach-Object { Write-Host $_ }
     Write-Host ""
 
     Write-ColorOutput "Your application is now running with 3 API instances!" "Success"
     Write-ColorOutput "Monitor with: docker-compose logs -f" "Info"
 }
 
-# Rollback function
 function Invoke-Rollback {
     if (Test-Path ".last_backup") {
-        $backupDir = Get-Content ".last_backup" -Raw
-        $backupDir = $backupDir.Trim()
+        $backupDir = (Get-Content ".last_backup" -Raw).Trim()
 
         if (Test-Path "$backupDir\docker-compose.yml") {
             Write-ColorOutput "Rolling back to previous setup..." "Warning"
@@ -209,7 +187,6 @@ function Invoke-Rollback {
     }
 }
 
-# Show logs
 function Show-Logs {
     param([string]$Service)
 
@@ -221,62 +198,43 @@ function Show-Logs {
     }
 }
 
-# Main function
-function Main {
-    # Display banner
-    Write-Host ""
-    Write-Host "+==============================================+" -ForegroundColor Green
-    Write-Host "|        JobTrak API Scaling                   |" -ForegroundColor Green
-    Write-Host "|    1 -> 3 Instances + Load Balancer         |" -ForegroundColor Green
-    Write-Host "+==============================================+" -ForegroundColor Green
-    Write-Host ""
+# Main execution
+Write-Host ""
+Write-Host "================================================" -ForegroundColor Green
+Write-Host "        JobTrak API Scaling                     " -ForegroundColor Green
+Write-Host "    1 -> 3 Instances + Load Balancer           " -ForegroundColor Green
+Write-Host "================================================" -ForegroundColor Green
+Write-Host ""
 
-    switch ($Action) {
-        "deploy" {
-            if (-not (Test-Docker)) { exit 1 }
-            Backup-CurrentSetup
-            Deploy-ScaledSetup
-            Test-Deployment
-            Show-Status
-        }
-        "status" {
-            Show-Status
-        }
-        "rollback" {
-            Invoke-Rollback
-        }
-        "logs" {
-            Show-Logs -Service $ServiceName
-        }
-        default {
-            Write-Host "Usage: .\deploy-scaling.ps1 [deploy|status|rollback|logs] [service_name]"
-            Write-Host ""
-            Write-Host "Commands:"
-            Write-Host "  deploy   - Scale API to 3 instances (default)"
-            Write-Host "  status   - Show current status"
-            Write-Host "  rollback - Rollback to previous setup"
-            Write-Host "  logs     - Show logs (optional: specify service name)"
-            Write-Host ""
-            Write-Host "Examples:"
-            Write-Host "  .\deploy-scaling.ps1 deploy"
-            Write-Host "  .\deploy-scaling.ps1 status"
-            Write-Host "  .\deploy-scaling.ps1 logs jobtrak-api-1"
-        }
+switch ($Action) {
+    "deploy" {
+        if (-not (Test-Docker)) { exit 1 }
+        Backup-CurrentSetup
+        Deploy-ScaledSetup
+        Test-Deployment
+        Show-Status
     }
-}
-
-# Check execution policy
-try {
-    $executionPolicy = Get-ExecutionPolicy
-    if ($executionPolicy -eq "Restricted") {
-        Write-ColorOutput "PowerShell execution policy is restricted. You may need to run:" "Warning"
-        Write-Host "Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser" -ForegroundColor Yellow
+    "status" {
+        Show-Status
+    }
+    "rollback" {
+        Invoke-Rollback
+    }
+    "logs" {
+        Show-Logs -Service $ServiceName
+    }
+    default {
+        Write-Host "Usage: .\deploy-scaling.ps1 [deploy|status|rollback|logs] [service_name]"
         Write-Host ""
+        Write-Host "Commands:"
+        Write-Host "  deploy   - Scale API to 3 instances (default)"
+        Write-Host "  status   - Show current status"
+        Write-Host "  rollback - Rollback to previous setup"
+        Write-Host "  logs     - Show logs (optional: specify service name)"
+        Write-Host ""
+        Write-Host "Examples:"
+        Write-Host "  .\deploy-scaling.ps1 deploy"
+        Write-Host "  .\deploy-scaling.ps1 status"
+        Write-Host "  .\deploy-scaling.ps1 logs jobtrak-api-1"
     }
 }
-catch {
-    # Ignore execution policy check errors
-}
-
-# Run main function
-Main
