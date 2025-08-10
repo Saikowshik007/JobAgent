@@ -515,8 +515,7 @@ class ResumeImprover:
 
     def _perform_global_ats_optimization(self, resume_context: Dict) -> Dict:
         """
-        NEW: Perform global ATS optimization pass on the complete resume.
-        Ensures optimal keyword distribution and ATS scoring.
+        ENHANCED: Perform global ATS optimization with real improvements.
         """
         try:
             logger.info("Performing global ATS optimization...")
@@ -528,17 +527,22 @@ class ResumeImprover:
             ats_score = self._calculate_ats_score(resume_data, job_analysis)
             logger.info(f"Current ATS score: {ats_score}")
 
-            # If score is already good (>85), return as-is
-            if ats_score >= 85:
-                logger.info("ATS score already optimal, skipping global optimization")
+            # Always try to optimize unless score is perfect
+            if ats_score >= 95:
+                logger.info("ATS score already optimal (95+), skipping optimization")
                 return {**resume_data, 'ats_score': ats_score}
 
-            # Perform optimization (simplified version for now)
+            # Perform real optimization
             optimized_data = self._optimize_keyword_distribution(resume_data, job_analysis)
 
             # Recalculate score
             final_score = self._calculate_ats_score(optimized_data, job_analysis)
-            logger.info(f"Optimized ATS score: {final_score}")
+            improvement = final_score - ats_score
+
+            if improvement > 0:
+                logger.info(f"ATS optimization successful: {ats_score} → {final_score} (+{improvement:.1f} points)")
+            else:
+                logger.info(f"ATS score maintained at {final_score} (no optimization opportunities)")
 
             return {**optimized_data, 'ats_score': final_score}
 
@@ -581,19 +585,203 @@ class ResumeImprover:
             return 50.0  # Default fallback score
 
     def _optimize_keyword_distribution(self, resume_data: Dict, job_analysis: Dict) -> Dict:
-        """Optimize keyword distribution across resume sections."""
+        """
+        REAL IMPLEMENTATION: Optimize keyword distribution across resume sections.
+        """
         try:
-            # For now, return the original data
-            # In a full implementation, this would:
-            # 1. Identify keyword gaps
-            # 2. Redistribute keywords optimally
-            # 3. Ensure natural integration
-            logger.info("Keyword optimization placeholder - returning original data")
-            return resume_data
+            logger.info("Performing actual keyword optimization...")
+
+            optimized_data = resume_data.copy()
+            primary_keywords = job_analysis.get('primary_keywords', [])
+            technical_skills = job_analysis.get('technical_skills', [])
+
+            if not primary_keywords and not technical_skills:
+                logger.info("No keywords to optimize - returning original data")
+                return resume_data
+
+            # Track optimization changes
+            changes_made = []
+
+            # 1. OBJECTIVE OPTIMIZATION
+            if optimized_data.get('objective'):
+                original_objective = optimized_data['objective']
+                optimized_objective = self._optimize_objective_keywords(
+                    original_objective, primary_keywords[:2]  # Top 2 keywords for objective
+                )
+                if optimized_objective != original_objective:
+                    optimized_data['objective'] = optimized_objective
+                    changes_made.append("Enhanced objective with ATS keywords")
+
+            # 2. EXPERIENCE HIGHLIGHTS OPTIMIZATION
+            if optimized_data.get('experiences'):
+                for i, exp in enumerate(optimized_data['experiences']):
+                    if 'highlights' in exp:
+                        original_highlights = exp['highlights'][:]
+                        optimized_highlights = self._optimize_highlights_keywords(
+                            exp['highlights'], primary_keywords, technical_skills
+                        )
+                        if optimized_highlights != original_highlights:
+                            exp['highlights'] = optimized_highlights
+                            changes_made.append(f"Enhanced experience {i+1} highlights")
+
+            # 3. PROJECT HIGHLIGHTS OPTIMIZATION
+            if optimized_data.get('projects'):
+                for i, proj in enumerate(optimized_data['projects']):
+                    if 'highlights' in proj:
+                        original_highlights = proj['highlights'][:]
+                        optimized_highlights = self._optimize_highlights_keywords(
+                            proj['highlights'], technical_skills[:3], primary_keywords[:2]
+                        )
+                        if optimized_highlights != original_highlights:
+                            proj['highlights'] = optimized_highlights
+                            changes_made.append(f"Enhanced project {i+1} highlights")
+
+            # 4. SKILLS SECTION OPTIMIZATION
+            if optimized_data.get('skills'):
+                original_skills = optimized_data['skills']
+                optimized_skills = self._optimize_skills_section(
+                    optimized_data['skills'], technical_skills, primary_keywords
+                )
+                if optimized_skills != original_skills:
+                    optimized_data['skills'] = optimized_skills
+                    changes_made.append("Enhanced skills section with missing ATS keywords")
+
+            # Log optimization results
+            if changes_made:
+                logger.info(f"Keyword optimization completed: {len(changes_made)} improvements made")
+                for change in changes_made:
+                    logger.info(f"  - {change}")
+            else:
+                logger.info("No keyword optimization opportunities found")
+
+            return optimized_data
 
         except Exception as e:
             logger.error(f"Error in keyword optimization: {e}")
             return resume_data
+
+    def _optimize_objective_keywords(self, objective: str, priority_keywords: List[str]) -> str:
+        """Add missing priority keywords to objective if space allows."""
+        if not priority_keywords or not objective:
+            return objective
+
+        words = objective.split()
+        objective_lower = objective.lower()
+
+        # Check which keywords are missing
+        missing_keywords = [kw for kw in priority_keywords if kw.lower() not in objective_lower]
+
+        if not missing_keywords:
+            return objective  # All keywords already present
+
+        # Try to integrate one missing keyword naturally
+        if len(words) < 23 and missing_keywords:  # Leave room for keyword
+            keyword = missing_keywords[0]
+
+            # Simple integration - add to technical context if possible
+            if any(tech_word in objective_lower for tech_word in ['engineer', 'developer', 'architect', 'specialist']):
+                # Try to integrate naturally
+                if 'engineer' in objective_lower:
+                    enhanced = objective.replace('Engineer', f'{keyword} Engineer', 1)
+                elif 'developer' in objective_lower:
+                    enhanced = objective.replace('Developer', f'{keyword} Developer', 1)
+                else:
+                    # Add at end if space allows
+                    enhanced = f"{objective} Specialized in {keyword}."
+
+                # Check word limit
+                if len(enhanced.split()) <= 25:
+                    return enhanced
+
+        return objective
+
+    def _optimize_highlights_keywords(self, highlights: List[str], primary_keywords: List[str], secondary_keywords: List[str]) -> List[str]:
+        """Optimize highlights by naturally integrating missing keywords."""
+        if not highlights or (not primary_keywords and not secondary_keywords):
+            return highlights
+
+        optimized = highlights[:]
+        all_keywords = primary_keywords + secondary_keywords
+
+        # Get current keyword coverage
+        highlights_text = ' '.join(highlights).lower()
+        missing_keywords = [kw for kw in all_keywords if kw.lower() not in highlights_text]
+
+        if not missing_keywords:
+            return highlights  # All keywords covered
+
+        # Try to integrate missing keywords into existing highlights
+        for i, highlight in enumerate(optimized):
+            if not missing_keywords:
+                break
+
+            words = highlight.split()
+            if len(words) >= 20:  # Already at limit
+                continue
+
+            # Try to add one missing keyword
+            keyword = missing_keywords[0]
+
+            # Simple integration strategies
+            if len(words) < 18:  # Room for keyword
+                # Strategy 1: Add technology context
+                if any(tech in highlight.lower() for tech in ['developed', 'built', 'implemented', 'created']):
+                    enhanced = highlight.replace('.', f' using {keyword}.')
+                    if len(enhanced.split()) <= 20:
+                        optimized[i] = enhanced
+                        missing_keywords.remove(keyword)
+                        continue
+
+                # Strategy 2: Add to metrics context
+                if any(metric in highlight for metric in ['%', 'users', 'performance', 'efficiency']):
+                    enhanced = highlight.replace('.', f' via {keyword} optimization.')
+                    if len(enhanced.split()) <= 20:
+                        optimized[i] = enhanced
+                        missing_keywords.remove(keyword)
+                        continue
+
+        return optimized
+
+    def _optimize_skills_section(self, skills: List[Dict], technical_requirements: List[str], primary_keywords: List[str]) -> List[Dict]:
+        """Add missing critical technical skills to skills section."""
+        if not skills or not technical_requirements:
+            return skills
+
+        optimized_skills = [skill.copy() for skill in skills]
+
+        # Get current skills coverage
+        current_skills_text = str(skills).lower()
+        missing_tech_skills = [skill for skill in technical_requirements
+                               if skill.lower() not in current_skills_text]
+
+        if not missing_tech_skills:
+            return skills  # All critical skills covered
+
+        # Find technical skills category to add missing skills
+        for skill_category in optimized_skills:
+            if skill_category.get('category', '').lower() == 'technical':
+                if 'subcategories' in skill_category:
+                    # Add to first subcategory (usually most relevant)
+                    if skill_category['subcategories']:
+                        first_subcat = skill_category['subcategories'][0]
+                        current_count = len(first_subcat.get('skills', []))
+
+                        # Add critical missing skills (up to 2)
+                        skills_to_add = missing_tech_skills[:min(2, 6 - current_count)]
+                        if skills_to_add:
+                            first_subcat['skills'].extend(skills_to_add)
+                            logger.info(f"Added missing ATS skills to {first_subcat.get('name', 'technical')}: {skills_to_add}")
+
+                elif 'skills' in skill_category:
+                    # Direct skills list
+                    current_count = len(skill_category['skills'])
+                    skills_to_add = missing_tech_skills[:min(2, 8 - current_count)]
+                    if skills_to_add:
+                        skill_category['skills'].extend(skills_to_add)
+                        logger.info(f"Added missing ATS skills: {skills_to_add}")
+                break
+
+        return optimized_skills
 
     # Keep all existing methods for backward compatibility
     def create_complete_tailored_resume(self, include_objective) -> str:
