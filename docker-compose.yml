@@ -39,6 +39,8 @@ services:
       context: .
       dockerfile: Dockerfile.api
     container_name: jobtrak-api-1
+    ports:
+      - "8001:8000"  # Local development access (bypass Traefik)
     volumes:
       - .:/app
       - ./database:/app/database
