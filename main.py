@@ -27,6 +27,7 @@ def get_allowed_origins():
         "https://job-agent-ui.vercel.app",
         "https://jobtrackai.duckdns.org",
         "http://jobtrackai.duckdns.org",
+         "https://streaming-service.vercel.app",
 
         # Vercel preview deployments (common pattern)
         "https://job-agent-ui-git-main-your-username.vercel.app",
