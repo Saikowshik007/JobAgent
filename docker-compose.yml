@@ -1,38 +1,4 @@
-# Simple JobTrak Scaling - Multiple API Instances with Load Balancing + Logging
-version: '3.8'
-
 services:
-  traefik:
-    image: traefik:v3.0
-    container_name: jobtrak-traefik
-    command:
-      - "--api.insecure=true"
-      - "--providers.docker=true"
-      - "--providers.docker.exposedbydefault=false"
-      - "--entrypoints.web.address=:80"
-      - "--entrypoints.websecure.address=:443"
-      # Let's Encrypt configuration
-      - "--certificatesresolvers.letsencrypt.acme.tlschallenge=true"
-      - "--certificatesresolvers.letsencrypt.acme.email=askowshik@outlook.com"
-      - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
-      # Redirect HTTP to HTTPS
-      - "--entrypoints.web.http.redirections.entrypoint.to=websecure"
-      - "--entrypoints.web.http.redirections.entrypoint.scheme=https"
-      - "--entrypoints.web.http.redirections.entrypoint.permanent=true"
-      # Logging
-      - "--log.level=INFO"
-      - "--accesslog=true"
-    ports:
-      - "80:80"
-      - "443:443"
-      - "8080:8080"  # Traefik dashboard
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - ./letsencrypt:/letsencrypt
-    networks:
-      - jobtrak-network
-    restart: unless-stopped
-
   # API Instance 1
   jobtrak-api-1:
     build:
@@ -40,7 +6,7 @@ services:
       dockerfile: Dockerfile.api
     container_name: jobtrak-api-1
     ports:
-      - "8001:8000"  # Local development access (bypass Traefik)
+      - "8001:8000"  # Direct access for debugging
     volumes:
       - .:/app
       - ./database:/app/database
@@ -48,46 +14,33 @@ services:
       - ./logs:/app/logs
     restart: unless-stopped
     networks:
-      - jobtrak-network
+      - my-network
     environment:
-      # Application settings
       - PYTHONPATH=/app
       - PYTHONUNBUFFERED=1
       - PYTHONDONTWRITEBYTECODE=1
       - API_DEBUG=1
       - HOST_IP=${HOST_IP:-auto-detect}
-
-      # Logging configuration
       - LOG_LEVEL=INFO
       - LOG_FILE=/app/logs/api.log
       - ACCESS_LOG_FILE=/app/logs/access.log
       - ERROR_LOG_FILE=/app/logs/error.log
-
-      # External services
       - SELENIUM_REMOTE_URL=http://selenium-chrome:4444/wd/hub
       - SIMPLIFY_JOBS_API_URL=https://api.simplify.jobs/v2
       - SIMPLIFY_SITE_KEY=6LcStf4UAAAAAIVZo9JUJ3PntTfRBhvXLKBTGww8
-
-      # Database configuration (PostgreSQL)
       - DATABASE_URL=postgresql://jobtrak_user:jobtrak_secure_password_2024@postgres:5432/jobtrak
       - POSTGRES_HOST=postgres
       - POSTGRES_PORT=5432
       - POSTGRES_DB=jobtrak
       - POSTGRES_USER=jobtrak_user
       - POSTGRES_PASSWORD=jobtrak_secure_password_2024
-
-      # Redis configuration
       - REDIS_URL=redis://redis:6379/0
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - REDIS_DB=0
       - CACHE_TTL=3600
-
-      # LinkedIn credentials
       - LINKEDIN_EMAIL=saianantula007@outlook.com
       - LINKEDIN_PASSWORD=Saikowshik@2000
-
-      # OpenAI configuration
       - OPENAI_API_KEY=your_openai_api_key
       - MODEL_PROVIDER=openai
       - MODEL_NAME=gpt-4.1-mini
@@ -103,23 +56,6 @@ services:
       timeout: 10s
       start_period: 40s
       retries: 3
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.api.rule=Host(`jobtrackai.duckdns.org`)"
-      - "traefik.http.routers.api.entrypoints=websecure"
-      - "traefik.http.routers.api.tls.certresolver=letsencrypt"
-      - "traefik.http.services.api.loadbalancer.server.port=8000"
-
-      # Load balancer health checks
-      - "traefik.http.services.api.loadbalancer.healthcheck.path=/health"
-      - "traefik.http.services.api.loadbalancer.healthcheck.interval=10s"
-
-      # HTTP to HTTPS redirect
-      - "traefik.http.routers.api-http.rule=Host(`jobtrackai.duckdns.org`)"
-      - "traefik.http.routers.api-http.entrypoints=web"
-      - "traefik.http.middlewares.https-redirect.redirectscheme.scheme=https"
-      - "traefik.http.middlewares.https-redirect.redirectscheme.permanent=true"
-      - "traefik.http.routers.api-http.middlewares=https-redirect"
 
   # API Instance 2
   jobtrak-api-2:
@@ -134,46 +70,29 @@ services:
       - ./logs:/app/logs
     restart: unless-stopped
     networks:
-      - jobtrak-network
+      - my-network
     environment:
-      # Application settings
       - PYTHONPATH=/app
       - PYTHONUNBUFFERED=1
       - PYTHONDONTWRITEBYTECODE=1
       - API_DEBUG=1
       - HOST_IP=${HOST_IP:-auto-detect}
-
-      # Logging configuration
       - LOG_LEVEL=INFO
       - LOG_FILE=/app/logs/api.log
-      - ACCESS_LOG_FILE=/app/logs/access.log
-      - ERROR_LOG_FILE=/app/logs/error.log
-
-      # External services
       - SELENIUM_REMOTE_URL=http://selenium-chrome:4444/wd/hub
-      - SIMPLIFY_JOBS_API_URL=https://api.simplify.jobs/v2
-      - SIMPLIFY_SITE_KEY=6LcStf4UAAAAAIVZo9JUJ3PntTfRBhvXLKBTGww8
-
-      # Database configuration (PostgreSQL)
       - DATABASE_URL=postgresql://jobtrak_user:jobtrak_secure_password_2024@postgres:5432/jobtrak
       - POSTGRES_HOST=postgres
       - POSTGRES_PORT=5432
       - POSTGRES_DB=jobtrak
       - POSTGRES_USER=jobtrak_user
       - POSTGRES_PASSWORD=jobtrak_secure_password_2024
-
-      # Redis configuration
       - REDIS_URL=redis://redis:6379/0
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - REDIS_DB=0
       - CACHE_TTL=3600
-
-      # LinkedIn credentials
       - LINKEDIN_EMAIL=saianantula007@outlook.com
       - LINKEDIN_PASSWORD=Saikowshik@2000
-
-      # OpenAI configuration
       - OPENAI_API_KEY=your_openai_api_key
       - MODEL_PROVIDER=openai
       - MODEL_NAME=gpt-4.1-mini
@@ -189,14 +108,6 @@ services:
       timeout: 10s
       start_period: 40s
       retries: 3
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.api.rule=Host(`jobtrackai.duckdns.org`)"
-      - "traefik.http.routers.api.entrypoints=websecure"
-      - "traefik.http.routers.api.tls.certresolver=letsencrypt"
-      - "traefik.http.services.api.loadbalancer.server.port=8000"
-      - "traefik.http.services.api.loadbalancer.healthcheck.path=/health"
-      - "traefik.http.services.api.loadbalancer.healthcheck.interval=10s"
 
   # API Instance 3
   jobtrak-api-3:
@@ -211,46 +122,29 @@ services:
       - ./logs:/app/logs
     restart: unless-stopped
     networks:
-      - jobtrak-network
+      - my-network
     environment:
-      # Application settings
       - PYTHONPATH=/app
       - PYTHONUNBUFFERED=1
       - PYTHONDONTWRITEBYTECODE=1
       - API_DEBUG=1
       - HOST_IP=${HOST_IP:-auto-detect}
-
-      # Logging configuration
       - LOG_LEVEL=INFO
       - LOG_FILE=/app/logs/api.log
-      - ACCESS_LOG_FILE=/app/logs/access.log
-      - ERROR_LOG_FILE=/app/logs/error.log
-
-      # External services
       - SELENIUM_REMOTE_URL=http://selenium-chrome:4444/wd/hub
-      - SIMPLIFY_JOBS_API_URL=https://api.simplify.jobs/v2
-      - SIMPLIFY_SITE_KEY=6LcStf4UAAAAAIVZo9JUJ3PntTfRBhvXLKBTGww8
-
-      # Database configuration (PostgreSQL)
       - DATABASE_URL=postgresql://jobtrak_user:jobtrak_secure_password_2024@postgres:5432/jobtrak
       - POSTGRES_HOST=postgres
       - POSTGRES_PORT=5432
       - POSTGRES_DB=jobtrak
       - POSTGRES_USER=jobtrak_user
       - POSTGRES_PASSWORD=jobtrak_secure_password_2024
-
-      # Redis configuration
       - REDIS_URL=redis://redis:6379/0
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - REDIS_DB=0
       - CACHE_TTL=3600
-
-      # LinkedIn credentials
       - LINKEDIN_EMAIL=saianantula007@outlook.com
       - LINKEDIN_PASSWORD=Saikowshik@2000
-
-      # OpenAI configuration
       - OPENAI_API_KEY=your_openai_api_key
       - MODEL_PROVIDER=openai
       - MODEL_NAME=gpt-4.1-mini
@@ -266,14 +160,6 @@ services:
       timeout: 10s
       start_period: 40s
       retries: 3
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.api.rule=Host(`jobtrackai.duckdns.org`)"
-      - "traefik.http.routers.api.entrypoints=websecure"
-      - "traefik.http.routers.api.tls.certresolver=letsencrypt"
-      - "traefik.http.services.api.loadbalancer.server.port=8000"
-      - "traefik.http.services.api.loadbalancer.healthcheck.path=/health"
-      - "traefik.http.services.api.loadbalancer.healthcheck.interval=10s"
 
   # PostgreSQL Database
   postgres:
@@ -290,7 +176,7 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ./init-scripts:/docker-entrypoint-initdb.d:ro
     networks:
-      - jobtrak-network
+      - my-network
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U jobtrak_user -d jobtrak"]
@@ -312,7 +198,7 @@ services:
     volumes:
       - redis_data:/data
     networks:
-      - jobtrak-network
+      - my-network
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
@@ -333,10 +219,10 @@ services:
     volumes:
       - /dev/shm:/dev/shm
     networks:
-      - jobtrak-network
+      - my-network
     restart: unless-stopped
 
-  # Simplified Logging with Grafana Loki (lighter alternative)
+  # Logging with Loki
   loki:
     image: grafana/loki:2.9.0
     container_name: jobtrak-loki
@@ -344,7 +230,7 @@ services:
       - "3100:3100"
     command: -config.file=/etc/loki/local-config.yaml
     networks:
-      - jobtrak-network
+      - my-network
     restart: unless-stopped
     volumes:
       - loki_data:/loki
@@ -360,7 +246,7 @@ services:
     volumes:
       - grafana_data:/var/lib/grafana
     networks:
-      - jobtrak-network
+      - my-network
     restart: unless-stopped
 
   promtail:
@@ -375,13 +261,13 @@ services:
     depends_on:
       - loki
     networks:
-      - jobtrak-network
+      - my-network
     restart: unless-stopped
 
 networks:
-  jobtrak-network:
-    driver: bridge
-    name: jobtrak-network
+  my-network:
+    external: true
+    name: my-network
 
 volumes:
   postgres_data:
