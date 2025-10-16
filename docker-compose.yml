@@ -105,8 +105,7 @@ services:
       retries: 3
     labels:
       - "traefik.enable=true"
-      # FIXED: Exclude /learn path from JobTrak API routing
-      - "traefik.http.routers.api.rule=Host(`jobtrackai.duckdns.org`) && !PathPrefix(`/learn`)"
+      - "traefik.http.routers.api.rule=Host(`jobtrackai.duckdns.org`)"
       - "traefik.http.routers.api.entrypoints=websecure"
       - "traefik.http.routers.api.tls.certresolver=letsencrypt"
       - "traefik.http.services.api.loadbalancer.server.port=8000"
@@ -116,7 +115,7 @@ services:
       - "traefik.http.services.api.loadbalancer.healthcheck.interval=10s"
 
       # HTTP to HTTPS redirect
-      - "traefik.http.routers.api-http.rule=Host(`jobtrackai.duckdns.org`) && !PathPrefix(`/learn`)"
+      - "traefik.http.routers.api-http.rule=Host(`jobtrackai.duckdns.org`)"
       - "traefik.http.routers.api-http.entrypoints=web"
       - "traefik.http.middlewares.https-redirect.redirectscheme.scheme=https"
       - "traefik.http.middlewares.https-redirect.redirectscheme.permanent=true"
@@ -192,8 +191,7 @@ services:
       retries: 3
     labels:
       - "traefik.enable=true"
-      # FIXED: Exclude /learn path from JobTrak API routing
-      - "traefik.http.routers.api.rule=Host(`jobtrackai.duckdns.org`) && !PathPrefix(`/learn`)"
+      - "traefik.http.routers.api.rule=Host(`jobtrackai.duckdns.org`)"
       - "traefik.http.routers.api.entrypoints=websecure"
       - "traefik.http.routers.api.tls.certresolver=letsencrypt"
       - "traefik.http.services.api.loadbalancer.server.port=8000"
@@ -270,8 +268,7 @@ services:
       retries: 3
     labels:
       - "traefik.enable=true"
-      # FIXED: Exclude /learn path from JobTrak API routing
-      - "traefik.http.routers.api.rule=Host(`jobtrackai.duckdns.org`) && !PathPrefix(`/learn`)"
+      - "traefik.http.routers.api.rule=Host(`jobtrackai.duckdns.org`)"
       - "traefik.http.routers.api.entrypoints=websecure"
       - "traefik.http.routers.api.tls.certresolver=letsencrypt"
       - "traefik.http.services.api.loadbalancer.server.port=8000"
