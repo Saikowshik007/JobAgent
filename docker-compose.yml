@@ -206,63 +206,6 @@ services:
       timeout: 3s
       retries: 3
 
-  # Selenium Chrome
-  selenium-chrome:
-    image: selenium/standalone-chrome:4.15.0-20231129
-    container_name: jobtrak-selenium
-    ports:
-      - "4444:4444"
-    environment:
-      - SE_VNC_NO_PASSWORD=1
-      - SE_NODE_MAX_INSTANCES=5
-      - SE_NODE_MAX_SESSIONS=5
-    volumes:
-      - /dev/shm:/dev/shm
-    networks:
-      - my-network
-    restart: unless-stopped
-
-  # Logging with Loki
-  loki:
-    image: grafana/loki:2.9.0
-    container_name: jobtrak-loki
-    ports:
-      - "3100:3100"
-    command: -config.file=/etc/loki/local-config.yaml
-    networks:
-      - my-network
-    restart: unless-stopped
-    volumes:
-      - loki_data:/loki
-
-  grafana:
-    image: grafana/grafana:latest
-    container_name: jobtrak-grafana
-    ports:
-      - "3000:3000"
-    environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin123
-      - GF_USERS_ALLOW_SIGN_UP=false
-    volumes:
-      - grafana_data:/var/lib/grafana
-    networks:
-      - my-network
-    restart: unless-stopped
-
-  promtail:
-    image: grafana/promtail:2.9.0
-    container_name: jobtrak-promtail
-    volumes:
-      - ./logs:/var/log/jobtrak:ro
-      - /var/lib/docker/containers:/var/lib/docker/containers:ro
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - ./logging/promtail-config.yml:/etc/promtail/config.yml:ro
-    command: -config.file=/etc/promtail/config.yml
-    depends_on:
-      - loki
-    networks:
-      - my-network
-    restart: unless-stopped
 
 networks:
   my-network:
@@ -276,9 +219,3 @@ volumes:
   redis_data:
     driver: local
     name: jobtrak-redis-data
-  loki_data:
-    driver: local
-    name: jobtrak-loki-data
-  grafana_data:
-    driver: local
-    name: jobtrak-grafana-data
