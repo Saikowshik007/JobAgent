@@ -1333,13 +1333,30 @@ class ResumeImprover:
             return 'unknown'
 
     def _get_formatted_chain_inputs(self, chain, section=None):
-        """EXISTING: Get formatted inputs for chain with proper skills formatting"""
-        from services.langchain_helpers import chain_formatter
+        """Get formatted inputs for chain with proper skills formatting and experience level"""
+        from services.langchain_helpers import chain_formatter, get_cumulative_time_from_titles
 
         output_dict = {}
         raw_self_data = self.__dict__
+
+        # Add experience level calculation
+        if self.experiences and len(self.experiences) > 0:
+            if 'titles' in self.experiences[0]:
+                years_exp = get_cumulative_time_from_titles(self.experiences[0].get('titles', []))
+            else:
+                # Fallback: calculate from all experiences
+                years_exp = 0
+                for exp in self.experiences:
+                    if 'titles' in exp:
+                        years_exp += get_cumulative_time_from_titles(exp.get('titles', []))
+
+            raw_self_data = raw_self_data.copy()  # Create a copy to avoid modifying original
+            raw_self_data['experience_level'] = self.get_experience_level(years_exp)
+            raw_self_data['years_experience'] = years_exp
+
         if section is not None:
-            raw_self_data = raw_self_data.copy()
+            if 'experience_level' not in raw_self_data:
+                raw_self_data = raw_self_data.copy()
             raw_self_data["section"] = section
 
         for key in chain.get_input_schema().schema().get("required", []):
@@ -1355,6 +1372,15 @@ class ResumeImprover:
                 logger.debug(f"After chain_formatter, skills input type: {type(output_dict[key])}")
 
         return output_dict
+
+    def get_experience_level(self, years: float) -> str:
+        """Determine experience level from years of experience."""
+        if years < 2:
+            return "junior (0-2 years)"
+        elif years < 5:
+            return "mid-level (2-5 years)"
+        else:
+            return "senior (5+ years)"
 
     def _get_degrees(self, resume: dict):
         """EXISTING: Extract degrees from the resume."""
