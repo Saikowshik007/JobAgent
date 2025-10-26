@@ -6,6 +6,7 @@ from typing import Optional, List
 from datetime import datetime
 import hashlib
 import logging
+import asyncio
 
 from core.dependencies import get_cache_manager, get_user_from_form
 from data.dbcache_manager import DBCacheManager
@@ -43,7 +44,6 @@ async def analyze_job(
         )
 
         # Run sync Playwright code in thread pool to avoid event loop conflicts
-        import asyncio
         await asyncio.to_thread(resume_improver.download_and_parse_job_post)
         job_details = resume_improver.parsed_job
 
