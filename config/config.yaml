@@ -13,10 +13,11 @@ api:
   port: 8000
   jobtrack_url: http://jobtrak-api:8000
 
-# Selenium Configuration
-selenium:
-  remote_url: http://selenium-chrome:4444/wd/hub
+# Playwright Configuration (local browser automation)
+playwright:
   headless: true
+  timeout: 30000  # milliseconds
+  wait_time: 3000  # milliseconds to wait after page load
 
 # Database Configuration
 database:

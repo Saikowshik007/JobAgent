@@ -25,7 +25,6 @@ services:
       - LOG_FILE=/app/logs/api.log
       - ACCESS_LOG_FILE=/app/logs/access.log
       - ERROR_LOG_FILE=/app/logs/error.log
-      - SELENIUM_REMOTE_URL=http://selenium-chrome:4444/wd/hub
       - SIMPLIFY_JOBS_API_URL=https://api.simplify.jobs/v2
       - SIMPLIFY_SITE_KEY=6LcStf4UAAAAAIVZo9JUJ3PntTfRBhvXLKBTGww8
       - DATABASE_URL=postgresql://jobtrak_user:jobtrak_secure_password_2024@postgres:5432/jobtrak
@@ -79,7 +78,6 @@ services:
       - HOST_IP=${HOST_IP:-auto-detect}
       - LOG_LEVEL=INFO
       - LOG_FILE=/app/logs/api.log
-      - SELENIUM_REMOTE_URL=http://selenium-chrome:4444/wd/hub
       - DATABASE_URL=postgresql://jobtrak_user:jobtrak_secure_password_2024@postgres:5432/jobtrak
       - POSTGRES_HOST=postgres
       - POSTGRES_PORT=5432
@@ -131,7 +129,6 @@ services:
       - HOST_IP=${HOST_IP:-auto-detect}
       - LOG_LEVEL=INFO
       - LOG_FILE=/app/logs/api.log
-      - SELENIUM_REMOTE_URL=http://selenium-chrome:4444/wd/hub
       - DATABASE_URL=postgresql://jobtrak_user:jobtrak_secure_password_2024@postgres:5432/jobtrak
       - POSTGRES_HOST=postgres
       - POSTGRES_PORT=5432

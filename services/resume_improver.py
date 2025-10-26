@@ -1146,9 +1146,9 @@ class ResumeImprover:
 
         try:
             with sync_playwright() as p:
-                # Launch browser in headless mode
+                # Launch browser locally (not remote)
                 browser = p.chromium.launch(
-                    headless=config.get("selenium.headless", True),
+                    headless=True,  # Always run headless in production
                     args=['--no-sandbox', '--disable-dev-shm-usage']
                 )
 
@@ -1200,7 +1200,15 @@ class ResumeImprover:
                     browser.close()
 
         except Exception as e:
-            logger.error(f"Playwright extraction failed for {self.url}: {e}")
+            error_msg = str(e)
+            logger.error(f"Playwright extraction failed for {self.url}: {error_msg}")
+
+            # Provide helpful error messages
+            if "Executable doesn't exist" in error_msg or "browserType.launch" in error_msg:
+                logger.error("Playwright browsers not installed. Run: playwright install chromium")
+            elif "ENOTFOUND" in error_msg or "getaddrinfo" in error_msg:
+                logger.error("Network/DNS error. Check your internet connection.")
+
             return False
 
     def _handle_job_board_specific_logic(self, page):
