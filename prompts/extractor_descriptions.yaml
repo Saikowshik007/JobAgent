@@ -35,26 +35,164 @@ RESUME_IMPROVER_OUTPUT:
 
 JOB_DESCRIPTION:
   company: >
-    Name of the company that has the job opening
+    Extract the EXACT company name from the job posting. Look for company branding, headers, or explicit mentions.
+    Common locations: page header, footer, "About [Company]" section, copyright notice.
+    If the posting is from a recruiter/agency, extract the hiring company name, NOT the recruiting firm.
+    Return null only if absolutely no company information is available.
+
   location: >
-    Location of the job posting. It can be city, country or can be both. Also look for Remote. Location should be null if not known.
+    Extract the job location with maximum specificity available. Prefer format: "City, State/Province, Country" or "City, Country".
+    Look for: explicit location mentions, office address, "based in", "located in", timezone references.
+    For remote positions, check if location restrictions apply (e.g., "Remote - US only", "Remote within EU").
+    IMPORTANT: If the job mentions "Remote" or "Work from home", still extract the office/headquarters location if mentioned.
+    Return null ONLY if no location information exists anywhere in the posting.
+    Examples: "San Francisco, CA, USA", "London, UK", "Remote - United States", "Bangalore, India", "Remote - No restrictions"
+
   job_type: >
-    Type of the job, which can be On site or Hybrid or Remote. Should return null if not known.
+    Determine work arrangement from these options ONLY: "On-site", "Hybrid", "Remote"
+    - "On-site": Must work from office/physical location full-time (look for "in-office", "on-site", no remote mention)
+    - "Hybrid": Combination of office and remote work (look for "hybrid", "flexible", "2-3 days in office", "office optional")
+    - "Remote": Work from home full-time (look for "fully remote", "100% remote", "work from anywhere", "distributed team")
+    Check multiple sections: job title, location field, benefits, "About the role" section.
+    If conflicting information exists, prioritize explicit statements over implicit ones.
+    Return null if genuinely ambiguous or not mentioned.
+
   job_title: >
-    Job title
-  team: Name of the team within the company. Team name should be null if it's not known.
+    Extract the EXACT job title as advertised. Do NOT normalize or simplify.
+    Preserve level indicators: "Senior", "Staff", "Principal", "Lead", "Junior", "Mid-level", "III", "II"
+    Preserve specializations: "Full Stack", "Frontend", "Backend", "DevOps", "ML", "Security"
+    Look in: page title, header, "Position:", "Role:", "We're hiring for"
+    Examples: "Senior Software Engineer - Platform", "Staff Data Scientist (ML/AI)", "Principal Backend Engineer"
+    If multiple titles exist (e.g., different levels offered), extract the primary/highlighted one.
+
+  team: >
+    Extract the specific team, department, or business unit this role belongs to.
+    Look for: "Join our [Team] team", "Part of [Department]", "Reporting to [Team]", organizational structure mentions.
+    Examples: "Platform Engineering", "Data Science & ML", "Infrastructure Team", "Product - Search", "Core Backend"
+    Distinguish between company-wide culture statements and actual team names.
+    Return null if only generic department mentions (e.g., just "Engineering") or no specific team identified.
+
   job_summary: >
-    Brief summary of the job, not exceeding 100 words
+    Create a concise summary capturing:
+    1. What the role does (core function/purpose)
+    2. Key technical focus areas or technologies
+    3. Team/product context if mentioned
+    4. Impact or scope of the role
+    Extract from: "About the role", "What you'll do", "Role overview", opening paragraphs.
+    Be specific and technical, avoid marketing fluff. Focus on substantive information.
+    If no dedicated summary exists, synthesize from responsibilities and company info.
+
   salary: >
-    Salary amount or range. Salary should be null if it's not known.
+    Extract ANY compensation information mentioned. Include:
+    - Base salary range (e.g., "$120,000 - $150,000", "€80k-95k", "₹25-35 LPA")
+    - Total compensation if specified (e.g., "$150k-$200k total comp")
+    - Equity/stock options if mentioned (e.g., "$130k + equity")
+    - Hourly rates for contract roles (e.g., "$75-95/hour")
+    Look in: dedicated compensation section, "What we offer", benefits section, fine print.
+    Preserve currency symbols and units exactly as written.
+    Return null ONLY if no compensation information exists anywhere.
+
   duties: >
-    The role, responsibilities and duties of the job as an itemized list, not exceeding 500 words
-  qualifications: The qualifications, skills, and experience required for the job as an itemized list, not exceeding 500 words
+    Extract 5-15 specific responsibilities, tasks, and day-to-day activities as an itemized list.
+    Look in: "Responsibilities", "What you'll do", "Day-to-day", "Role expectations", "You will"
+    Each item should be:
+    - Specific and actionable (not vague goals)
+    - Focused on WHAT work is done, not WHAT QUALITIES are needed
+    - Include technical details when mentioned (languages, tools, systems)
+    Examples of GOOD items:
+    - "Design and implement RESTful APIs using Python and FastAPI"
+    - "Collaborate with product managers to define technical requirements"
+    - "Conduct code reviews and mentor junior engineers"
+    Examples of BAD items (these are qualifications, not duties):
+    - "Strong communication skills"
+    - "Experience with Python"
+    Exclude marketing language and company culture statements.
+    Maximum 500 words total. If list is very long, prioritize explicit responsibilities over nice-to-haves.
+
+  qualifications: >
+    Extract ALL requirements, qualifications, prerequisites, and desired attributes as an itemized list.
+    Look in: "Requirements", "Qualifications", "What we're looking for", "You have", "Ideal candidate"
+    Include:
+    - Years of experience requirements (e.g., "5+ years in software development")
+    - Technical skill requirements (e.g., "Proficiency in React and TypeScript")
+    - Educational requirements (e.g., "BS in Computer Science or equivalent")
+    - Certifications (e.g., "AWS Solutions Architect certification")
+    - Soft skills (e.g., "Excellent written and verbal communication")
+    - Domain knowledge (e.g., "Experience in fintech or healthcare")
+    Distinguish between "Required" and "Nice to have" if specified, but include both.
+    Each item should be a complete requirement, not fragmented.
+    Maximum 500 words total. Prioritize explicit requirements over vague preferences.
+
   ats_keywords: >
-    Keywords that may be triggered by Applicant Tracking Systems (ATS), such as: Python, Cloud Computing, Agile, Data analytics, product management, cross-function collaboration, etc...
+    Extract 15-30 HIGH-VALUE keywords that ATS systems scan for. Include:
+    TECHNICAL SKILLS: Programming languages, frameworks, libraries, tools
+    - Examples: Python, React, Kubernetes, PostgreSQL, AWS, TensorFlow, Git
+    METHODOLOGIES: Development practices, workflows
+    - Examples: Agile, Scrum, CI/CD, Test-Driven Development, Microservices
+    DOMAINS: Industry/technical domains
+    - Examples: Machine Learning, Cloud Computing, DevOps, Data Engineering, Security
+    CERTIFICATIONS: Relevant certifications if mentioned
+    - Examples: AWS Certified, PMP, CISSP
+    SOFT SKILLS: Key professional competencies
+    - Examples: Leadership, Cross-functional Collaboration, Communication
+
+    IMPORTANT RULES:
+    - Use EXACT terminology from job posting (e.g., "React.js" if they wrote "React.js", not "React")
+    - Include variations if mentioned (e.g., both "ML" and "Machine Learning")
+    - Prioritize technical terms over generic soft skills
+    - Exclude company-specific jargon or overly generic terms
+    - Include both acronyms and full forms when both appear (e.g., "CI/CD", "Continuous Integration")
+    Maximum 30 keywords. Focus on terms that appear multiple times or in "Required" sections.
+
   is_fully_remote: >
-    Does the job have an option to work fully (100%) remotely? Hybrid or partial remote is marked as `False`. Use `None` if the answer is not known.
+    Boolean field determining if role is 100% remote with NO office requirement.
+    - True: Fully remote, work from anywhere, no office visits required, distributed team
+    - False: Any office requirement (on-site, hybrid, "remote with occasional office visits", location-restricted)
+    - None/null: Cannot determine from job posting
+
+    IMPORTANT DISTINCTIONS:
+    - "Remote" alone without clarification → check for location restrictions
+    - "Remote within [region]" → True (location-restricted but fully remote)
+    - "Hybrid" or "Flexible" → False (not fully remote)
+    - "Remote with quarterly team meetups" → True (still fully remote, occasional travel OK)
+    - "Remote option available" → False (implies default is not remote)
+    Look for: work location policy, "Where you'll work", team structure, relocation mentions.
+
   technical_skills: >
-    An itemized list of technical skills, including programming languages, technologies, and tools.
+    Extract 10-25 SPECIFIC technical skills, tools, and technologies mentioned in the job posting.
+    Include ONLY skills with explicit mentions, not inferred requirements.
+
+    CATEGORIZE AS:
+    - Programming Languages: Python, Java, TypeScript, Go, Rust, SQL
+    - Frameworks/Libraries: React, Django, FastAPI, Spring Boot, TensorFlow, PyTorch
+    - Databases: PostgreSQL, MongoDB, Redis, Elasticsearch, MySQL
+    - Cloud/Infrastructure: AWS, Azure, GCP, Kubernetes, Docker, Terraform
+    - Tools: Git, Jenkins, Jira, Datadog, Grafana
+    - Platforms: Linux, Salesforce, Snowflake
+
+    EXTRACTION RULES:
+    - Use canonical names: "PostgreSQL" not "Postgres", "Kubernetes" not "K8s" (unless only abbreviation appears)
+    - Include version numbers if specified: "Python 3.9+", "React 18"
+    - Separate related but distinct skills: ["AWS", "S3", "Lambda"] not just ["AWS"]
+    - Exclude vague categories: don't list "databases" if specific databases are mentioned
+    - Prioritize required skills over nice-to-haves
+    Return as a flat list of strings, NOT categorized in this field.
+
   non_technical_skills: >
-    An itemized list of non-technical Soft skills.
+    Extract 5-12 professional soft skills, interpersonal qualities, and work style attributes.
+    Look in: "About you", "What we value", "Team culture", "Working style" sections.
+
+    INCLUDE:
+    - Communication: "Excellent written communication", "Strong presentation skills"
+    - Collaboration: "Cross-functional collaboration", "Team player", "Mentorship"
+    - Leadership: "Technical leadership", "Project management", "Stakeholder management"
+    - Problem-solving: "Analytical thinking", "Creative problem-solving", "Attention to detail"
+    - Work style: "Self-motivated", "Adaptable", "Growth mindset", "Ownership mentality"
+
+    EXTRACTION RULES:
+    - Extract as specifically stated, avoid generic interpretation
+    - Include both explicit requirements ("Must have strong communication") and cultural hints ("We value collaboration")
+    - Exclude technical skills that might sound soft (e.g., "Agile" is technical, not soft)
+    - Prioritize skills mentioned in requirements over nice-to-haves
+    - Use the actual phrasing from the job post when possible
+    Maximum 12 skills. Focus on skills explicitly valued or required.

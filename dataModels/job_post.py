@@ -3,6 +3,7 @@ from typing import List, Optional
 from prompts.prompts import Prompts
 import services
 from langchain_openai import ChatOpenAI
+from langchain.prompts import ChatPromptTemplate
 
 Prompts.initialize()
 
@@ -65,8 +66,26 @@ class JobPost:
         )
         self.parsed_job = None
 
-    def parse_job_post(self, **chain_kwargs) -> dict:
-        """Parse the job posting to extract job description and skills."""
-        model = self.extractor_llm.with_structured_output(JobDescription)
-        self.parsed_job = model.invoke(self.posting).dict()
+    def parse_job_post(self, use_enhanced_prompts=True, **chain_kwargs) -> dict:
+        """
+        Parse the job posting to extract job description and skills.
+
+        Args:
+            use_enhanced_prompts: If True, uses JOB_EXTRACTOR prompts for better extraction.
+                                 If False, uses simple extraction (backward compatible).
+        """
+        if use_enhanced_prompts and "JOB_EXTRACTOR" in Prompts.lookup:
+            # Use enhanced extraction with JOB_EXTRACTOR prompts
+            prompt = ChatPromptTemplate(messages=Prompts.lookup["JOB_EXTRACTOR"])
+            chain = prompt | self.extractor_llm.with_structured_output(JobDescription)
+
+            # Prepare inputs for the prompt template
+            inputs = {"raw_job_text": self.posting}
+
+            self.parsed_job = chain.invoke(inputs).dict()
+        else:
+            # Fallback to simple extraction (original method)
+            model = self.extractor_llm.with_structured_output(JobDescription)
+            self.parsed_job = model.invoke(self.posting).dict()
+
         return self.parsed_job

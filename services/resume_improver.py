@@ -12,6 +12,7 @@ import concurrent.futures
 from datetime import datetime
 import time
 from typing import Dict, List, Optional
+from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 
 logger = config.getLogger("ResumeImprover")
 
@@ -1036,11 +1037,44 @@ class ResumeImprover:
         return defaults.get(task_name)
 
     def download_and_parse_job_post(self, url=None):
-        """EXISTING: Download and parse the job post from the provided URL."""
+        """
+        Download and parse the job post from the provided URL.
+        Uses hybrid approach: static HTML first, Playwright fallback for JS-heavy sites.
+        """
         if url:
             self.url = url
-        self._download_url()
+
+        # Check if we should use Playwright immediately (for known JS-heavy sites)
+        url_lower = self.url.lower()
+        force_playwright = any(site in url_lower for site in [
+            'linkedin.com', 'myworkdayjobs.com', 'workday',
+            'greenhouse.io', 'lever.co', 'ashbyhq.com'
+        ])
+
+        success = False
+
+        if force_playwright:
+            logger.info(f"Using Playwright directly for known JS-heavy site: {self.url}")
+            success = self._download_url_with_playwright()
+        else:
+            # Try static HTML first
+            logger.info(f"Attempting static HTML download for: {self.url}")
+            success = self._download_url()
+
+        if not success:
+            logger.error(f"Failed to download job post from {self.url}")
+            raise Exception(f"Failed to download job post from {self.url}")
+
+        # Extract text from HTML
         self._extract_html_data()
+
+        # Check if we should retry with Playwright (content too short)
+        if not force_playwright and self._should_use_playwright():
+            logger.info("Retrying with Playwright due to insufficient content")
+            if self._download_url_with_playwright():
+                self._extract_html_data()
+
+        # Parse the job post with LLM
         self.job_post = JobPost(self.job_post_raw, self.user)
         self.parsed_job = self.job_post.parse_job_post(verbose=True)
 
@@ -1092,6 +1126,175 @@ class ResumeImprover:
                         time.sleep(backoff_factor * 2**attempt)
 
         logger.error(f"Exceeded maximum retries for URL {self.url}")
+        return False
+
+    def _download_url_with_playwright(self, url=None, wait_time: int = 3000) -> bool:
+        """
+        Download content using Playwright for JavaScript-rendered pages.
+
+        Args:
+            url: URL to download (uses self.url if not provided)
+            wait_time: Time in milliseconds to wait for page load (default: 3000ms)
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        if url:
+            self.url = url
+
+        logger.info(f"Attempting to download URL with Playwright (JS-enabled): {self.url}")
+
+        try:
+            with sync_playwright() as p:
+                # Launch browser in headless mode
+                browser = p.chromium.launch(
+                    headless=config.get("selenium.headless", True),
+                    args=['--no-sandbox', '--disable-dev-shm-usage']
+                )
+
+                # Create context with realistic user agent
+                context = browser.new_context(
+                    user_agent=config.get(
+                        "request_headers.user_agent",
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                    ),
+                    viewport={'width': 1920, 'height': 1080}
+                )
+
+                # Open new page
+                page = context.new_page()
+
+                try:
+                    # Navigate to URL with timeout
+                    page.goto(self.url, wait_until='networkidle', timeout=30000)
+
+                    # Wait for dynamic content to load
+                    page.wait_for_timeout(wait_time)
+
+                    # Try to detect and handle common job board patterns
+                    self._handle_job_board_specific_logic(page)
+
+                    # Extract the rendered HTML content
+                    self.job_post_html_data = page.content()
+
+                    logger.info(f"Successfully downloaded {len(self.job_post_html_data)} characters with Playwright")
+
+                    return True
+
+                except PlaywrightTimeoutError as e:
+                    logger.error(f"Playwright timeout while loading {self.url}: {e}")
+                    # Try to get partial content
+                    try:
+                        self.job_post_html_data = page.content()
+                        if self.job_post_html_data and len(self.job_post_html_data) > 500:
+                            logger.warning("Retrieved partial content despite timeout")
+                            return True
+                    except:
+                        pass
+                    return False
+
+                finally:
+                    # Clean up resources
+                    page.close()
+                    context.close()
+                    browser.close()
+
+        except Exception as e:
+            logger.error(f"Playwright extraction failed for {self.url}: {e}")
+            return False
+
+    def _handle_job_board_specific_logic(self, page):
+        """
+        Handle site-specific logic for common job boards.
+
+        Args:
+            page: Playwright page object
+        """
+        url_lower = self.url.lower()
+
+        try:
+            # LinkedIn - close sign-in modal if present
+            if 'linkedin.com' in url_lower:
+                try:
+                    page.click('button[aria-label="Dismiss"]', timeout=2000)
+                except:
+                    pass
+                # Wait for job description to load
+                try:
+                    page.wait_for_selector('.jobs-description', timeout=5000)
+                except:
+                    logger.debug("LinkedIn job description selector not found")
+
+            # Indeed - expand full job description
+            elif 'indeed.com' in url_lower:
+                try:
+                    page.click('#jobDescriptionText', timeout=2000)
+                except:
+                    pass
+
+            # Glassdoor - handle sign-in overlay
+            elif 'glassdoor.com' in url_lower:
+                try:
+                    page.click('button[data-test="close-modal"]', timeout=2000)
+                except:
+                    pass
+
+            # Workday - wait for iframe content
+            elif 'myworkdayjobs.com' in url_lower or 'workday' in url_lower:
+                try:
+                    page.wait_for_selector('[data-automation-id="jobPostingDescription"]', timeout=5000)
+                except:
+                    logger.debug("Workday job description selector not found")
+
+            # Greenhouse - standard wait
+            elif 'greenhouse.io' in url_lower:
+                try:
+                    page.wait_for_selector('#content', timeout=5000)
+                except:
+                    pass
+
+            # Lever - wait for posting content
+            elif 'lever.co' in url_lower:
+                try:
+                    page.wait_for_selector('.posting', timeout=5000)
+                except:
+                    pass
+
+        except Exception as e:
+            logger.debug(f"Site-specific handling failed (non-critical): {e}")
+
+    def _should_use_playwright(self) -> bool:
+        """
+        Determine if Playwright should be used based on URL or content quality.
+
+        Returns:
+            bool: True if Playwright should be used
+        """
+        url_lower = self.url.lower()
+
+        # Known JavaScript-heavy job boards
+        js_heavy_sites = [
+            'linkedin.com',
+            'myworkdayjobs.com',
+            'workday',
+            'greenhouse.io',
+            'lever.co',
+            'ashbyhq.com',
+            'jobs.lever.co',
+            'boards.greenhouse.io'
+        ]
+
+        # Check if URL matches known JS-heavy sites
+        for site in js_heavy_sites:
+            if site in url_lower:
+                logger.info(f"Detected JS-heavy site: {site} - will use Playwright")
+                return True
+
+        # Check if static content is too short (likely incomplete)
+        if self.job_post_raw and len(self.job_post_raw.strip()) < 200:
+            logger.info("Static content too short - will retry with Playwright")
+            return True
+
         return False
 
     def write_objective(self, **chain_kwargs) -> str:
