@@ -41,7 +41,10 @@ async def analyze_job(
             url=job_url,
             user = user
         )
-        resume_improver.download_and_parse_job_post()
+
+        # Run sync Playwright code in thread pool to avoid event loop conflicts
+        import asyncio
+        await asyncio.to_thread(resume_improver.download_and_parse_job_post)
         job_details = resume_improver.parsed_job
 
         # Create a job ID
