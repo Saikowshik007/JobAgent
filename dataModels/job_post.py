@@ -3,7 +3,7 @@ from typing import List, Optional
 from prompts.prompts import Prompts
 import services
 from langchain_openai import ChatOpenAI
-from langchain.prompts import ChatPromptTemplate
+from langchain_core.prompts import ChatPromptTemplate
 
 Prompts.initialize()
 

@@ -1,5 +1,5 @@
-from langchain.prompts import ChatPromptTemplate, HumanMessagePromptTemplate
-from langchain.schema import HumanMessage, SystemMessage
+from langchain_core.prompts import ChatPromptTemplate, HumanMessagePromptTemplate
+from langchain_core.messages import HumanMessage, SystemMessage
 import yaml
 import config
 

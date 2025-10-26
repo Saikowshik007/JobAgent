@@ -194,7 +194,7 @@ class ResumeImprover:
             from prompts import Prompts
             from dataModels.resume import ResumeSummarizerOutput
             from services.langchain_helpers import create_llm
-            from langchain.prompts import ChatPromptTemplate
+            from langchain_core.prompts import ChatPromptTemplate
 
             logger.debug("Generating objective with ATS context...")
 
@@ -237,7 +237,7 @@ class ResumeImprover:
             from prompts import Prompts
             from dataModels.resume import ResumeSkillsMatcherOutput
             from services.langchain_helpers import create_llm
-            from langchain.prompts import ChatPromptTemplate
+            from langchain_core.prompts import ChatPromptTemplate
 
             logger.debug("Generating skills with cumulative context...")
 
@@ -423,7 +423,7 @@ class ResumeImprover:
             from prompts import Prompts
             from dataModels.resume import ResumeSectionHighlighterOutput
             from services.langchain_helpers import create_llm
-            from langchain.prompts import ChatPromptTemplate
+            from langchain_core.prompts import ChatPromptTemplate
 
             section_name = section.get('title') or section.get('name', 'Unknown')
             logger.debug(f"Rewriting section with context: {section_name}")
@@ -1303,7 +1303,7 @@ class ResumeImprover:
             from prompts import Prompts
             from dataModels.resume import ResumeSummarizerOutput
             from services.langchain_helpers import create_llm
-            from langchain.prompts import ChatPromptTemplate
+            from langchain_core.prompts import ChatPromptTemplate
 
             prompt = ChatPromptTemplate(messages=Prompts.lookup["OBJECTIVE_WRITER"])
             llm = create_llm(self.user, **self.llm_kwargs)
@@ -1337,7 +1337,7 @@ class ResumeImprover:
             from prompts import Prompts
             from dataModels.resume import ResumeSkillsMatcherOutput
             from services.langchain_helpers import create_llm
-            from langchain.prompts import ChatPromptTemplate
+            from langchain_core.prompts import ChatPromptTemplate
 
             chain = ChatPromptTemplate(messages=Prompts.lookup["SKILLS_MATCHER"])
             llm = create_llm(self.user, **self.llm_kwargs)
@@ -1482,7 +1482,7 @@ class ResumeImprover:
             from prompts import Prompts
             from dataModels.resume import ResumeSectionHighlighterOutput
             from services.langchain_helpers import create_llm
-            from langchain.prompts import ChatPromptTemplate
+            from langchain_core.prompts import ChatPromptTemplate
 
             logger.debug(f"Starting rewrite_section for: {section.get('title') or section.get('name', 'Unknown')}")
 

@@ -2,12 +2,12 @@ from datetime import datetime
 from dateutil import parser as dateparser
 from dateutil.relativedelta import relativedelta
 from langchain_openai import ChatOpenAI
-import langchain
+from langchain_core.globals import set_llm_cache
 from langchain_community.cache import InMemoryCache
 import config
 
 # Set up LLM cache
-langchain.llm_cache = InMemoryCache()
+set_llm_cache(InMemoryCache())
 logger = config.getLogger("langchain_helper")  # Get the logger from config
 
 
@@ -48,7 +48,7 @@ def parse_date(date_str: str) -> datetime:
         logger.debug(f"Successfully parsed date '{date_str}' to {parsed_date}")
         return parsed_date
     except dateparser._parser.ParserError as e:
-        langchain.llm_cache.clear()
+        # Note: cache.clear() removed as it's not critical for parsing
         logger.error(f"Date input `{date_str}` could not be parsed: {str(e)}")
         raise e
 
