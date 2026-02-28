@@ -34,3 +34,4 @@ aioredis
 orjson
 redis-py-cluster
 hiredis
+pydantic>=2.0.0
