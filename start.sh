@@ -1,5 +1,5 @@
 #!/bin/bash
-# JobTrak Launcher - Integrated with Shared Infra
+# JobTrak Launcher - POSIX Compliant & Integrated with Shared Infra
 
 set -e
 
@@ -9,10 +9,11 @@ COMPOSE_CMD="docker compose"
 
 print_status() { echo -e "\033[0;34m[INFO]\033[0m $1"; }
 print_success() { echo -e "\033[0;32m[SUCCESS]\033[0m $1"; }
+print_error() { echo -e "\033[0;31m[ERROR]\033[0m $1"; }
 
-# 1. Check if Infra is actually running
+# 1. Check if Shared Infra is actually running
 if ! $DOCKER_CMD ps | grep -q "infra-postgres"; then
-    echo "Error: Shared infrastructure (infra-postgres) is not running!"
+    print_error "Shared infrastructure (infra-postgres) is not running!"
     echo "Please run 'docker compose up -d' in your infra folder first."
     exit 1
 fi
@@ -35,7 +36,13 @@ while [ $counter -lt $timeout ]; do
         break
     fi
     sleep 2
-    ((counter++))
+    # POSIX compliant increment
+    counter=$((counter + 1))
 done
+
+if [ $counter -eq $timeout ]; then
+    print_error "API failed to start within $timeout seconds."
+    exit 1
+fi
 
 print_status "Access via: https://jobtrackai.duckdns.org (Ensure Caddy is reloaded)"
