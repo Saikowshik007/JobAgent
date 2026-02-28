@@ -464,7 +464,7 @@ class ResumeImprover:
             from prompts import Prompts
             from dataModels.resume import ResumeSkillsMatcherOutput
             from services.langchain_helpers import create_llm
-            from langchain.prompts import ChatPromptTemplate
+            from langchain_core.prompts import ChatPromptTemplate
 
             chain = ChatPromptTemplate(messages=Prompts.lookup["SKILLS_MATCHER"])
             llm = create_llm(self.user, **self.llm_kwargs)
