@@ -13,7 +13,7 @@ services:
       - ./logs:/app/logs
     restart: unless-stopped
     networks:
-      - infra-network  # Connects to shared infra
+      - infra-network
     environment:
       - PYTHONPATH=/app
       - PYTHONUNBUFFERED=1
