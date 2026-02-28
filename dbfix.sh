@@ -9,7 +9,7 @@ echo "======================================"
 # Function to check if PostgreSQL is ready
 check_postgres() {
     echo "🔍 Checking PostgreSQL connection..."
-    docker exec jobtrak-postgres pg_isready -U jobtrak_user -d jobtrak
+    docker exec infra-postgres pg_isready -U postgres -d jobtrak
     return $?
 }
 
@@ -20,7 +20,7 @@ init_database() {
     # Copy the init script to the container if it doesn't exist
     if [ -f "./init-scripts/01.sql" ]; then
         echo "📄 Found init script, executing..."
-        docker exec -i jobtrak-postgres psql -U jobtrak_user -d jobtrak < ./init-scripts/01.sql
+        docker exec -i infra-postgres psql -U postgres -d jobtrak < ./init-scripts/01.sql
     else
         echo "❌ Init script not found at ./init-scripts/01.sql"
         echo "Creating the script now..."
