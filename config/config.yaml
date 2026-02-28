@@ -20,7 +20,7 @@ selenium:
 
 # Database Configuration
 database:
-  path: postgresql://jobtrak_user:jobtrak_secure_password_2024@jobtrak-postgres:5432/jobtrak
+  path: postgresql://postgres:postgres@infra-postgres:5432/postgres
 
 # Cache Configuration
 cache:
