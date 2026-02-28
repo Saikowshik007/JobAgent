@@ -3,7 +3,7 @@ from dateutil import parser as dateparser
 from dateutil.relativedelta import relativedelta
 from langchain_openai import ChatOpenAI
 from langchain_core.globals import set_llm_cache, get_llm_cache
-from langchain_community.cache import InMemoryCache
+from langchain_community.cache import RedisCache
 import config
 import redis
 
