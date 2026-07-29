@@ -681,6 +681,10 @@ class ResumeImprover:
                     f"{index}. {highlight}"
                     for index, highlight in enumerate(original_highlights, start=1)
                 ),
+                highlight_word_limits="\n".join(
+                    f"{index}: 3-{self._highlight_word_limit(highlight)} words"
+                    for index, highlight in enumerate(original_highlights, start=1)
+                ),
             )
             last_error = None
             for rewrite_attempt in range(1, 3):
@@ -782,9 +786,10 @@ class ResumeImprover:
             word_count = len(re.findall(r"\b\w+\b", candidate))
             normalized = candidate.casefold()
             original_normalized = " ".join(originals[source_index - 1].split()).casefold()
-            if not 3 <= word_count <= 40:
+            max_words = self._highlight_word_limit(originals[source_index - 1])
+            if not 3 <= word_count <= max_words:
                 rejection_reasons.append(
-                    f"source_index {source_index} has {word_count} words; it must have 3-40"
+                    f"source_index {source_index} has {word_count} words; it must have 3-{max_words}"
                 )
                 continue
             if normalized in seen:
@@ -808,6 +813,12 @@ class ResumeImprover:
                 f"accepted indexes {sorted(accepted)}; rejections: {'; '.join(rejection_reasons) or 'missing source indexes'})"
             )
         return [accepted[index] for index in range(1, expected_count + 1)]
+
+    @staticmethod
+    def _highlight_word_limit(source_highlight: str) -> int:
+        """Allow enough room to preserve a long factual source bullet without unbounded output."""
+        source_words = len(re.findall(r"\b\w+\b", source_highlight or ""))
+        return min(64, max(40, source_words + 8))
 
     def _normalized_skill_groups(self, groups: list) -> list:
         """Defensively deduplicate and bound LLM-generated skill output."""
@@ -876,7 +887,7 @@ class ResumeImprover:
             "company", "job_summary", "duties", "qualifications", "ats_keywords",
             "technical_skills", "non_technical_skills", "evidence_inventory", "evidence_map",
             "section_evidence", "tailored_sections", "required_highlight_count", "rewrite_attempt",
-            "source_highlights", "validation_feedback",
+            "source_highlights", "highlight_word_limits", "validation_feedback",
         }
         for key in keys:
             value = raw_self_data.get(key)

@@ -16,6 +16,9 @@ SECTION_HIGHLIGHTER:
     <Numbered source highlights>
     {source_highlights}
 
+    <Per-source bullet word limits>
+    {highlight_word_limits}
+
     <Supported matches for this section>
     {section_evidence}
   instruction_message: >
@@ -27,7 +30,8 @@ SECTION_HIGHLIGHTER:
     - Never invent or infer a metric, technology, customer, team size, title, certification, responsibility, or outcome.
     - Preserve every number, named tool, and factual claim unless it is already present in the source. Do not turn an unquantified claim into a quantified one.
     - Keep the original meaning; improve wording, order, and keyword placement only when truthful.
-    - Use one clear action and outcome per bullet. Target 12-28 words; never exceed 40 words.
+    - Use one clear action and outcome per bullet. Target 12-28 words. Respect the
+      per-source maximum in the word-limits table for the matching source_index.
     - Include a job keyword only when the source demonstrates it or an unambiguous synonym.
     - Return exactly one rewritten bullet for every numbered source highlight.
     - Each response item must use the matching one-based source_index. Include every
@@ -36,8 +40,9 @@ SECTION_HIGHLIGHTER:
       wording while preserving its facts. Do not return any source bullet verbatim.
     - The source section contains {required_highlight_count} highlights. final_answer
       must contain exactly {required_highlight_count} distinct rewritten highlights.
-    - Before returning, verify every item: valid one-based source_index, 3-40 words,
-      non-verbatim wording, distinct text, and a relevance score from 1 to 5.
+    - Before returning, verify every item: valid one-based source_index, 3 words minimum,
+      its mapped maximum from the word-limits table, non-verbatim wording, distinct text,
+      and a relevance score from 1 to 5.
     - This is rewrite attempt {rewrite_attempt}. If this is a retry, use the validation
       feedback to correct the affected source_index while still returning the complete mapping.
     - Validation feedback from the previous attempt: {validation_feedback}
@@ -66,11 +71,11 @@ SOURCE_RESUME_PARSER:
     basic, objective, education, experiences, projects, skills.
     - basic: name, address, email, phone, websites (array of URLs).
     - objective: source summary/objective as a string, or an empty string if absent.
-    - education: array of {school, degrees}; each degree is {names: [string], gpa, dates}.
-    - experiences: array of {company, skip_name, location, titles, highlights}; each title
-      is {name, startdate, enddate} and highlights is an array of source bullets.
-    - projects: array of {name, technologies, link, hyperlink, show_link, highlights}.
-    - skills: array of {category, skills}, where skills is an array of strings.
+    - education: array of {{school, degrees}}; each degree is {{names: [string], gpa, dates}}.
+    - experiences: array of {{company, skip_name, location, titles, highlights}}; each title
+      is {{name, startdate, enddate}} and highlights is an array of source bullets.
+    - projects: array of {{name, technologies, link, hyperlink, show_link, highlights}}.
+    - skills: array of {{category, skills}}, where skills is an array of strings.
     - Use empty strings, empty arrays, or false when a field is absent. Do not fabricate
       dates, locations, links, metrics, responsibilities, or skills.
     - Keep every source bullet as a separate highlight. Do not tailor to a job description.
