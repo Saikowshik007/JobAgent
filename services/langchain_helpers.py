@@ -97,9 +97,7 @@ def chain_formatter(format_type: str, input_data) -> str:
 
         elif format_type == 'skills':
             as_list = format_skills_for_prompt(input_data)
-            formatted = format_prompt_inputs_as_strings(["skills"], skills=as_list)
-            result = formatted.get("skills", "")
-            return result
+            return format_list_as_string(as_list)
 
         else:
             if isinstance(input_data, (list, dict)):
