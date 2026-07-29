@@ -27,7 +27,7 @@ SECTION_HIGHLIGHTER:
     - Never invent or infer a metric, technology, customer, team size, title, certification, responsibility, or outcome.
     - Preserve every number, named tool, and factual claim unless it is already present in the source. Do not turn an unquantified claim into a quantified one.
     - Keep the original meaning; improve wording, order, and keyword placement only when truthful.
-    - Use one clear action and outcome per bullet. Aim for 12-28 words; use plain, specific language.
+    - Use one clear action and outcome per bullet. Target 12-28 words; never exceed 40 words.
     - Include a job keyword only when the source demonstrates it or an unambiguous synonym.
     - Return exactly one rewritten bullet for every numbered source highlight.
     - Each response item must use the matching one-based source_index. Include every
@@ -36,8 +36,10 @@ SECTION_HIGHLIGHTER:
       wording while preserving its facts. Do not return any source bullet verbatim.
     - The source section contains {required_highlight_count} highlights. final_answer
       must contain exactly {required_highlight_count} distinct rewritten highlights.
-    - This is rewrite attempt {rewrite_attempt}. If this is a retry, correct any
-      missing, duplicated, unchanged, or oversized bullets from the previous attempt.
+    - Before returning, verify every item: valid one-based source_index, 3-40 words,
+      non-verbatim wording, distinct text, and a relevance score from 1 to 5.
+    - This is rewrite attempt {rewrite_attempt}. If this is a retry, use the validation
+      feedback to correct the affected source_index while still returning the complete mapping.
     - Validation feedback from the previous attempt: {validation_feedback}
     - Return structured output only; do not expose reasoning or a plan.
   steps_message: >

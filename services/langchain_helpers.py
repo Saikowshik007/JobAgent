@@ -40,22 +40,17 @@ def invoke_structured(
         except BadRequestError as error:
             if "temperature" not in request or "temperature" not in str(error).lower():
                 raise
-            logger.info("Model does not accept temperature; retrying with its default sampling settings")
+            logger.info("llm_temperature_not_supported_retrying", extra={"prompt.type": prompt_type})
             request.pop("temperature")
             response = client.responses.parse(**request)
         if response.output_parsed is None:
             raise ValueError("Model returned no structured output")
         return response.output_parsed
     except APIError as e:
-        logger.error(
-            "OpenAI request failed for %s after %.0fs: %s",
-            prompt_type,
-            timeout_seconds,
-            e,
-        )
+        logger.warning("llm_request_failed", extra={"prompt.type": prompt_type, "timeout.seconds": timeout_seconds, "error.reason": str(e)})
         raise
     except Exception as e:
-        logger.error(f"Structured generation failed: {e}")
+        logger.error("llm_structured_generation_failed", extra={"prompt.type": prompt_type, "error.reason": str(e)})
         raise
 
 
@@ -69,39 +64,39 @@ def format_list_as_string(lst: list, list_sep: str = "\n- ") -> str:
 
 def parse_date(date_str: str) -> datetime:
     """Given an arbitrary string, parse it to a date."""
-    logger.debug(f"Parsing date string: {date_str}")
+    logger.debug("date_parse_started")
     default_date = datetime(datetime.today().year, 1, 1)
     try:
         parsed_date = dateparser.parse(str(date_str), default=default_date)
-        logger.debug(f"Successfully parsed date '{date_str}' to {parsed_date}")
+        logger.debug("date_parse_completed")
         return parsed_date
     except (TypeError, ValueError, OverflowError) as e:
-        logger.error(f"Date input `{date_str}` could not be parsed: {str(e)}")
+        logger.error("date_parse_failed", extra={"error.reason": str(e)})
         raise e
 
 
 def datediff_years(start_date: str, end_date: str) -> float:
     """Calculate the difference between two dates in fractional years."""
-    logger.debug(f"Calculating years between {start_date} and {end_date}")
+    logger.debug("date_difference_started")
     if isinstance(end_date, str) and end_date.lower() == "present":
         end_date = datetime.today().strftime("%Y-%m-%d")
-        logger.debug(f"End date is 'present', using current date: {end_date}")
+        logger.debug("date_difference_current_end_date_used")
 
     try:
         start = parse_date(start_date)
         end = parse_date(end_date)
         datediff = relativedelta(end, start)
         years_diff = datediff.years + datediff.months / 12.0
-        logger.debug(f"Date difference calculated: {years_diff} years")
+        logger.debug("date_difference_completed", extra={"date_difference.years": years_diff})
         return years_diff
     except Exception as e:
-        logger.error(f"Error calculating date difference: {str(e)}")
+        logger.error("date_difference_failed", extra={"error.reason": str(e)})
         raise
 
 
 def chain_formatter(format_type: str, input_data) -> str:
     """Format resume/job inputs for inclusion in a runnable sequence."""
-    logger.debug(f"Formatting chain input of type: {format_type}")
+    logger.debug("prompt_input_formatting_started", extra={"format.type": format_type})
 
     try:
         if format_type in {'experience', 'experiences'}:
@@ -122,7 +117,7 @@ def chain_formatter(format_type: str, input_data) -> str:
             return input_data or ""
 
     except Exception as e:
-        logger.error(f"Error formatting chain input of type '{format_type}': {str(e)}")
+        logger.error("prompt_input_formatting_failed", extra={"format.type": format_type, "error.reason": str(e)})
         return ""
 
 
@@ -158,7 +153,7 @@ def format_skills_for_prompt(input_data) -> list:
 
         return result
     except Exception as e:
-        logger.error(f"Error formatting skills: {str(e)}")
+        logger.error("skills_formatting_failed", extra={"error.reason": str(e)})
         return []
 
 
@@ -172,7 +167,7 @@ def get_cumulative_time_from_titles(titles) -> int:
                 result += datediff_years(start_date=t["startdate"], end_date=last_date)
         return round(result)
     except Exception as e:
-        logger.error(f"Error calculating cumulative time: {str(e)}")
+        logger.error("cumulative_time_calculation_failed", extra={"error.reason": str(e)})
         raise
 
 
@@ -195,7 +190,7 @@ def format_experiences_for_prompt(input_data) -> list:
             result.append(curr)
         return result
     except Exception as e:
-        logger.error(f"Error formatting experiences: {str(e)}")
+        logger.error("experience_formatting_failed", extra={"error.reason": str(e)})
         raise
 
 
@@ -215,5 +210,5 @@ def format_projects_for_prompt(input_data) -> list:
                 result.append(curr)
         return result
     except Exception as e:
-        logger.error(f"Error formatting projects: {str(e)}")
+        logger.error("project_formatting_failed", extra={"error.reason": str(e)})
         raise

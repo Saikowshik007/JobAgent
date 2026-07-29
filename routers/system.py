@@ -4,7 +4,6 @@ System management routes for health checks, cache management, and utilities.
 from fastapi import APIRouter, Depends, HTTPException, Request
 from datetime import datetime
 import logging
-import traceback
 
 from core.dependencies import get_cache_manager
 from data.dbcache_manager import DBCacheManager
@@ -25,30 +24,30 @@ async def get_system_status(
 ):
     """Get the overall status of the job tracking system."""
     try:
-        logger.info(f"Getting system status for user: {user_id}")
+        logger.debug("system_status_requested")
 
         # Get health check from unified cache manager
         try:
             health_info = await cache_manager.health_check()
-            logger.info("✓ Health check completed")
+            logger.debug("system_health_check_completed")
         except Exception as e:
-            logger.warning(f"Health check failed: {e}")
+            logger.warning("system_health_check_failed", extra={"error.reason": str(e)})
             health_info = {"status": "degraded", "error": str(e)}
 
         # Get job statistics
         try:
             job_stats = await cache_manager.get_job_stats(user_id)
-            logger.info("✓ Job stats retrieved")
+            logger.debug("system_job_stats_loaded")
         except Exception as e:
-            logger.warning(f"Job stats failed: {e}")
+            logger.warning("system_job_stats_load_failed", extra={"error.reason": str(e)})
             job_stats = {"error": str(e)}
 
         # Get cache statistics
         try:
             cache_stats = cache_manager.get_cache_stats()
-            logger.info("✓ Cache stats retrieved")
+            logger.debug("system_cache_stats_loaded")
         except Exception as e:
-            logger.warning(f"Cache stats failed: {e}")
+            logger.warning("system_cache_stats_load_failed", extra={"error.reason": str(e)})
             cache_stats = {"error": str(e)}
 
         return {
@@ -66,8 +65,7 @@ async def get_system_status(
             }
         }
     except Exception as e:
-        logger.error(f"Error getting system status for user {user_id}: {e}")
-        logger.error(traceback.format_exc())
+        logger.exception("system_status_failed")
         raise HTTPException(status_code=500, detail=f"System status error: {str(e)}")
 
 @router.delete("/{user_id}/cache/clear")
@@ -78,20 +76,19 @@ async def clear_cache(
 ):
     """Clear user's cache data."""
     try:
-        logger.info(f"Clearing cache for user: {user_id}")
+        logger.info("cache_clear_started")
 
         # Clear all cache data using unified cache manager
         await cache_manager.clear_user_cache(user_id)
 
-        logger.info(f"✓ Cache cleared successfully for user: {user_id}")
+        logger.info("cache_clear_completed")
         return {
             "message": "Cache cleared successfully",
             "user_id": user_id,
             "timestamp": datetime.now().isoformat()
         }
     except Exception as e:
-        logger.error(f"Error clearing cache for user {user_id}: {e}")
-        logger.error(traceback.format_exc())
+        logger.exception("cache_clear_failed")
         raise HTTPException(status_code=500, detail=f"Cache clear error: {str(e)}")
 
 @router.post("/{user_id}/cache/cleanup")
@@ -102,19 +99,18 @@ async def cleanup_cache(
 ):
     """Clean up expired cache entries."""
     try:
-        logger.info("Starting cache cleanup")
+        logger.info("cache_cleanup_started")
 
         await cache_manager.cleanup_expired_cache()
 
-        logger.info("✓ Cache cleanup completed successfully")
+        logger.info("cache_cleanup_completed")
         return {
             "message": "Cache cleanup completed",
             "timestamp": datetime.now().isoformat(),
             "user_id": user_id
         }
     except Exception as e:
-        logger.error(f"Error cleaning up cache: {e}")
-        logger.error(traceback.format_exc())
+        logger.exception("cache_cleanup_failed")
         raise HTTPException(status_code=500, detail=f"Cache cleanup error: {str(e)}")
 
 @router.get("/{user_id}/cache/stats")
@@ -125,12 +121,12 @@ async def get_cache_stats(
 ):
     """Get detailed cache statistics."""
     try:
-        logger.info("Getting cache statistics")
+        logger.debug("cache_stats_requested")
 
         stats = cache_manager.get_cache_stats()
         health = await cache_manager.health_check()
 
-        logger.info("✓ Cache statistics retrieved successfully")
+        logger.debug("cache_stats_loaded")
         return {
             "cache_stats": stats,
             "health": health,
@@ -138,6 +134,5 @@ async def get_cache_stats(
             "timestamp": datetime.now().isoformat()
         }
     except Exception as e:
-        logger.error(f"Error getting cache stats: {e}")
-        logger.error(traceback.format_exc())
+        logger.exception("cache_stats_failed")
         raise HTTPException(status_code=500, detail=f"Cache stats error: {str(e)}")

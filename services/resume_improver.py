@@ -54,7 +54,7 @@ class ResumeImprover:
         This is what ResumeGenerator calls - does everything.
         """
         try:
-            logger.info("=== Creating Complete Tailored Resume (Parallel) ===")
+            logger.info("resume_tailoring_started", extra={"event.action": "resume_tailoring"})
 
             self._report_progress("evidence_planning", 20, "Matching job requirements to resume evidence")
             # Establish the factual boundary before any section is rewritten.
@@ -71,22 +71,22 @@ class ResumeImprover:
                     loop = asyncio.get_event_loop()
                     if loop.is_running():
                         # We're in an async context, use thread-based approach
-                        logger.info(f'Using thread-based parallel approach (async context detected) using model: {self.user.model}')
+                        logger.info("resume_tailoring_parallel_mode", extra={"execution.mode": "threads"})
                         results = self._generate_content_parallel_threads(include_objective)
                     else:
                         # No active loop, safe to use asyncio.run
-                        logger.info("Using asyncio-based parallel approach")
+                        logger.info("resume_tailoring_parallel_mode", extra={"execution.mode": "asyncio"})
                         results = asyncio.run(self._generate_content_async_parallel(include_objective))
                 except RuntimeError:
                     # No event loop, safe to use asyncio.run
-                    logger.info("Using asyncio-based parallel approach (no existing loop)")
+                    logger.info("resume_tailoring_parallel_mode", extra={"execution.mode": "asyncio"})
                     results = asyncio.run(self._generate_content_async_parallel(include_objective))
 
                 end_time = time.time()
-                logger.info(f"Parallel generation completed in {end_time - start_time:.2f} seconds")
+                logger.info("resume_tailoring_sections_completed", extra={"event.duration_seconds": round(end_time - start_time, 2)})
 
             except Exception as parallel_error:
-                logger.error("Parallel generation failed; refusing to persist a partial resume")
+                logger.error("resume_tailoring_sections_failed")
                 raise RuntimeError("Required resume tailoring did not complete") from parallel_error
 
             # Extract results with detailed logging
@@ -95,14 +95,18 @@ class ResumeImprover:
             experiences = results.get('experiences', [])
             projects = results.get('projects', [])
 
-            logger.info(f"Results summary:")
-            logger.info(f"  - Objective: {'✓' if objective else '✗'}")
-            logger.info(f"  - Skills: {len(skills)} categories")
-            logger.info(f"  - Experiences: {len(experiences)} items")
-            logger.info(f"  - Projects: {len(projects)} items")
+            logger.info(
+                "resume_tailoring_results_ready",
+                extra={
+                    "resume.objective_included": bool(objective),
+                    "resume.skill_group_count": len(skills),
+                    "resume.experience_count": len(experiences),
+                    "resume.project_count": len(projects),
+                },
+            )
 
             # Step 2: Create final resume
-            logger.info("Assembling final resume...")
+            logger.info("resume_tailoring_assembling")
             final_resume = {
                 'editing': False,
                 'basic': self.basic_info or {},
@@ -125,11 +129,11 @@ class ResumeImprover:
             # Step 3: Convert to YAML
             self._report_progress("saving_resume", 95, "Preparing the tailored resume")
             yaml_content = self.dict_to_yaml_string(final_resume)
-            logger.info("=== Resume Creation Complete ===")
+            logger.info("resume_tailoring_completed")
             return yaml_content
 
-        except Exception as e:
-            logger.error(f"Complete resume creation failed: {e}")
+        except Exception:
+            logger.exception("resume_tailoring_failed")
             raise
 
     def _report_progress(self, stage: str, progress_percentage: int, message: str) -> None:
@@ -178,7 +182,7 @@ class ResumeImprover:
                 plan.append(item)
             return plan
         except Exception as error:
-            logger.exception("Evidence planning failed; refusing to generate an unplanned resume")
+            logger.exception("resume_evidence_planning_failed")
             raise RuntimeError(
                 "Evidence planning failed; resume generation was not started. Please retry."
             ) from error
@@ -226,7 +230,7 @@ class ResumeImprover:
                     + ", ".join(sorted(rejected_ids))
                 )
         except Exception as error:
-            logger.exception("Grounding validation failed; refusing to persist an unverified resume")
+            logger.exception("resume_grounding_validation_failed")
             raise RuntimeError("Final grounding validation failed") from error
         return tailored_resume
 
@@ -238,7 +242,7 @@ class ResumeImprover:
 
         loop = asyncio.get_event_loop()
 
-        logger.info("Starting parallel task execution...")
+        logger.info("resume_tailoring_tasks_started", extra={"task.count": 4 if include_objective else 3})
 
         tasks = []
         task_names = []
@@ -262,9 +266,9 @@ class ResumeImprover:
                 asyncio.gather(*tasks, return_exceptions=True),
                 timeout=self.timeout
             )
-            logger.info(f"All {len(results)} tasks completed")
+            logger.info("resume_tailoring_tasks_finished", extra={"task.count": len(results)})
         except asyncio.TimeoutError as error:
-            logger.error(f"Parallel generation timed out after {self.timeout} seconds")
+            logger.error("resume_tailoring_timed_out", extra={"timeout.seconds": self.timeout})
             # Cancel remaining tasks
             for task in tasks:
                 if not task.done():
@@ -276,10 +280,10 @@ class ResumeImprover:
 
         for i, (result, task_name) in enumerate(zip(results, task_names)):
             if isinstance(result, Exception):
-                logger.error(f"Task '{task_name}' failed with exception: {result}")
+                logger.error("resume_tailoring_task_failed", extra={"task.name": task_name, "error.reason": str(result)})
                 raise RuntimeError(f"Required {task_name} tailoring failed") from result
             else:
-                logger.info(f"Task '{task_name}' completed successfully")
+                logger.debug("resume_tailoring_task_completed", extra={"task.name": task_name})
                 processed_results[task_name] = result
 
         # If objective was not included, set it to None/empty
@@ -291,58 +295,42 @@ class ResumeImprover:
     def _safe_write_objective(self) -> Optional[str]:
         """Thread-safe wrapper for write_objective."""
         try:
-            logger.debug("Starting objective generation...")
             result = self.write_objective()
-            logger.debug(f"Objective generation result: {result}")
             return result
-        except Exception as e:
-            logger.error(f"Error in parallel objective generation: {e}")
-            import traceback
-            logger.error(f"Objective traceback: {traceback.format_exc()}")
+        except Exception as error:
+            logger.warning("resume_objective_generation_failed", extra={"error.reason": str(error)})
             return None
 
     def _safe_extract_matched_skills(self) -> List:
         """Thread-safe wrapper for extract_matched_skills."""
         try:
-            logger.debug("Starting skills extraction...")
             result = self.extract_matched_skills()
-            logger.debug(f"Skills extraction result: {len(result) if result else 0} categories")
             return result
-        except Exception as e:
-            logger.error(f"Error in parallel skills extraction: {e}")
-            import traceback
-            logger.error(f"Skills traceback: {traceback.format_exc()}")
+        except Exception as error:
+            logger.warning("resume_skills_generation_failed", extra={"error.reason": str(error)})
             return self.skills or []
 
     def _safe_rewrite_experiences(self) -> List:
         """Thread-safe wrapper for rewrite_unedited_experiences."""
         try:
-            logger.debug("Starting experience rewriting...")
             result = self.rewrite_unedited_experiences()
-            logger.debug(f"Experience rewriting result: {len(result) if result else 0} experiences")
             return result
-        except Exception as e:
-            logger.error(f"Error in parallel experience rewriting: {e}")
-            import traceback
-            logger.error(f"Experience traceback: {traceback.format_exc()}")
+        except Exception as error:
+            logger.error("resume_experience_rewrite_failed", extra={"error.reason": str(error)})
             raise
 
     def _safe_rewrite_projects(self) -> List:
         """Thread-safe wrapper for rewrite_unedited_projects."""
         try:
-            logger.debug("Starting project rewriting...")
             result = self.rewrite_unedited_projects()
-            logger.debug(f"Project rewriting result: {len(result) if result else 0} projects")
             return result
-        except Exception as e:
-            logger.error(f"Error in parallel project rewriting: {e}")
-            import traceback
-            logger.error(f"Project traceback: {traceback.format_exc()}")
+        except Exception as error:
+            logger.error("resume_project_rewrite_failed", extra={"error.reason": str(error)})
             raise
 
     def _generate_content_parallel_threads(self, include_objective: bool = True) -> Dict:
         """Generate content using ThreadPoolExecutor for cases where we're already in async context."""
-        logger.info("Using ThreadPoolExecutor for parallel generation...")
+        logger.info("resume_tailoring_parallel_mode", extra={"execution.mode": "threads"})
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
             # Submit tasks conditionally
@@ -370,70 +358,52 @@ class ResumeImprover:
                     try:
                         result = future.result()
                         results[task_name] = result
-                        logger.info(f"✓ {task_name} completed successfully ({completed_tasks}/{total_tasks})")
+                        logger.debug("resume_tailoring_task_completed", extra={"task.name": task_name})
 
-                        # Debug log the result
-                        if task_name == 'experiences':
-                            logger.debug(f"Experiences result: {len(result) if result else 0} items")
-                        elif task_name == 'projects':
-                            logger.debug(f"Projects result: {len(result) if result else 0} items")
-
-                    except Exception as e:
-                        logger.error(f"✗ {task_name} failed with exception: {e}")
-                        import traceback
-                        logger.error(f"{task_name} traceback: {traceback.format_exc()}")
-                        results[task_name] = self._get_default_value(task_name)
+                    except Exception as error:
+                        logger.error("resume_tailoring_task_failed", extra={"task.name": task_name, "error.reason": str(error)})
+                        raise RuntimeError(f"Required {task_name} tailoring failed") from error
 
             except concurrent.futures.TimeoutError:
-                logger.error(f"Parallel generation timed out after {self.timeout} seconds")
-                logger.error(f"Completed {completed_tasks}/{total_tasks} tasks before timeout")
+                logger.error("resume_tailoring_timed_out", extra={"timeout.seconds": self.timeout, "task.completed": completed_tasks, "task.total": total_tasks})
 
                 # Cancel remaining futures
                 for future in future_to_task:
                     if not future.done():
                         future.cancel()
                         task_name = future_to_task[future]
-                        logger.warning(f"Cancelled task: {task_name}")
-
-                # Fill in defaults for missing results
-                expected_tasks = ['skills', 'experiences', 'projects']
-                if include_objective:
-                    expected_tasks.insert(0, 'objective')
-
-                for task_name in expected_tasks:
-                    if task_name not in results:
-                        results[task_name] = self._get_default_value(task_name)
-                        logger.warning(f"Using default value for {task_name} due to timeout")
+                        logger.warning("resume_tailoring_task_cancelled", extra={"task.name": task_name})
+                raise RuntimeError("Required resume tailoring timed out")
 
             # If objective was not included, set it to None
             if not include_objective:
                 results['objective'] = None
 
-            logger.info(f"Thread-based parallel execution completed: {len(results)}/{total_tasks} tasks")
+            logger.info("resume_tailoring_tasks_finished", extra={"task.completed": len(results), "task.total": total_tasks})
             return results
 
     def _generate_content_sequential(self, include_objective: bool = True) -> Dict:
         """Fallback sequential content generation."""
-        logger.info("Running sequential content generation...")
+        logger.info("resume_tailoring_sequential_mode")
 
         results = {}
 
         if include_objective:
-            logger.info("Sequential: Generating objective...")
+            logger.debug("resume_tailoring_task_started", extra={"task.name": "objective"})
             results['objective'] = self._safe_write_objective()
         else:
             results['objective'] = None
 
-        logger.info("Sequential: Extracting skills...")
+        logger.debug("resume_tailoring_task_started", extra={"task.name": "skills"})
         results['skills'] = self._safe_extract_matched_skills()
 
-        logger.info("Sequential: Rewriting experiences...")
+        logger.debug("resume_tailoring_task_started", extra={"task.name": "experiences"})
         results['experiences'] = self._safe_rewrite_experiences()
 
-        logger.info("Sequential: Rewriting projects...")
+        logger.debug("resume_tailoring_task_started", extra={"task.name": "projects"})
         results['projects'] = self._safe_rewrite_projects()
 
-        logger.info("Sequential content generation completed")
+        logger.info("resume_tailoring_tasks_finished")
         return results
 
     def _get_default_value(self, task_name: str):
@@ -470,7 +440,7 @@ class ResumeImprover:
             soup = BeautifulSoup(self.job_post_html_data, "html.parser")
             self.job_post_raw = soup.get_text(separator=" ", strip=True)
         except Exception as e:
-            logger.error(f"Failed to extract HTML data: {e}")
+            logger.error("job_page_text_extraction_failed", extra={"error.reason": str(e)})
             raise
 
     async def _download_url(self, url=None):
@@ -505,17 +475,17 @@ class ResumeImprover:
                 except httpx.HTTPStatusError as e:
                     status_code = e.response.status_code
                     if status_code not in (429, 999) or attempt == max_retries - 1:
-                        logger.error(f"Failed to download URL {self.url}: {e}")
+                        logger.error("job_page_download_failed", extra={"error.reason": str(e)})
                         break
                     delay = backoff_factor * 2 ** attempt
-                    logger.warning(f"Job site rate-limited the request; retrying in {delay} seconds")
+                    logger.warning("job_page_rate_limited", extra={"retry.delay_seconds": delay})
                     await asyncio.sleep(delay)
                 except httpx.HTTPError as e:
-                    logger.error(f"Failed to download URL {self.url}: {e}")
+                    logger.error("job_page_download_failed", extra={"error.reason": str(e)})
                     if attempt < max_retries - 1:
                         await asyncio.sleep(backoff_factor * 2 ** attempt)
 
-        logger.error(f"Exceeded maximum retries for URL {self.url}")
+        logger.error("job_page_download_retries_exhausted")
         return False
 
     def write_objective(self, **chain_kwargs) -> str:
@@ -533,25 +503,25 @@ class ResumeImprover:
                 if hasattr(result, 'final_answer'):
                     # Pydantic model
                     objective = result.final_answer
-                    logger.info("Using Pydantic model access")
+                    logger.debug("resume_objective_response_parsed", extra={"response.type": "pydantic"})
                 elif isinstance(result, dict):
                     # Dictionary response
                     objective = result.get('final_answer')
-                    logger.info("Using dictionary access")
+                    logger.debug("resume_objective_response_parsed", extra={"response.type": "dictionary"})
                 else:
                     # Direct string response
                     objective = result
-                    logger.info("Using direct response")
+                    logger.debug("resume_objective_response_parsed", extra={"response.type": "string"})
 
                 objective = self._validated_summary(objective)
-                logger.debug(f"Objective result: {objective}")
+                logger.debug("resume_objective_generated", extra={"resume.objective_included": bool(objective)})
                 return objective
 
-            logger.warning("Objective generation returned None")
+            logger.warning("resume_objective_generation_empty")
             return None
 
-        except Exception as e:
-            logger.error(f"Error in write_objective: {e}")
+        except Exception as error:
+            logger.warning("resume_objective_generation_failed", extra={"error.reason": str(error)})
             return None
 
     def extract_matched_skills(self, **chain_kwargs) -> list:
@@ -568,7 +538,7 @@ class ResumeImprover:
             )
 
             if not extracted_skills:
-                logger.warning("No extracted_skills returned from LLM")
+                logger.warning("resume_skills_generation_empty")
                 return self.skills or []
 
             # Handle both Pydantic model and dictionary responses
@@ -579,10 +549,10 @@ class ResumeImprover:
                 # Dictionary response
                 extracted_skills_dict = extracted_skills.get("final_answer", {})
             else:
-                logger.error(f"Unexpected response type: {type(extracted_skills)}")
+                logger.error("resume_skills_response_invalid", extra={"response.type": type(extracted_skills).__name__})
                 return self.skills or []
 
-            logger.info(f"LLM returned skills: {extracted_skills_dict}")
+            logger.debug("resume_skills_response_received")
 
             # Build the final skills structure - LLM has already handled deduplication
             result = []
@@ -629,102 +599,73 @@ class ResumeImprover:
                     "skills": non_technical_skills
                 })
 
-            logger.info(f"Final skills structure: {len(result)} categories")
-            for category in result:
-                if "subcategories" in category:
-                    logger.info(f"  {category['category']}: {len(category['subcategories'])} subcategories")
-                    for subcat in category['subcategories']:
-                        logger.info(f"    - {subcat['name']}: {len(subcat['skills'])} skills")
-                else:
-                    logger.info(f"  {category['category']}: {len(category['skills'])} skills")
+            logger.info("resume_skills_generated", extra={"resume.skill_group_count": len(result)})
 
             return self._normalized_skill_groups(result)
 
-        except Exception as e:
-            logger.error(f"Error in extract_matched_skills: {e}")
-            import traceback
-            logger.error(f"Full traceback: {traceback.format_exc()}")
+        except Exception as error:
+            logger.warning("resume_skills_generation_failed", extra={"error.reason": str(error)})
             return self.skills or []
 
     def rewrite_unedited_experiences(self, **chain_kwargs) -> list:
         """Rewrite unedited experiences in the resume."""
         try:
             if not self.experiences:
-                logger.info("No experiences to rewrite")
+                logger.info("resume_experience_rewrite_skipped")
                 return []
 
-            logger.info(f"Rewriting {len(self.experiences)} experiences...")
+            logger.info("resume_experience_rewrite_started", extra={"resume.experience_count": len(self.experiences)})
             result = []
             for i, exp in enumerate(self.experiences):
-                logger.info(f"Processing experience {i + 1}: {exp.get('title', 'Unknown')}")
                 exp = dict(exp)
 
-                # Log original highlights
                 original_highlights = exp.get("highlights", [])
-                logger.info(f"  Original highlights: {len(original_highlights)} items")
-                for j, highlight in enumerate(original_highlights):
-                    logger.debug(f"    {j + 1}: {highlight}")
+                logger.debug("resume_section_rewrite_started", extra={"section.id": f"experience:{i}", "source.highlight_count": len(original_highlights)})
 
                 if not original_highlights:
                     result.append(exp)
                     continue
 
                 new_highlights = self.rewrite_section(section=exp, section_id=f"experience:{i}", **chain_kwargs)
-                logger.info(f"  New highlights: {len(new_highlights) if new_highlights else 0} items")
-
-                for j, highlight in enumerate(new_highlights):
-                    logger.debug(f"    NEW {j + 1}: {highlight}")
                 exp["highlights"] = new_highlights
 
                 result.append(exp)
 
-            logger.info(f"Completed rewriting {len(result)} experiences")
+            logger.info("resume_experience_rewrite_completed", extra={"resume.experience_count": len(result)})
             return result
-        except Exception as e:
-            logger.error(f"Error in rewrite_unedited_experiences: {e}")
-            import traceback
-            logger.error(f"Experience rewrite traceback: {traceback.format_exc()}")
-            raise RuntimeError("Experience bullet rewriting failed") from e
+        except Exception as error:
+            logger.error("resume_experience_rewrite_failed", extra={"error.reason": str(error)})
+            raise RuntimeError("Experience bullet rewriting failed") from error
 
     def rewrite_unedited_projects(self, **chain_kwargs) -> list:
         """Rewrite unedited projects in the resume."""
         try:
             if not self.projects:
-                logger.info("No projects to rewrite")
+                logger.info("resume_project_rewrite_skipped")
                 return []
 
-            logger.info(f"Rewriting {len(self.projects)} projects...")
+            logger.info("resume_project_rewrite_started", extra={"resume.project_count": len(self.projects)})
             result = []
             for i, proj in enumerate(self.projects):
-                logger.info(f"Processing project {i + 1}: {proj.get('name', 'Unknown')}")
                 proj = dict(proj)
 
-                # Log original highlights
                 original_highlights = proj.get("highlights", [])
-                logger.info(f"  Original highlights: {len(original_highlights)} items")
-                for j, highlight in enumerate(original_highlights):
-                    logger.debug(f"    {j + 1}: {highlight}")
+                logger.debug("resume_section_rewrite_started", extra={"section.id": f"project:{i}", "source.highlight_count": len(original_highlights)})
 
                 if not original_highlights:
                     result.append(proj)
                     continue
 
                 new_highlights = self.rewrite_section(section=proj, section_id=f"project:{i}", **chain_kwargs)
-                logger.info(f"  New highlights: {len(new_highlights) if new_highlights else 0} items")
-
-                for j, highlight in enumerate(new_highlights):
-                    logger.debug(f"    NEW {j + 1}: {highlight}")
                 proj["highlights"] = new_highlights
 
                 result.append(proj)
 
-            logger.info(f"Completed rewriting {len(result)} projects")
+            logger.info("resume_project_rewrite_completed", extra={"resume.project_count": len(result)})
             return result
-        except Exception as e:
-            logger.error(f"Error in rewrite_unedited_projects: {e}")
-            import traceback
-            logger.error(f"Project rewrite traceback: {traceback.format_exc()}")
-            raise RuntimeError("Project bullet rewriting failed") from e
+        except Exception as error:
+            logger.error("resume_project_rewrite_failed", extra={"error.reason": str(error)})
+            raise RuntimeError("Project bullet rewriting failed") from error
 
     def rewrite_section(self, section, section_id: str = "", **chain_kwargs) -> list:
         """Rewrite a section of the resume."""
@@ -733,7 +674,7 @@ class ResumeImprover:
             from dataModels.resume import ResumeSectionHighlighterOutput
             from services.langchain_helpers import invoke_structured
 
-            logger.debug(f"Starting rewrite_section for: {section.get('title') or section.get('name', 'Unknown')}")
+            logger.debug("resume_section_rewrite_requested", extra={"section.id": section_id})
 
             prompt_inputs = self._get_prompt_inputs(
                 section=section,
@@ -748,7 +689,7 @@ class ResumeImprover:
             for rewrite_attempt in range(1, 3):
                 prompt_inputs["rewrite_attempt"] = rewrite_attempt
                 prompt_inputs["validation_feedback"] = str(last_error or "None; produce the complete mapping.")
-                logger.debug("Invoking structured highlight generation, attempt %s", rewrite_attempt)
+                logger.debug("resume_section_rewrite_attempt", extra={"section.id": section_id, "rewrite.attempt": rewrite_attempt})
                 section_revised = invoke_structured(
                     self.user,
                     "SECTION_HIGHLIGHTER",
@@ -779,28 +720,31 @@ class ResumeImprover:
                         if item["relevance"] >= relevance_threshold
                     ]
                     logger.info(
-                        "Selected %s of %s validated bullets with relevance >= %s",
-                        len(selected_highlights),
-                        len(validated_highlights),
-                        relevance_threshold,
+                        "resume_section_rewrite_completed",
+                        extra={
+                            "section.id": section_id,
+                            "source.highlight_count": len(original_highlights),
+                            "resume.highlight_count": len(selected_highlights),
+                            "relevance.threshold": relevance_threshold,
+                        },
                     )
                     return [item["highlight"] for item in selected_highlights]
                 except ValueError as error:
                     last_error = error
                     logger.warning(
-                        "Section rewrite attempt %s/%s failed validation: %s",
-                        rewrite_attempt,
-                        2,
-                        error,
+                        "resume_section_rewrite_validation_failed",
+                        extra={
+                            "section.id": section_id,
+                            "rewrite.attempt": rewrite_attempt,
+                            "error.reason": str(error),
+                        },
                     )
 
             raise last_error or ValueError("The model returned no rewritten highlights")
 
-        except Exception as e:
-            logger.error(f"Error in rewrite_section: {e}")
-            import traceback
-            logger.error(f"Rewrite section traceback: {traceback.format_exc()}")
-            raise RuntimeError("Section bullet rewriting failed") from e
+        except Exception as error:
+            logger.error("resume_section_rewrite_failed", extra={"section.id": section_id, "error.reason": str(error)})
+            raise RuntimeError("Section bullet rewriting failed") from error
 
     def _validated_summary(self, summary) -> Optional[str]:
         """Keep summaries concise and avoid replacing a usable original with bad output."""
@@ -808,7 +752,7 @@ class ResumeImprover:
             return self.objective or None
         summary = " ".join(summary.split())
         if not summary or len(re.findall(r"\b\w+\b", summary)) > 55:
-            logger.warning("Discarding empty or oversized generated summary")
+            logger.warning("resume_objective_generation_invalid")
             return self.objective or None
         return summary
 
@@ -841,9 +785,9 @@ class ResumeImprover:
             word_count = len(re.findall(r"\b\w+\b", candidate))
             normalized = candidate.casefold()
             original_normalized = " ".join(originals[source_index - 1].split()).casefold()
-            if not 3 <= word_count <= 30:
+            if not 3 <= word_count <= 40:
                 rejection_reasons.append(
-                    f"source_index {source_index} has {word_count} words; it must have 3-30"
+                    f"source_index {source_index} has {word_count} words; it must have 3-40"
                 )
                 continue
             if normalized in seen:
@@ -963,7 +907,7 @@ class ResumeImprover:
         try:
             return yaml.dump(data, default_flow_style=False, allow_unicode=True)
         except YAMLError as error:
-            logger.error("Failed to serialize the tailored resume as YAML")
+            logger.error("resume_yaml_serialization_failed")
             raise ValueError("Could not serialize the generated resume") from error
 
     def __del__(self):
