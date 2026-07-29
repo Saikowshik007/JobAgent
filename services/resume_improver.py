@@ -817,39 +817,54 @@ class ResumeImprover:
         expected_count = len(originals or [])
         expected_indexes = set(range(1, expected_count + 1))
         accepted, seen, received_indexes = {}, set(), set()
-        for candidate in candidates or []:
+        rejection_reasons = []
+        for response_position, candidate in enumerate(candidates or [], start=1):
             if not isinstance(candidate, dict):
+                rejection_reasons.append(f"response item {response_position} is not an object")
                 continue
             source_index = candidate.get("source_index")
             highlight = candidate.get("highlight")
             relevance = candidate.get("relevance")
             if not isinstance(source_index, int) or source_index not in expected_indexes:
+                rejection_reasons.append(f"response item {response_position} has an invalid source_index")
                 continue
-            if (
-                source_index in received_indexes
-                or not isinstance(highlight, str)
-                or not isinstance(relevance, int)
-                or not 1 <= relevance <= 5
-            ):
+            if source_index in received_indexes:
+                rejection_reasons.append(f"source_index {source_index} is duplicated")
+                continue
+            if not isinstance(highlight, str):
+                rejection_reasons.append(f"source_index {source_index} has no text highlight")
+                continue
+            if not isinstance(relevance, int) or not 1 <= relevance <= 5:
+                rejection_reasons.append(f"source_index {source_index} has an invalid relevance score")
                 continue
             candidate = " ".join(highlight.split())
             word_count = len(re.findall(r"\b\w+\b", candidate))
             normalized = candidate.casefold()
             original_normalized = " ".join(originals[source_index - 1].split()).casefold()
-            if 3 <= word_count <= 30 and normalized not in seen and normalized != original_normalized:
-                accepted[source_index] = {
-                    "source_index": source_index,
-                    "highlight": candidate,
-                    "relevance": relevance,
-                }
-                seen.add(normalized)
-                received_indexes.add(source_index)
+            if not 3 <= word_count <= 30:
+                rejection_reasons.append(
+                    f"source_index {source_index} has {word_count} words; it must have 3-30"
+                )
+                continue
+            if normalized in seen:
+                rejection_reasons.append(f"source_index {source_index} duplicates another rewritten bullet")
+                continue
+            if normalized == original_normalized:
+                rejection_reasons.append(f"source_index {source_index} repeats the source bullet verbatim")
+                continue
+            accepted[source_index] = {
+                "source_index": source_index,
+                "highlight": candidate,
+                "relevance": relevance,
+            }
+            seen.add(normalized)
+            received_indexes.add(source_index)
 
         if set(accepted) != expected_indexes:
             raise ValueError(
                 "The model must return one distinct, valid rewrite mapped to every source highlight "
                 f"(expected indexes {sorted(expected_indexes)}, received {len(candidates or [])}, "
-                f"accepted indexes {sorted(accepted)})"
+                f"accepted indexes {sorted(accepted)}; rejections: {'; '.join(rejection_reasons) or 'missing source indexes'})"
             )
         return [accepted[index] for index in range(1, expected_count + 1)]
 
