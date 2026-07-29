@@ -8,6 +8,8 @@ from datetime import datetime
 import re
 import time
 from typing import Dict, List, Optional
+import yaml
+from yaml import YAMLError
 
 logger = config.getLogger("ResumeImprover")
 
@@ -911,6 +913,14 @@ class ResumeImprover:
                 elif isinstance(names, str):
                     result.append(names)
         return result
+
+    def dict_to_yaml_string(self, data: dict) -> str:
+        """Serialize the completed resume for the existing persistence layer."""
+        try:
+            return yaml.dump(data, default_flow_style=False, allow_unicode=True)
+        except YAMLError as error:
+            logger.error("Failed to serialize the tailored resume as YAML")
+            raise ValueError("Could not serialize the generated resume") from error
 
     def __del__(self):
         self.close()
