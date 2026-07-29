@@ -29,9 +29,11 @@ def extract_pdf_text(pdf_content: bytes) -> str:
     return text
 
 
-def parse_source_resume(pdf_content: bytes, user) -> dict[str, Any]:
+def parse_source_resume(pdf_content: bytes, user, progress_callback=None) -> dict[str, Any]:
     """Use structured generation to produce the canonical editable resume object."""
     source_text = extract_pdf_text(pdf_content)
+    if progress_callback:
+        progress_callback("structuring", 55, "Mapping resume text into editable fields")
     try:
         schema_example = SAMPLE_RESUME_PATH.read_text(encoding="utf-8")
     except OSError as error:
@@ -45,6 +47,8 @@ def parse_source_resume(pdf_content: bytes, user) -> dict[str, Any]:
         source_resume_text=source_text,
         resume_schema_example=schema_example,
     )
+    if progress_callback:
+        progress_callback("validating", 85, "Validating extracted resume fields")
     resume_data = result.final_answer
     if not isinstance(resume_data, dict):
         raise ValueError("The resume parser returned an invalid structured response")

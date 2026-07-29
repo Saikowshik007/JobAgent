@@ -4,11 +4,14 @@ Resume management routes for generating, uploading, and managing resumes.
 from fastapi import APIRouter, Depends, HTTPException, Form, Query, File, UploadFile
 from typing import Optional
 import logging
+import asyncio
+import uuid
 
 from core.dependencies import get_cache_manager
 from data.dbcache_manager import DBCacheManager
 from dataModels.api_models import GenerateResumeRequest
 from dataModels.user_model import User
+from data.cache import ResumeGenerationStatus
 from services.resume_generator import ResumeGenerator
 from services.resume_parser import parse_source_resume
 
@@ -290,21 +293,75 @@ async def parse_resume_pdf(
         file: UploadFile = File(...),
         api_key: str = Form(...),
         model: str = Form("gpt-4o"),
+        cache_manager: DBCacheManager = Depends(get_cache_manager),
 ):
-    """Extract a text-based PDF and return canonical, editable resume data."""
+    """Start an asynchronous PDF-to-canonical-resume import."""
     if file.content_type not in {"application/pdf", "application/x-pdf"} and not (file.filename or "").lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF resumes are supported")
     if not api_key.strip():
         raise HTTPException(status_code=400, detail="An OpenAI API key is required to parse a resume")
     try:
-        resume_data = parse_source_resume(
+        import_id = str(uuid.uuid4())
+        await cache_manager.set_resume_status(
+            import_id,
+            user_id,
+            ResumeGenerationStatus.PENDING,
+            data={
+                "operation": "resume_import",
+                "stage": "queued",
+                "progress_percentage": 5,
+                "message": "PDF resume import is queued",
+            },
+        )
+        asyncio.create_task(_parse_resume_pdf_background(
+            import_id,
+            user_id,
             await file.read(),
             User(id=user_id, api_key=api_key.strip(), model=model),
-        )
-        logger.info("resume_pdf_parsed", extra={"resume.source_type": "pdf"})
-        return {"resume_data": resume_data}
+            cache_manager,
+        ))
+        return {"status": "processing", "import_id": import_id}
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error))
     except Exception as error:
         logger.exception("resume_pdf_parse_failed")
         raise HTTPException(status_code=502, detail="Could not parse the resume PDF. Please try again.") from error
+
+
+async def _parse_resume_pdf_background(import_id: str, user_id: str, pdf_content: bytes, user: User,
+                                       cache_manager: DBCacheManager) -> None:
+    """Run source-resume extraction without blocking the request loop."""
+    try:
+        await cache_manager.set_resume_status(
+            import_id, user_id, ResumeGenerationStatus.IN_PROGRESS,
+            data={"operation": "resume_import", "stage": "extracting", "progress_percentage": 25,
+                  "message": "Extracting text from the PDF"},
+        )
+        event_loop = asyncio.get_running_loop()
+
+        def report_progress(stage: str, progress: int, message: str) -> None:
+            future = asyncio.run_coroutine_threadsafe(
+                cache_manager.set_resume_status(
+                    import_id, user_id, ResumeGenerationStatus.IN_PROGRESS,
+                    data={"operation": "resume_import", "stage": stage,
+                          "progress_percentage": progress, "message": message},
+                ),
+                event_loop,
+            )
+            future.result(timeout=5)
+
+        resume_data = await asyncio.to_thread(parse_source_resume, pdf_content, user, report_progress)
+        await cache_manager.set_resume_status(
+            import_id, user_id, ResumeGenerationStatus.COMPLETED,
+            data={"operation": "resume_import", "stage": "completed", "progress_percentage": 100,
+                  "message": "Resume fields are ready for review", "resume_data": resume_data},
+        )
+        logger.info("resume_pdf_parsed", extra={"resume.source_type": "pdf"})
+    except Exception as error:
+        logger.exception("resume_pdf_parse_failed")
+        await cache_manager.set_resume_status(
+            import_id, user_id, ResumeGenerationStatus.FAILED,
+            data={"operation": "resume_import", "stage": "failed", "progress_percentage": 0,
+                  "message": f"PDF resume import failed: {error}"},
+            error=str(error),
+        )

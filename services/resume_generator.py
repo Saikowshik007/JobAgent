@@ -285,7 +285,7 @@ class ResumeGenerator:
                 response["error"] = cache_entry["error"]
 
             progress_data = cache_entry.get("data") or {}
-            for field in ("stage", "progress_percentage", "message", "failure_reason", "job_id"):
+            for field in ("stage", "progress_percentage", "message", "failure_reason", "job_id", "operation", "resume_data"):
                 if field in progress_data:
                     response[field] = progress_data[field]
 
