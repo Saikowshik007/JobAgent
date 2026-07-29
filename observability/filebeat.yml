@@ -1,0 +1,25 @@
+filebeat.inputs:
+  - type: filestream
+    id: docker-json-logs
+    paths:
+      - /var/lib/docker/containers/*/*.log
+    parsers:
+      - container:
+          stream: all
+          format: docker
+    processors:
+      - add_docker_metadata:
+          host: unix:///var/run/docker.sock
+      - decode_json_fields:
+          fields: ["message"]
+          target: ""
+          overwrite_keys: true
+          add_error_key: true
+
+output.elasticsearch:
+  hosts: ["http://elasticsearch:9200"]
+  index: "jobagent-logs-%{+yyyy.MM.dd}"
+
+setup.template.name: "jobagent-logs"
+setup.template.pattern: "jobagent-logs-*"
+setup.ilm.enabled: false
