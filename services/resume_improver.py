@@ -187,8 +187,13 @@ class ResumeImprover:
         """Persist an honest, UI-friendly summary of match strength and real gaps."""
         matches = [match for match in self.evidence_plan if not match.get("gap")]
         gaps = [match["requirement"] for match in self.evidence_plan if match.get("gap")]
+        requirements_evaluated = len(matches) + len(gaps)
         return {
             "matched_requirements": len(matches),
+            "requirements_evaluated": requirements_evaluated,
+            "evidence_coverage_percentage": round(
+                (len(matches) / requirements_evaluated) * 100
+            ) if requirements_evaluated else 0,
             "gaps": gaps,
             "strong_matches": [match["requirement"] for match in matches if match.get("match_strength", 0) >= 4],
         }
