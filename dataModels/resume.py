@@ -8,6 +8,10 @@ Prompts.initialize()
 class ResumeSectionHighlight(BaseModel):
     """Pydantic class that defines each highlight to be returned by the LLM."""
 
+    source_index: int = Field(
+        ..., ge=1,
+        description="One-based index of the source highlight this rewrite replaces.",
+    )
     highlight: str = Field(
         ..., description=Prompts.descriptions["RESUME_SECTION_HIGHLIGHT"]["highlight"]
     )

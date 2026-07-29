@@ -13,6 +13,9 @@ SECTION_HIGHLIGHTER:
     <Candidate source section>
     {section}
 
+    <Numbered source highlights>
+    {source_highlights}
+
     <Supported matches for this section>
     {section_evidence}
   instruction_message: >
@@ -26,13 +29,16 @@ SECTION_HIGHLIGHTER:
     - Keep the original meaning; improve wording, order, and keyword placement only when truthful.
     - Use one clear action and outcome per bullet. Aim for 12-28 words; use plain, specific language.
     - Include a job keyword only when the source demonstrates it or an unambiguous synonym.
-    - Return exactly one rewritten bullet for every source highlight. Reformulate each
-      bullet for clarity and role relevance while preserving its facts; do not return
-      a source highlight verbatim.
+    - Return exactly one rewritten bullet for every numbered source highlight.
+    - Each response item must use the matching one-based source_index. Include every
+      source_index from 1 through {required_highlight_count} exactly once.
+    - Reformulate every bullet with a different sentence structure and stronger action-first
+      wording while preserving its facts. Do not return any source bullet verbatim.
     - The source section contains {required_highlight_count} highlights. final_answer
       must contain exactly {required_highlight_count} distinct rewritten highlights.
     - This is rewrite attempt {rewrite_attempt}. If this is a retry, correct any
       missing, duplicated, unchanged, or oversized bullets from the previous attempt.
+    - Validation feedback from the previous attempt: {validation_feedback}
     - Return structured output only; do not expose reasoning or a plan.
   steps_message: >
     First identify evidence in the source section, then rank it against the job

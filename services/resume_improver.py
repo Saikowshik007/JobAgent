@@ -739,10 +739,15 @@ class ResumeImprover:
                 section=section,
                 section_id=section_id,
                 required_highlight_count=len(original_highlights),
+                source_highlights="\n".join(
+                    f"{index}. {highlight}"
+                    for index, highlight in enumerate(original_highlights, start=1)
+                ),
             )
             last_error = None
             for rewrite_attempt in range(1, 3):
                 prompt_inputs["rewrite_attempt"] = rewrite_attempt
+                prompt_inputs["validation_feedback"] = str(last_error or "None; produce the complete mapping.")
                 logger.debug("Invoking structured highlight generation, attempt %s", rewrite_attempt)
                 section_revised = invoke_structured(
                     self.user,
@@ -753,16 +758,33 @@ class ResumeImprover:
 
                 if hasattr(section_revised, "final_answer"):
                     highlights = section_revised.final_answer or []
-                    result = [item.highlight for item in highlights]
+                    result = [item.model_dump() for item in highlights]
                 elif isinstance(section_revised, dict):
                     highlights = section_revised.get("final_answer", [])
-                    result = [item.get("highlight", "") for item in highlights]
+                    result = highlights
                 else:
                     last_error = ValueError("The model returned no structured highlights")
                     continue
 
                 try:
-                    return self._validated_highlights(result, original_highlights)
+                    validated_highlights = self._validated_highlights(result, original_highlights)
+                    ranked_highlights = sorted(
+                        validated_highlights,
+                        key=lambda item: (-item["relevance"], item["source_index"]),
+                    )
+                    strongest_score = ranked_highlights[0]["relevance"]
+                    relevance_threshold = max(1, strongest_score - 1)
+                    selected_highlights = [
+                        item for item in ranked_highlights
+                        if item["relevance"] >= relevance_threshold
+                    ]
+                    logger.info(
+                        "Selected %s of %s validated bullets with relevance >= %s",
+                        len(selected_highlights),
+                        len(validated_highlights),
+                        relevance_threshold,
+                    )
+                    return [item["highlight"] for item in selected_highlights]
                 except ValueError as error:
                     last_error = error
                     logger.warning(
@@ -792,25 +814,44 @@ class ResumeImprover:
 
     def _validated_highlights(self, candidates, originals) -> list:
         """Require a complete, materially changed set of grounded bullet rewrites."""
-        accepted, seen = [], set()
-        original_texts = {" ".join(item.split()).casefold() for item in originals or [] if isinstance(item, str)}
+        expected_count = len(originals or [])
+        expected_indexes = set(range(1, expected_count + 1))
+        accepted, seen, received_indexes = {}, set(), set()
         for candidate in candidates or []:
-            if not isinstance(candidate, str):
+            if not isinstance(candidate, dict):
                 continue
-            candidate = " ".join(candidate.split())
+            source_index = candidate.get("source_index")
+            highlight = candidate.get("highlight")
+            relevance = candidate.get("relevance")
+            if not isinstance(source_index, int) or source_index not in expected_indexes:
+                continue
+            if (
+                source_index in received_indexes
+                or not isinstance(highlight, str)
+                or not isinstance(relevance, int)
+                or not 1 <= relevance <= 5
+            ):
+                continue
+            candidate = " ".join(highlight.split())
             word_count = len(re.findall(r"\b\w+\b", candidate))
             normalized = candidate.casefold()
-            if 3 <= word_count <= 30 and normalized not in seen and normalized not in original_texts:
-                accepted.append(candidate)
+            original_normalized = " ".join(originals[source_index - 1].split()).casefold()
+            if 3 <= word_count <= 30 and normalized not in seen and normalized != original_normalized:
+                accepted[source_index] = {
+                    "source_index": source_index,
+                    "highlight": candidate,
+                    "relevance": relevance,
+                }
                 seen.add(normalized)
+                received_indexes.add(source_index)
 
-        expected_count = len(originals or [])
-        if len(accepted) != expected_count:
+        if set(accepted) != expected_indexes:
             raise ValueError(
-                "The model must return one distinct, valid rewrite for every source highlight "
-                f"(expected {expected_count}, received {len(candidates or [])}, accepted {len(accepted)})"
+                "The model must return one distinct, valid rewrite mapped to every source highlight "
+                f"(expected indexes {sorted(expected_indexes)}, received {len(candidates or [])}, "
+                f"accepted indexes {sorted(accepted)})"
             )
-        return accepted
+        return [accepted[index] for index in range(1, expected_count + 1)]
 
     def _normalized_skill_groups(self, groups: list) -> list:
         """Defensively deduplicate and bound LLM-generated skill output."""
@@ -879,6 +920,7 @@ class ResumeImprover:
             "company", "job_summary", "duties", "qualifications", "ats_keywords",
             "technical_skills", "non_technical_skills", "evidence_inventory", "evidence_map",
             "section_evidence", "tailored_sections", "required_highlight_count", "rewrite_attempt",
+            "source_highlights", "validation_feedback",
         }
         for key in keys:
             value = raw_self_data.get(key)
