@@ -55,7 +55,15 @@ class ResumeGenerator:
 
         # Set initial status in cache
         await self.cache_manager.set_resume_status(
-            resume_id, user.id, ResumeGenerationStatus.PENDING
+            resume_id,
+            user.id,
+            ResumeGenerationStatus.PENDING,
+            data={
+                "stage": "queued",
+                "progress_percentage": 5,
+                "message": "Resume generation is queued",
+                "job_id": job_id,
+            },
         )
 
         # Start background generation (non-blocking)
@@ -85,14 +93,41 @@ class ResumeGenerator:
 
             # Update status to in progress
             await self.cache_manager.set_resume_status(
-                resume_id, user.id, ResumeGenerationStatus.IN_PROGRESS
+                resume_id,
+                user.id,
+                ResumeGenerationStatus.IN_PROGRESS,
+                data={
+                    "stage": "initializing",
+                    "progress_percentage": 10,
+                    "message": "Loading the job and source resume",
+                    "job_id": job_dict.get("id"),
+                },
             )
+
+            event_loop = asyncio.get_running_loop()
+
+            def report_progress(stage: str, progress_percentage: int, message: str) -> None:
+                future = asyncio.run_coroutine_threadsafe(
+                    self.cache_manager.set_resume_status(
+                        resume_id,
+                        user.id,
+                        ResumeGenerationStatus.IN_PROGRESS,
+                        data={
+                            "stage": stage,
+                            "progress_percentage": progress_percentage,
+                            "message": message,
+                            "job_id": job_dict.get("id"),
+                        },
+                    ),
+                    event_loop,
+                )
+                future.result(timeout=5)
 
             # Run the blocking LLM work outside the request event loop.  Using the
             # shared asyncio executor avoids creating one thread pool per request.
             yaml_content = await asyncio.to_thread(
                 self._generate_resume_sync,
-                job_dict, user, resume_data, customize, include_objective,
+                job_dict, user, resume_data, customize, include_objective, report_progress,
             )
 
             # Create the resume object
@@ -137,7 +172,13 @@ class ResumeGenerator:
             # Update cache with completed status
             await self.cache_manager.set_resume_status(
                 resume_id, user.id, ResumeGenerationStatus.COMPLETED,
-                data={"yaml_content": yaml_content}
+                data={
+                    "yaml_content": yaml_content,
+                    "stage": "completed",
+                    "progress_percentage": 100,
+                    "message": "Resume generated successfully",
+                    "job_id": job_dict.get("id"),
+                },
             )
 
             # Update job status to RESUME_GENERATED after everything is complete
@@ -153,7 +194,13 @@ class ResumeGenerator:
             # Update cache with failed status
             await self.cache_manager.set_resume_status(
                 resume_id, user.id, ResumeGenerationStatus.FAILED,
-                error=str(e)
+                data={
+                    "stage": "failed",
+                    "progress_percentage": 0,
+                    "message": "Resume generation failed",
+                    "job_id": job_dict.get("id"),
+                },
+                error=str(e),
             )
     async def _update_job_with_resume_id(self, job_id: str, user_id:str, resume_id: str):
         """Update the job record with the generated resume ID."""
@@ -170,7 +217,8 @@ class ResumeGenerator:
             logger.error(f"Error updating job {job_id} with resume_id {resume_id}: {e}")
 
     def _generate_resume_sync(self, job_dict: dict, user: User, resume_data: Dict[str, Any],
-                              customize: bool, include_objective: bool = True) -> str:
+                              customize: bool, include_objective: bool = True,
+                              progress_callback=None) -> str:
         """Synchronous resume generation that runs in thread pool."""
         try:
             job_url = job_dict.get('job_url')
@@ -186,7 +234,8 @@ class ResumeGenerator:
             resume_improver = ResumeImprover(
                 url=job_url,
                 parsed_job=parsed_job,
-                user = user
+                user=user,
+                progress_callback=progress_callback,
             )
             try:
                 logger.info(f"Using user-provided resume data for job {job_dict.get('id')}")
@@ -229,6 +278,11 @@ class ResumeGenerator:
 
             if cache_entry.get("error"):
                 response["error"] = cache_entry["error"]
+
+            progress_data = cache_entry.get("data") or {}
+            for field in ("stage", "progress_percentage", "message", "job_id"):
+                if field in progress_data:
+                    response[field] = progress_data[field]
 
             if status == ResumeGenerationStatus.COMPLETED.value:
                 # If completed, also get job info from database

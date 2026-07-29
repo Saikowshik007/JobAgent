@@ -26,7 +26,9 @@ SECTION_HIGHLIGHTER:
     - Keep the original meaning; improve wording, order, and keyword placement only when truthful.
     - Use one clear action and outcome per bullet. Aim for 12-28 words; use plain, specific language.
     - Include a job keyword only when the source demonstrates it or an unambiguous synonym.
-    - If a source bullet cannot be improved without adding facts, return it unchanged.
+    - Return exactly one rewritten bullet for every source highlight. Reformulate each
+      bullet for clarity and role relevance while preserving its facts; do not return
+      a source highlight verbatim.
     - Return structured output only; do not expose reasoning or a plan.
   steps_message: >
     First identify evidence in the source section, then rank it against the job
