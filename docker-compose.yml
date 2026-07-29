@@ -39,6 +39,8 @@ services:
       PORT: 8000
     ports:
       - "${API_PORT:-8000}:8000"
+    labels:
+      co.elastic.logs/enabled: "true"
     depends_on:
       postgres:
         condition: service_healthy
@@ -46,6 +48,47 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:9.4.0
+    profiles: ["observability"]
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: -Xms512m -Xmx512m
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    ports:
+      - "127.0.0.1:${ELASTIC_PORT:-9200}:9200"
+    restart: unless-stopped
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:9.4.0
+    profiles: ["observability"]
+    environment:
+      ELASTICSEARCH_HOSTS: http://elasticsearch:9200
+      XPACK_SECURITY_ENABLED: "false"
+    ports:
+      - "127.0.0.1:${KIBANA_PORT:-5601}:5601"
+    depends_on:
+      - elasticsearch
+    restart: unless-stopped
+
+  filebeat:
+    image: docker.elastic.co/beats/filebeat:9.4.0
+    profiles: ["observability"]
+    user: root
+    command: filebeat -e --strict.perms=false
+    volumes:
+      - ./observability/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - filebeat_data:/usr/share/filebeat/data
+    depends_on:
+      - elasticsearch
+    restart: unless-stopped
+
 volumes:
   postgres_data:
   redis_data:
+  elasticsearch_data:
+  filebeat_data:

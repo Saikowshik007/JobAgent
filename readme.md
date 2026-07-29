@@ -30,6 +30,39 @@ docker compose down              # stops services; preserves database volumes
 docker compose down -v           # deletes all local JobAgent data
 ```
 
+## Logs
+
+Logs are JSON lines written to container stdout, with `@timestamp`, `service.name`,
+`trace.id`, HTTP method/path/status, and request duration. View them locally with:
+
+```bash
+docker compose logs -f api
+```
+
+They are ready for collection by Elastic Agent, Filebeat, Vector, or another JSON
+log shipper. Set `LOG_LEVEL=DEBUG` in `.env` for more detail. API responses echo
+the request correlation ID as `X-Request-ID`.
+
+### Local Elasticsearch and Kibana
+
+Start the optional local stack with:
+
+```bash
+./start.sh --observability
+```
+
+Kibana is available at `http://localhost:5601`; Elasticsearch is at
+`http://localhost:9200`. Filebeat ships the API's JSON logs to a daily
+`jobagent-logs-*` index. In Kibana, create a data view for that pattern and use
+`@timestamp` as the time field.
+
+This profile is for local development only: Elastic security is disabled and both
+ports bind only to localhost. On Ubuntu, Elasticsearch may require:
+
+```bash
+sudo sysctl -w vm.max_map_count=262144
+```
+
 ## Configuration
 
 `.env` is intentionally ignored by Git. Set `POSTGRES_PASSWORD` before

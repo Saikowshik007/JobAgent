@@ -11,11 +11,20 @@ if [ ! -f .env ]; then
   exit 1
 fi
 
+compose_profile=""
+if [ "${1:-}" = "--observability" ]; then
+  compose_profile="--profile observability"
+elif [ -n "${1:-}" ]; then
+  echo "Usage: ./start.sh [--observability]"
+  exit 1
+fi
+
 # shellcheck disable=SC1091
 . ./.env
 api_port=${API_PORT:-8000}
 
-docker compose up --build --detach
+# shellcheck disable=SC2086
+docker compose $compose_profile up --build --detach
 
 attempt=0
 while [ "$attempt" -lt 30 ]; do

@@ -3,19 +3,22 @@ Main FastAPI application with proper initialization and enhanced CORS configurat
 """
 import os
 import logging
+import time
+import uuid
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from starlette.middleware.cors import CORSMiddleware  # Use Starlette directly
+from starlette.requests import Request
+from starlette.responses import Response
+
+from core.logging_config import configure_logging, request_id_var
+
+configure_logging()
 
 from core.database import initialize_app
 from routers import system, jobs, resume, simplify
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
 logger = logging.getLogger(__name__)
 
 
@@ -124,6 +127,36 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+
+@app.middleware("http")
+async def log_request(request: Request, call_next) -> Response:
+    """Attach a request ID and emit a safe, searchable completion event."""
+    request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
+    token = request_id_var.set(request_id)
+    started_at = time.perf_counter()
+    status_code = 500
+    try:
+        response = await call_next(request)
+        status_code = response.status_code
+        response.headers["X-Request-ID"] = request_id
+        return response
+    except Exception:
+        logger.exception(
+            "request_failed",
+            extra={"http": {"request": {"method": request.method}, "response": {"status_code": status_code}}, "url.path": request.url.path},
+        )
+        raise
+    finally:
+        logger.info(
+            "request_completed",
+            extra={
+                "event.duration_ms": round((time.perf_counter() - started_at) * 1000, 2),
+                "http": {"request": {"method": request.method}, "response": {"status_code": status_code}},
+                "url.path": request.url.path,
+            },
+        )
+        request_id_var.reset(token)
+
 # Configure CORS IMMEDIATELY after app creation - this is critical!
 app.add_middleware(
     CORSMiddleware,
@@ -229,5 +262,7 @@ if __name__ == "__main__":
         host=host,
         port=port,
         reload=os.getenv("RELOAD", "false").lower() == "true",
-        log_level="info"
+        log_level=os.getenv("LOG_LEVEL", "info").lower(),
+        log_config=None,
+        access_log=False,
     )
