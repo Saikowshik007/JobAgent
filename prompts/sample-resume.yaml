@@ -1,0 +1,154 @@
+# Sample Resume YAML File for JobAgent
+# Save this file as resume.yaml and upload it during registration
+
+editing: true
+debug: false
+basic:
+  name: "Alex Johnson"
+  address: "Seattle, WA"
+  email: "alex.johnson@email.com"
+  phone: "+1 (555) 123-4567"
+  websites:
+    - "https://linkedin.com/in/alexjohnson"
+    - "https://alexjohnson.dev"
+
+objective: "A highly skilled Software Engineer with expertise in cloud computing, cybersecurity, and full-stack development. Proven track record in developing and optimizing enterprise-level applications, implementing cloud solutions, and enhancing system performance. Proficient in Java, Python, AWS, and various development frameworks with a strong focus on scalable and secure solutions."
+
+education:
+  - school: "University of Washington"
+    degrees:
+      - names:
+          - "M.S. Computer Science"
+        gpa: "3.8"
+        dates: "August 2019 - May 2021"
+  - school: "California State University"
+    degrees:
+      - names:
+          - "B.S. Computer Science"
+        gpa: "3.7"
+        dates: "June 2015 - May 2019"
+
+experiences:
+  - company: "Microsoft Corporation"
+    skip_name: false
+    location: "Redmond, WA"
+    titles:
+      - name: "Senior Software Engineer (Cloud Services)"
+        startdate: "January 2023"
+        enddate: "Present"
+    highlights:
+      - "Led end-to-end development of mission-critical authentication system projected to save $12M annually, architecting and implementing scalable backend services that transformed access management for 250K+ users"
+      - "Designed and implemented high-performance REST APIs and database schemas using PostgreSQL/MSSQL, achieving 99.98% uptime and <120ms latency through optimized query patterns and connection pooling"
+      - "Engineered secure authentication system using OAuth 2.0 and Azure AD, enabling seamless integration with enterprise identity providers while maintaining compliance standards"
+      - "Spearheaded cross-functional collaboration with product teams, gathering requirements and delivering technical presentations to senior leadership"
+      - "Architected and deployed critical upgrade of Azure infrastructure serving enterprise clients, achieving 25% performance improvement through optimization while maintaining zero-downtime deployment"
+
+  - company: "Amazon Web Services"
+    skip_name: false
+    location: "Austin, TX"
+    titles:
+      - name: "Software Development Engineer"
+        startdate: "June 2021"
+        enddate: "December 2022"
+    highlights:
+      - "Spearheaded the development of enterprise-level applications using Java and Spring Boot, resulting in a 45% increase in system efficiency and implementing RESTful web services that improved data processing speed by 35%"
+      - "Engineered a highly efficient, low latency transaction pipeline system utilizing Apache Kafka, Kubernetes, and Docker; achieved 65% increase in batch-processing efficiency, leading to better productivity and faster transactions"
+      - "Architected and launched back-end API and front-end UI using Java, React JS, Spring Boot, EC2, S3, and REST API in AWS, elevated scalability and robustness of the pipeline by 75%"
+      - "Pioneered the development of dynamic and responsive user interfaces using React JS, contributing to a 45% reduction in page load times and a 40% increase in user engagement metrics"
+      - "Developed POJOs and DAOs for 90+ database entities using Spring JDBC and MyBatis, optimizing backend connectivity and performance within a Controller-Service layered architecture"
+
+  - company: "University of Washington"
+    skip_name: false
+    location: "Seattle, WA"
+    titles:
+      - name: "Graduate Research Assistant"
+        startdate: "August 2019"
+        enddate: "May 2021"
+    highlights:
+      - "Conducted experiments to enhance scalable IoT systems using machine learning and sensor networks, resulting in a 35% reduction in overall system power consumption using Python, JavaScript, and Java"
+      - "Developed advanced algorithms that performed 75% more efficiently than existing models and published research papers on wireless communication protocols"
+      - "Created Python automation scripts for data processing, reducing analysis time by 90% using REST APIs and database integration"
+
+  - company: "TechStartup Inc"
+    skip_name: false
+    location: "San Francisco, CA"
+    titles:
+      - name: "Software Engineering Intern"
+        startdate: "June 2020"
+        enddate: "August 2020"
+    highlights:
+      - "Developed and optimized customer service APIs leveraging Java and Spring framework, resulting in 35% reduction in response time for client requests and improved overall system performance"
+      - "Engineered REST APIs using Spring Boot and Java features including Collections Framework, Exception Handling, I/O System, Multi-Threading, and JDBC, resulting in 55% system efficiency improvement"
+      - "Built Spring components such as Controller, Validator, Resource Mapping using annotations to handle requests, created custom view templates, and developed Unit and Integration tests using JUnit and Mockito"
+      - "Led debugging initiatives for complex full-stack projects, resolving over 90% of critical issues within deadlines while minimizing downtime and maintaining high software quality standards"
+
+projects:
+  - name: "Cloud IoT Analytics Platform | Kafka, Python, AWS"
+    technologies: "Python, Flutter, Raspberry Pi, PostgreSQL, Kafka, REST API"
+    link: "https://www.github.com/username/project"
+    hyperlink: false
+    show_link: false
+    highlights:
+      - "Built a scalable IoT platform processing 1.2M+ daily sensor readings, improving data ingestion efficiency by 75% (1.2s to 0.3s/request)"
+
+  - name: "Smart Resource Management System | Java, Design Patterns"
+    technologies: "Java, Spring Boot, Gradle, Git, Design Patterns"
+    link: "https://www.github.com/username/project"
+    hyperlink: false
+    show_link: false
+    highlights:
+      - "Reduced resource allocation wait times by 45% using queue optimization and Factory pattern, improving utilization efficiency by 65%"
+
+  - name: "Distributed Cache Optimizer | Python, Redis, MongoDB"
+    technologies: "Python, MongoDB, Redis, SQL, NoSQL"
+    link: "https://www.github.com/username/project"
+    hyperlink: false
+    show_link: false
+    highlights:
+      - "Reduced database hits by 65% (from 12k/day to 4.2k/day) using a hybrid Redis-MongoDB caching layer, cutting query latency by 85% (250ms to 35ms)"
+
+skills:
+  - category: "Technical"
+    skills:
+      - "Java"
+      - "Python"
+      - "JavaScript"
+      - "SQL"
+      - "CSS"
+      - "HTML"
+      - "Oracle"
+      - "PostgreSQL"
+      - "Redis"
+      - "MySQL"
+      - "MongoDB"
+      - "Spring Boot"
+      - "REST API"
+      - "React.js"
+      - "Airflow"
+      - "Flutter"
+      - "AWS"
+      - "Lambda"
+      - "Kafka"
+      - "Spark"
+      - "Docker"
+      - "Jenkins"
+      - "Git"
+      - "Maven"
+      - "GCP"
+      - "JUnit"
+      - "Mockito"
+      - "Postman"
+      - "SoapUI"
+      - "Gradle"
+
+  - category: "Non-technical"
+    skills:
+      - "Agile Methodologies"
+      - "Project Management"
+      - "Team Leadership"
+      - "Problem Solving"
+      - "Technical Documentation"
+      - "Code Review"
+      - "SDLC"
+      - "Product Engineering"
+      - "Cross-functional Collaboration"
