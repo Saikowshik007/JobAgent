@@ -29,6 +29,10 @@ SECTION_HIGHLIGHTER:
     - Return exactly one rewritten bullet for every source highlight. Reformulate each
       bullet for clarity and role relevance while preserving its facts; do not return
       a source highlight verbatim.
+    - The source section contains {required_highlight_count} highlights. final_answer
+      must contain exactly {required_highlight_count} distinct rewritten highlights.
+    - This is rewrite attempt {rewrite_attempt}. If this is a retry, correct any
+      missing, duplicated, unchanged, or oversized bullets from the previous attempt.
     - Return structured output only; do not expose reasoning or a plan.
   steps_message: >
     First identify evidence in the source section, then rank it against the job

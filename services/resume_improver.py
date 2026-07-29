@@ -730,45 +730,44 @@ class ResumeImprover:
 
             logger.debug(f"Starting rewrite_section for: {section.get('title') or section.get('name', 'Unknown')}")
 
-            prompt_inputs = self._get_prompt_inputs(section=section, section_id=section_id)
-            logger.debug("Invoking structured highlight generation...")
-            section_revised = invoke_structured(
-                self.user,
-                "SECTION_HIGHLIGHTER",
-                ResumeSectionHighlighterOutput,
-                **prompt_inputs,
+            prompt_inputs = self._get_prompt_inputs(
+                section=section,
+                section_id=section_id,
+                required_highlight_count=len(original_highlights),
             )
-            logger.debug(f"LLM response type: {type(section_revised)}")
-            logger.debug(f"LLM response: {section_revised}")
+            last_error = None
+            for rewrite_attempt in range(1, 3):
+                prompt_inputs["rewrite_attempt"] = rewrite_attempt
+                logger.debug("Invoking structured highlight generation, attempt %s", rewrite_attempt)
+                section_revised = invoke_structured(
+                    self.user,
+                    "SECTION_HIGHLIGHTER",
+                    ResumeSectionHighlighterOutput,
+                    **prompt_inputs,
+                )
 
-            if section_revised:
-                # Handle both Pydantic model and dictionary responses
-                if hasattr(section_revised, 'final_answer'):
-                    # Pydantic model
+                if hasattr(section_revised, "final_answer"):
                     highlights = section_revised.final_answer or []
-                    logger.info(f"Pydantic model: Got {len(highlights)} highlights")
-                    if highlights:
-                        sorted_highlights = sorted(highlights, key=lambda d: d.relevance * -1)
-
-                        result = [s.highlight for s in sorted_highlights]
-                        logger.debug(f"Final highlights: {result}")
-                        return self._validated_highlights(result, original_highlights)
-
+                    result = [item.highlight for item in highlights]
                 elif isinstance(section_revised, dict):
-                    # Dictionary response
                     highlights = section_revised.get("final_answer", [])
-                    logger.info(f"Dictionary: Got {len(highlights)} highlights")
-                    if highlights:
-                        sorted_highlights = sorted(highlights, key=lambda d: d.get("relevance", 0) * -1)
-
-                        result = [s.get("highlight", "") for s in sorted_highlights]
-                        logger.debug(f"Final highlights: {result}")
-                        return self._validated_highlights(result, original_highlights)
+                    result = [item.get("highlight", "") for item in highlights]
                 else:
-                    logger.error(f"Unexpected response type: {type(section_revised)}")
-                    logger.error(f"Response content: {section_revised}")
+                    last_error = ValueError("The model returned no structured highlights")
+                    continue
 
-            raise ValueError("The model returned no rewritten highlights")
+                try:
+                    return self._validated_highlights(result, original_highlights)
+                except ValueError as error:
+                    last_error = error
+                    logger.warning(
+                        "Section rewrite attempt %s/%s failed validation: %s",
+                        rewrite_attempt,
+                        2,
+                        error,
+                    )
+
+            raise last_error or ValueError("The model returned no rewritten highlights")
 
         except Exception as e:
             logger.error(f"Error in rewrite_section: {e}")
@@ -800,9 +799,11 @@ class ResumeImprover:
                 accepted.append(candidate)
                 seen.add(normalized)
 
-        if len(accepted) != len(originals or []):
+        expected_count = len(originals or [])
+        if len(accepted) != expected_count:
             raise ValueError(
-                "The model must return one distinct, valid rewrite for every source highlight"
+                "The model must return one distinct, valid rewrite for every source highlight "
+                f"(expected {expected_count}, received {len(candidates or [])}, accepted {len(accepted)})"
             )
         return accepted
 
@@ -872,7 +873,7 @@ class ResumeImprover:
             "section", "objective", "experiences", "projects", "skills",
             "company", "job_summary", "duties", "qualifications", "ats_keywords",
             "technical_skills", "non_technical_skills", "evidence_inventory", "evidence_map",
-            "section_evidence", "tailored_sections",
+            "section_evidence", "tailored_sections", "required_highlight_count", "rewrite_attempt",
         }
         for key in keys:
             value = raw_self_data.get(key)
