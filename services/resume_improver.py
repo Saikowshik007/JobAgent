@@ -150,6 +150,10 @@ class ResumeImprover:
                 self.user,
                 "RESUME_EVIDENCE_PLANNER",
                 ResumeEvidencePlanOutput,
+                # Evidence planning reads the full source inventory. Give it one
+                # longer attempt instead of several 60-second retries.
+                timeout_seconds=120.0,
+                max_retries=1,
                 **self._get_prompt_inputs(),
             )
             valid_ids = {item["section_id"] for item in self.evidence_inventory}
@@ -162,8 +166,10 @@ class ResumeImprover:
                 plan.append(item)
             return plan
         except Exception as error:
-            logger.warning(f"Evidence planning failed; generation will use source-only safeguards: {error}")
-            return []
+            logger.exception("Evidence planning failed; refusing to generate an unplanned resume")
+            raise RuntimeError(
+                "Evidence planning failed; resume generation was not started. Please retry."
+            ) from error
 
     def _match_report(self) -> dict:
         """Persist an honest, UI-friendly summary of match strength and real gaps."""

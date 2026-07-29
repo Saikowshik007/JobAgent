@@ -9,7 +9,15 @@ import config
 logger = config.getLogger("llm_helper")
 
 
-def invoke_structured(user, prompt_type: str, schema, **prompt_values):
+def invoke_structured(
+    user,
+    prompt_type: str,
+    schema,
+    *,
+    timeout_seconds: float = 60.0,
+    max_retries: int = 2,
+    **prompt_values,
+):
     """Generate and validate a structured response with the official OpenAI SDK."""
     preferences = user.preferences or {}
     request = {
@@ -22,7 +30,11 @@ def invoke_structured(user, prompt_type: str, schema, **prompt_values):
     if temperature is not None:
         request["temperature"] = temperature
     try:
-        client = OpenAI(api_key=user.api_key, max_retries=2, timeout=60.0)
+        client = OpenAI(
+            api_key=user.api_key,
+            max_retries=max_retries,
+            timeout=timeout_seconds,
+        )
         try:
             response = client.responses.parse(**request)
         except BadRequestError as error:
@@ -35,7 +47,12 @@ def invoke_structured(user, prompt_type: str, schema, **prompt_values):
             raise ValueError("Model returned no structured output")
         return response.output_parsed
     except APIError as e:
-        logger.error(f"OpenAI request failed: {e}")
+        logger.error(
+            "OpenAI request failed for %s after %.0fs: %s",
+            prompt_type,
+            timeout_seconds,
+            e,
+        )
         raise
     except Exception as e:
         logger.error(f"Structured generation failed: {e}")
