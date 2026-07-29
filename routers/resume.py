@@ -8,7 +8,9 @@ import logging
 from core.dependencies import get_cache_manager
 from data.dbcache_manager import DBCacheManager
 from dataModels.api_models import GenerateResumeRequest
+from dataModels.user_model import User
 from services.resume_generator import ResumeGenerator
+from services.resume_parser import parse_source_resume
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -282,3 +284,27 @@ async def get_active_resume_generations(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/{user_id}/parse-pdf")
+async def parse_resume_pdf(
+        user_id: str,
+        file: UploadFile = File(...),
+        api_key: str = Form(...),
+        model: str = Form("gpt-4o"),
+):
+    """Extract a text-based PDF and return canonical, editable resume data."""
+    if file.content_type not in {"application/pdf", "application/x-pdf"} and not (file.filename or "").lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="Only PDF resumes are supported")
+    if not api_key.strip():
+        raise HTTPException(status_code=400, detail="An OpenAI API key is required to parse a resume")
+    try:
+        resume_data = parse_source_resume(
+            await file.read(),
+            User(id=user_id, api_key=api_key.strip(), model=model),
+        )
+        logger.info("resume_pdf_parsed", extra={"resume.source_type": "pdf"})
+        return {"resume_data": resume_data}
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error))
+    except Exception as error:
+        logger.exception("resume_pdf_parse_failed")
+        raise HTTPException(status_code=502, detail="Could not parse the resume PDF. Please try again.") from error

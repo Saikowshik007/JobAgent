@@ -1,8 +1,16 @@
 from pydantic import BaseModel, Field
-from typing import List, Dict, Optional
+from typing import Any, List, Dict, Optional
 from prompts.prompts import Prompts
 
 Prompts.initialize()
+
+
+class SourceResumeExtractionOutput(BaseModel):
+    """Canonical resume data extracted from a user-uploaded source document."""
+
+    final_answer: Dict[str, Any] = Field(
+        ..., description="A complete JobAgent resume object matching the requested schema."
+    )
 
 
 class ResumeSectionHighlight(BaseModel):

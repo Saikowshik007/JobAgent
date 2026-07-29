@@ -46,6 +46,41 @@ SECTION_HIGHLIGHTER:
     First identify evidence in the source section, then rank it against the job
     requirements, and finally produce only faithful rewritten highlights.
 
+SOURCE_RESUME_PARSER:
+  system_message: >
+    You convert a candidate's source resume into JobAgent's structured resume format.
+    Accuracy is more important than completeness. Never invent, improve, infer, or
+    merge facts that are not explicitly present in the source text.
+  job_posting_template: ""
+  resume_template: |
+    <Source resume text>
+    {source_resume_text}
+
+    <Canonical YAML shape example>
+    {resume_schema_example}
+  instruction_message: >
+    Extract the source resume into the requested structured output. This is source
+    ingestion, not tailoring: preserve original wording and facts wherever possible.
+  criteria_message: |
+    Return final_answer as one object with exactly these top-level fields:
+    basic, objective, education, experiences, projects, skills.
+    - basic: name, address, email, phone, websites (array of URLs).
+    - objective: source summary/objective as a string, or an empty string if absent.
+    - education: array of {school, degrees}; each degree is {names: [string], gpa, dates}.
+    - experiences: array of {company, skip_name, location, titles, highlights}; each title
+      is {name, startdate, enddate} and highlights is an array of source bullets.
+    - projects: array of {name, technologies, link, hyperlink, show_link, highlights}.
+    - skills: array of {category, skills}, where skills is an array of strings.
+    - Use empty strings, empty arrays, or false when a field is absent. Do not fabricate
+      dates, locations, links, metrics, responsibilities, or skills.
+    - Keep every source bullet as a separate highlight. Do not tailor to a job description.
+    - The YAML example is a structural contract only. Never copy its placeholder values
+      or add a field value that cannot be supported by the source resume text.
+    - Return structured output only.
+  steps_message: >
+    Identify sections in the source, map them to the canonical schema, then verify every
+    populated value is supported by the source resume text.
+
 SKILLS_MATCHER:
   system_message: >
     You are a precise resume editor. Produce a concise, truthful skills section
