@@ -2,7 +2,7 @@ from typing import Dict, List, Optional, Any
 import hashlib
 import json
 import logging
-import threading
+import os
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -13,7 +13,7 @@ class DBCacheManager:
     This manager provides a single interface for all database and cache interactions.
     """
 
-    def __init__(self, database=None, redis_cache=None, redis_url="redis://redis:6379"):
+    def __init__(self, database=None, redis_cache=None, redis_url: Optional[str] = None):
         """
         Initialize the unified cache manager with database and Redis cache.
 
@@ -24,10 +24,11 @@ class DBCacheManager:
         """
         self.db = database
 
-        # Initialize Redis cache if not provided
+        # Initialize Redis cache if not provided.  This honors the deployment
+        # configuration instead of assuming a Docker service named "redis".
         if redis_cache is None:
             from data.cache import RedisCache
-            self.cache = RedisCache(redis_url=redis_url)
+            self.cache = RedisCache(redis_url=redis_url or os.getenv("REDIS_URL", "redis://localhost:6379/0"))
         else:
             self.cache = redis_cache
 

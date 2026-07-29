@@ -1,9 +1,7 @@
 from pydantic import BaseModel, Field
 from typing import List, Optional
 from prompts.prompts import Prompts
-import config
-import services
-from langchain_openai import ChatOpenAI
+from services.langchain_helpers import invoke_structured
 
 Prompts.initialize()
 
@@ -57,17 +55,15 @@ class JobPost:
     def __init__(self, posting: str, user):
         """Initialize JobPost with the job posting string."""
         self.posting = posting
-        self.extractor_llm = services.langchain_helpers.create_llm(
-            user= user,
-            chat_model=ChatOpenAI,
-            model_name=user.model,
-            temperature=user.preferences.get("temperature"),
-            cache=True
-        )
+        self.user = user
         self.parsed_job = None
 
-    def parse_job_post(self, **chain_kwargs) -> dict:
+    def parse_job_post(self) -> dict:
         """Parse the job posting to extract job description and skills."""
-        model = self.extractor_llm.with_structured_output(JobDescription)
-        self.parsed_job = model.invoke(self.posting).dict()
+        self.parsed_job = invoke_structured(
+            self.user,
+            "JOB_DESCRIPTION",
+            JobDescription,
+            posting=self.posting,
+        ).model_dump()
         return self.parsed_job

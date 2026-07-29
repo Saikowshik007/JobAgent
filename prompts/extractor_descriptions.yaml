@@ -3,35 +3,20 @@ RESUME_SECTION_HIGHLIGHT:
   relevance: relevance of the bullet point
 
 RESUME_SECTION_HIGHLIGHTER_OUTPUT:
-  plan: itemized <Plan>
-  additional_steps: itemized <Additional Steps>
-  work: itemized <Work>
-  final_answer: itemized <Final Answer> in the correct format
+  final_answer: Ranked resume highlights in the requested structured format.
 
 RESUME_SKILLS:
   technical_skills: A dictionary where each key is a technical skill subcategory (e.g., "Languages & Frameworks", "Cloud & DevOps") and the value is a list of relevant skills under that group.
   non_technical_skills: An itemized list of non-technical skills (simple list, not nested)
 
 RESUME_SKILLS_MATCHER_OUTPUT:
-  plan: itemized <Plan>
-  additional_steps: itemized <Additional Steps>
-  work: itemized <Work>
-  final_answer: <Final Answer> in the correct format
+  final_answer: Deduplicated skills in the requested structured format.
 
 RESUME_OBJECTIVE_OUTPUT:
-  plan: itemized <Plan>
-  additional_steps: itemized <Additional Steps>
-  work: itemized <Work>
-  final_answer: <Final Answer> in the correct format
+  final_answer: A factual, role-targeted professional summary.
 
-RESUME_IMPROVEMENTS:
-  improvements: itemized list of suggested improvements
-
-RESUME_IMPROVER_OUTPUT:
-  plan: itemized <Plan>
-  additional_steps: itemized <Additional Steps>
-  work: itemized <Work>
-  final_answer: itemized <Final Answer> in the correct format
+RESUME_EVIDENCE_PLAN_OUTPUT:
+  final_answer: Candidate-supported requirement matches with source IDs, safe keywords, match strength, and gaps.
 
 JOB_DESCRIPTION:
   company: >

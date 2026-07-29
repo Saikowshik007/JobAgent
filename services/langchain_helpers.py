@@ -1,29 +1,44 @@
 from datetime import datetime
+import json
 from dateutil import parser as dateparser
 from dateutil.relativedelta import relativedelta
-from langchain_openai import ChatOpenAI
-from langchain_core.globals import set_llm_cache, get_llm_cache
-from langchain_community.cache import RedisCache
+from openai import APIError, BadRequestError, OpenAI
+from prompts import Prompts
 import config
-import redis
+
+logger = config.getLogger("llm_helper")
 
 
-redis_client = redis.Redis(host='infra-redis', port=6379, db=0)
-set_llm_cache(RedisCache(redis_client))
-
-logger = config.getLogger("langchain_helper")  # Get the logger from config
-
-
-def create_llm(user, **kwargs):
-    """Create an LLM instance with specified parameters."""
-    chat_model = kwargs.pop("chat_model", ChatOpenAI)
-    kwargs.setdefault("model_name", user.model)
-    kwargs.setdefault("cache", True) # Explicitly enable caching
-    kwargs.setdefault("api_key", user.api_key)
+def invoke_structured(user, prompt_type: str, schema, **prompt_values):
+    """Generate and validate a structured response with the official OpenAI SDK."""
+    preferences = user.preferences or {}
+    request = {
+        "model": user.model,
+        "input": Prompts.render_messages(prompt_type, **prompt_values),
+        "text_format": schema,
+        "store": False,
+    }
+    temperature = preferences.get("temperature")
+    if temperature is not None:
+        request["temperature"] = temperature
     try:
-        return chat_model(**kwargs)
+        client = OpenAI(api_key=user.api_key, max_retries=2, timeout=60.0)
+        try:
+            response = client.responses.parse(**request)
+        except BadRequestError as error:
+            if "temperature" not in request or "temperature" not in str(error).lower():
+                raise
+            logger.info("Model does not accept temperature; retrying with its default sampling settings")
+            request.pop("temperature")
+            response = client.responses.parse(**request)
+        if response.output_parsed is None:
+            raise ValueError("Model returned no structured output")
+        return response.output_parsed
+    except APIError as e:
+        logger.error(f"OpenAI request failed: {e}")
+        raise
     except Exception as e:
-        logger.error(f"Failed to create LLM with environment API key: {str(e)}")
+        logger.error(f"Structured generation failed: {e}")
         raise
 
 
@@ -34,13 +49,6 @@ def format_list_as_string(lst: list, list_sep: str = "\n- ") -> str:
     return str(lst)
 
 
-def format_prompt_inputs_as_strings(prompt_inputs: list[str], **kwargs):
-    """Convert values to string for all keys in kwargs matching list in prompt inputs."""
-    logger.debug(f"Formatting prompt inputs: {', '.join(prompt_inputs)}")
-    return {
-        k: format_list_as_string(v) for k, v in kwargs.items() if k in prompt_inputs
-    }
-
 
 def parse_date(date_str: str) -> datetime:
     """Given an arbitrary string, parse it to a date."""
@@ -50,11 +58,7 @@ def parse_date(date_str: str) -> datetime:
         parsed_date = dateparser.parse(str(date_str), default=default_date)
         logger.debug(f"Successfully parsed date '{date_str}' to {parsed_date}")
         return parsed_date
-    except dateparser._parser.ParserError as e:
-        # Properly clear cache if it exists
-        current_cache = get_llm_cache()
-        if current_cache:
-            current_cache.clear()
+    except (TypeError, ValueError, OverflowError) as e:
         logger.error(f"Date input `{date_str}` could not be parsed: {str(e)}")
         raise e
 
@@ -83,15 +87,13 @@ def chain_formatter(format_type: str, input_data) -> str:
     logger.debug(f"Formatting chain input of type: {format_type}")
 
     try:
-        if format_type == 'experience':
+        if format_type in {'experience', 'experiences'}:
             as_list = format_experiences_for_prompt(input_data)
-            formatted = format_prompt_inputs_as_strings(["experience"], experience=as_list)
-            return formatted.get("experience", "")
+            return format_list_as_string(as_list)
 
-        elif format_type == 'projects':
+        elif format_type in {'project', 'projects'}:
             as_list = format_projects_for_prompt(input_data)
-            formatted = format_prompt_inputs_as_strings(["projects"], projects=as_list)
-            return formatted.get("projects", "")
+            return format_list_as_string(as_list)
 
         elif format_type == 'skills':
             as_list = format_skills_for_prompt(input_data)
@@ -99,31 +101,14 @@ def chain_formatter(format_type: str, input_data) -> str:
             result = formatted.get("skills", "")
             return result
 
-        elif format_type == 'education':
-            return format_education_for_resume(input_data)
-
         else:
             if isinstance(input_data, (list, dict)):
-                return str(input_data)
+                return json.dumps(input_data, ensure_ascii=False)
             return input_data or ""
 
     except Exception as e:
         logger.error(f"Error formatting chain input of type '{format_type}': {str(e)}")
         return ""
-
-
-def format_education_for_resume(education_list: list[dict]) -> str:
-    """Format education entries for inclusion in a resume."""
-    try:
-        formatted_education = []
-        for entry in education_list:
-            school = entry.get('school', '')
-            degrees = ', '.join(degree.get('names', ['Degree'])[0] for degree in entry.get('degrees', []))
-            formatted_education.append(f"{school}: {degrees}")
-        return '\n'.join(formatted_education)
-    except Exception as e:
-        logger.error(f"Error formatting education list: {str(e)}")
-        raise
 
 
 def format_skills_for_prompt(input_data) -> list:
@@ -180,15 +165,19 @@ def format_experiences_for_prompt(input_data) -> list:
     """Format experiences for inclusion in a prompt."""
     try:
         result = []
-        for exp in input_data:
-            curr = ""
+        for exp in input_data or []:
+            if not isinstance(exp, dict):
+                continue
+            title = exp.get("title") or exp.get("name") or "Role"
+            company = exp.get("company") or ""
+            curr = f"{title} {('at ' + company) if company else ''}".strip()
             if "titles" in exp:
                 exp_time = get_cumulative_time_from_titles(exp["titles"])
-                curr += f"{exp_time} years experience in:"
-            if "highlights" in exp:
-                curr += format_list_as_string(exp["highlights"], list_sep="\n  - ")
-                curr += "\n"
-                result.append(curr)
+                curr += f" ({exp_time} years)"
+            highlights = exp.get("highlights") or []
+            if highlights:
+                curr += format_list_as_string(highlights, list_sep="\n  - ")
+            result.append(curr)
         return result
     except Exception as e:
         logger.error(f"Error formatting experiences: {str(e)}")
@@ -199,7 +188,9 @@ def format_projects_for_prompt(input_data) -> list:
     """Format projects for inclusion in a prompt."""
     try:
         result = []
-        for exp in input_data:
+        for exp in input_data or []:
+            if not isinstance(exp, dict):
+                continue
             curr = ""
             if "name" in exp:
                 curr += f"Side Project: {exp['name']}"

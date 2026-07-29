@@ -1,5 +1,4 @@
 import asyncio
-import concurrent
 import uuid
 import yaml
 from datetime import datetime
@@ -23,7 +22,6 @@ class ResumeGenerator:
     def __init__(self, cache_manager):
         """Initialize the ResumeGenerator with unified cache manager and user ID."""
         self.cache_manager = cache_manager
-        self.thread_pool = concurrent.futures.ThreadPoolExecutor(max_workers=4)
 
     async def generate_resume(self, job_id: str, user: User, template: str = "standard",
                               customize: bool = True, resume_data: Optional[Dict[str, Any]] = None,
@@ -43,6 +41,8 @@ class ResumeGenerator:
         job_dict = await self.cache_manager.get_job(job_id, user.id)
         if not job_dict:
             raise ValueError(f"Job not found with ID: {job_id} for user: {user.id}")
+        if not isinstance(resume_data, dict) or not resume_data:
+            raise ValueError("resume_data is required to generate a factual tailored resume")
 
         # Check for existing resumes linked to this job
         existing_resumes = await self.cache_manager.get_resumes_for_job(job_id, user.id)
@@ -88,12 +88,11 @@ class ResumeGenerator:
                 resume_id, user.id, ResumeGenerationStatus.IN_PROGRESS
             )
 
-            # Run the blocking resume generation in thread pool
-            loop = asyncio.get_event_loop()
-            yaml_content = await loop.run_in_executor(
-                self.thread_pool,
+            # Run the blocking LLM work outside the request event loop.  Using the
+            # shared asyncio executor avoids creating one thread pool per request.
+            yaml_content = await asyncio.to_thread(
                 self._generate_resume_sync,
-                job_dict, user, resume_data, include_objective  # Pass include_objective here
+                job_dict, user, resume_data, customize, include_objective,
             )
 
             # Create the resume object
@@ -170,7 +169,8 @@ class ResumeGenerator:
         except Exception as e:
             logger.error(f"Error updating job {job_id} with resume_id {resume_id}: {e}")
 
-    def _generate_resume_sync(self, job_dict: dict, user:User, resume_data: Optional[Dict[str, Any]], include_objective: bool = True) -> str:
+    def _generate_resume_sync(self, job_dict: dict, user: User, resume_data: Dict[str, Any],
+                              customize: bool, include_objective: bool = True) -> str:
         """Synchronous resume generation that runs in thread pool."""
         try:
             job_url = job_dict.get('job_url')
@@ -178,23 +178,24 @@ class ResumeGenerator:
             if not job_url:
                 raise ValueError("Job URL not found in job data")
 
+            if not customize:
+                logger.info("Customization disabled; preserving the supplied resume content")
+                return self.dict_to_yaml_string(resume_data)
+
             # Initialize ResumeImprover - it does ALL the work
             resume_improver = ResumeImprover(
                 url=job_url,
                 parsed_job=parsed_job,
                 user = user
             )
-
-            # Set up resume data if provided
-            if resume_data:
+            try:
                 logger.info(f"Using user-provided resume data for job {job_dict.get('id')}")
                 self._setup_resume_data(resume_improver, resume_data)
-            else:
-                logger.info(f"Using default resume template for job {job_dict.get('id')}")
-                # You'll need to provide default data or handle this case
 
-            # Let ResumeImprover do all the work with include_objective flag
-            return resume_improver.create_complete_tailored_resume(include_objective)
+                # Let ResumeImprover do all the work with include_objective flag
+                return resume_improver.create_complete_tailored_resume(include_objective)
+            finally:
+                resume_improver.close()
 
         except Exception as e:
             logger.error(f"Synchronous resume generation failed: {e}")
@@ -355,94 +356,3 @@ class ResumeGenerator:
         except YAMLError as e:
             logger.error("Failed to convert dict to YAML string.")
             raise e
-
-    def __del__(self):
-        """Cleanup thread pool on deletion."""
-        if hasattr(self, 'thread_pool'):
-            self.thread_pool.shutdown(wait=False)
-
-    async def replace_job_resume(self, job_id: str, user_id:str, new_resume_id: str) -> Dict[str, Any]:
-        """Replace the current resume for a job with a new one, handling orphaning properly."""
-        try:
-            # Verify the job exists
-            job_dict = await self.cache_manager.get_job(job_id, user_id)
-            if not job_dict:
-                raise ValueError(f"Job not found with ID: {job_id} for user: {user_id}")
-
-            # Verify the new resume exists and belongs to this user
-            new_resume = await self.cache_manager.get_resume(new_resume_id, user_id)
-            if not new_resume:
-                raise ValueError(f"Resume not found with ID: {new_resume_id} for user: {user_id}")
-
-            # Get current resume(s) for this job
-            current_resumes = await self.cache_manager.get_resumes_for_job(job_id, user_id)
-
-            # Update the job to point to the new resume
-            success = await self.cache_manager.update_job_resume_id(job_id, user_id, new_resume_id)
-
-            if not success:
-                raise ValueError("Failed to update job with new resume ID")
-
-            # Update the new resume to point to this job (if it wasn't already)
-            if new_resume.job_id != job_id:
-                new_resume.job_id = job_id
-                await self.cache_manager.save_resume(new_resume, user_id)
-
-            # Optionally orphan the old resumes (don't delete them, just clear their job_id)
-            orphaned_resumes = []
-            for old_resume in current_resumes:
-                if old_resume.id != new_resume_id:  # Don't orphan the new resume we just linked
-                    old_resume.job_id = None  # Orphan it
-                    await self.cache_manager.save_resume(old_resume, user_id)
-                    orphaned_resumes.append(old_resume.id)
-
-            return {
-                "message": f"Successfully replaced resume for job {job_id}",
-                "job_id": job_id,
-                "new_resume_id": new_resume_id,
-                "orphaned_resumes": orphaned_resumes,
-                "user_id": user_id
-            }
-
-        except Exception as e:
-            logger.error(f"Error replacing job resume for job {job_id} for user {user_id}: {e}")
-            raise
-
-    async def cleanup_orphaned_resumes(self, user_id: Optional[str] = None) -> Dict[str, Any]:
-        """Find orphaned resumes (resumes not linked to any job)."""
-        target_user_id = user_id
-
-        try:
-            # Get all resumes for the user
-            all_resumes = await self.cache_manager.get_all_resumes(target_user_id)
-
-            # Find orphaned resumes (job_id is None or points to non-existent job)
-            orphaned_resumes = []
-            for resume in all_resumes:
-                if not resume.job_id:
-                    orphaned_resumes.append({
-                        "resume_id": resume.id,
-                        "reason": "no_job_id",
-                        "date_created": resume.date_created.isoformat() if resume.date_created else None
-                    })
-                else:
-                    # Check if the job still exists
-                    job = await self.cache_manager.get_job(resume.job_id, target_user_id)
-                    if not job:
-                        orphaned_resumes.append({
-                            "resume_id": resume.id,
-                            "reason": "job_not_found",
-                            "missing_job_id": resume.job_id,
-                            "date_created": resume.date_created.isoformat() if resume.date_created else None
-                        })
-
-            return {
-                "user_id": target_user_id,
-                "total_resumes": len(all_resumes),
-                "orphaned_count": len(orphaned_resumes),
-                "orphaned_resumes": orphaned_resumes
-            }
-
-        except Exception as e:
-            logger.error(f"Error finding orphaned resumes for user {target_user_id}: {e}")
-            raise

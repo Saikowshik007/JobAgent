@@ -1,6 +1,6 @@
 from enum import Enum
 from datetime import datetime
-from typing import Dict, List, Optional, Any, Union
+from typing import Dict, Optional, Any, Union
 
 
 class JobStatus(Enum):
@@ -150,61 +150,4 @@ class Resume:
             yaml_content=data["yaml_content"],
             date_created=date_created,
             uploaded_to_simplify=data.get("uploaded_to_simplify", False)
-        )
-
-
-class SearchHistory:
-    """Class representing a search history entry."""
-    
-    def __init__(
-        self,
-        id: str,
-        keywords: str,
-        location: str,
-        filters: Dict[str, Any],
-        date_searched: Optional[datetime] = None,
-        job_count: int = 0
-    ):
-        """
-        Initialize a SearchHistory instance.
-        
-        Args:
-            id: Unique identifier for the search
-            keywords: Search keywords
-            location: Search location
-            filters: Search filters
-            date_searched: Date the search was performed
-            job_count: Number of jobs found in this search
-        """
-        self.id = id
-        self.keywords = keywords
-        self.location = location
-        self.filters = filters
-        self.date_searched = date_searched or datetime.now()
-        self.job_count = job_count
-    
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert SearchHistory instance to a dictionary for database storage."""
-        return {
-            "id": self.id,
-            "keywords": self.keywords,
-            "location": self.location,
-            "filters": self.filters,
-            "date_searched": self.date_searched.isoformat() if self.date_searched else None,
-            "job_count": self.job_count
-        }
-    
-    @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'SearchHistory':
-        """Create a SearchHistory instance from a dictionary."""
-        # Convert datetime strings back to datetime objects
-        date_searched = datetime.fromisoformat(data["date_searched"]) if data.get("date_searched") else None
-        
-        return cls(
-            id=data["id"],
-            keywords=data["keywords"],
-            location=data["location"],
-            filters=data.get("filters", {}),
-            date_searched=date_searched,
-            job_count=data.get("job_count", 0)
         )

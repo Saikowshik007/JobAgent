@@ -14,25 +14,14 @@ class ResumeSectionHighlight(BaseModel):
     relevance: int = Field(
         ...,
         description=Prompts.descriptions["RESUME_SECTION_HIGHLIGHT"]["relevance"],
-        enum=[1, 2, 3, 4, 5],
+        ge=1,
+        le=5,
     )
 
 
 class ResumeSectionHighlighterOutput(BaseModel):
     """Pydantic class that defines a list of highlights to be returned by the LLM."""
 
-    plan: List[str] = Field(
-        ...,
-        description=Prompts.descriptions["RESUME_SECTION_HIGHLIGHTER_OUTPUT"]["plan"],
-    )
-    additional_steps: List[str] = Field(
-        ...,
-        description=Prompts.descriptions["RESUME_SECTION_HIGHLIGHTER_OUTPUT"]["additional_steps"],
-    )
-    work: List[str] = Field(
-        ...,
-        description=Prompts.descriptions["RESUME_SECTION_HIGHLIGHTER_OUTPUT"]["work"],
-    )
     final_answer: List[ResumeSectionHighlight] = Field(
         ...,
         description=Prompts.descriptions["RESUME_SECTION_HIGHLIGHTER_OUTPUT"]["final_answer"],
@@ -55,15 +44,6 @@ class ResumeSkills(BaseModel):
 class ResumeSkillsMatcherOutput(BaseModel):
     """Pydantic class that defines a list of skills to be returned by the LLM."""
 
-    plan: List[str] = Field(
-        description=Prompts.descriptions["RESUME_SKILLS_MATCHER_OUTPUT"]["plan"]
-    )
-    additional_steps: List[str] = Field(
-        description=Prompts.descriptions["RESUME_SKILLS_MATCHER_OUTPUT"]["additional_steps"],
-    )
-    work: List[str] = Field(
-        description=Prompts.descriptions["RESUME_SKILLS_MATCHER_OUTPUT"]["work"]
-    )
     final_answer: ResumeSkills = Field(
         description=Prompts.descriptions["RESUME_SKILLS_MATCHER_OUTPUT"]["final_answer"],
     )
@@ -72,55 +52,32 @@ class ResumeSkillsMatcherOutput(BaseModel):
 class ResumeSummarizerOutput(BaseModel):
     """Pydantic class that defines a list of skills to be returned by the LLM."""
 
-    plan: List[str] = Field(
-        ..., description=Prompts.descriptions["RESUME_OBJECTIVE_OUTPUT"]["plan"]
-    )
-    additional_steps: List[str] = Field(
-        ...,
-        description=Prompts.descriptions["RESUME_OBJECTIVE_OUTPUT"]["additional_steps"],
-    )
-    work: List[str] = Field(
-        ..., description=Prompts.descriptions["RESUME_OBJECTIVE_OUTPUT"]["work"]
-    )
     final_answer: str = Field(
         ...,
         description=Prompts.descriptions["RESUME_OBJECTIVE_OUTPUT"]["final_answer"],
     )
 
 
-class ResumeImprovements(BaseModel):
-    """Pydantic class that defines a list of improvements to be returned by the LLM."""
+class EvidenceMatch(BaseModel):
+    """A candidate-supported match between one job requirement and resume evidence."""
 
-    section: str = Field(
-        ...,
-        enum=[
-            "objective",
-            "education",
-            "experiences",
-            "projects",
-            "skills",
-            "spelling and grammar",
-            "other",
-        ],
-    )
-    improvements: List[str] = Field(
-        ..., description=Prompts.descriptions["RESUME_IMPROVEMENTS"]["improvements"]
+    requirement: str
+    source_ids: List[str] = Field(default_factory=list)
+    safe_keywords: List[str] = Field(default_factory=list)
+    match_strength: int = Field(ge=0, le=5)
+    gap: bool
+
+
+class ResumeEvidencePlanOutput(BaseModel):
+    """Structured job-to-resume evidence map used to ground all later edits."""
+
+    final_answer: List[EvidenceMatch] = Field(
+        description=Prompts.descriptions["RESUME_EVIDENCE_PLAN_OUTPUT"]["final_answer"]
     )
 
 
-class ResumeImproverOutput(BaseModel):
-    """Pydantic class that defines a list of improvements to be returned by the LLM."""
+class ResumeValidationOutput(BaseModel):
+    """Section-level factual-grounding verdicts for a tailored resume."""
 
-    plan: List[str] = Field(
-        ..., description=Prompts.descriptions["RESUME_IMPROVER_OUTPUT"]["plan"]
-    )
-    additional_steps: List[str] = Field(
-        ...,
-        description=Prompts.descriptions["RESUME_IMPROVER_OUTPUT"]["additional_steps"],
-    )
-    work: List[str] = Field(
-        ..., description=Prompts.descriptions["RESUME_IMPROVER_OUTPUT"]["work"]
-    )
-    final_answer: List[ResumeImprovements] = Field(
-        ..., description=Prompts.descriptions["RESUME_IMPROVER_OUTPUT"]["final_answer"]
-    )
+    approved_section_ids: List[str] = Field(default_factory=list)
+    rejected_section_ids: List[str] = Field(default_factory=list)

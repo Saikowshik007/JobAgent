@@ -1,15 +1,11 @@
-import yaml
-import requests
+import httpx
 from bs4 import BeautifulSoup
-from fp.fp import FreeProxy
-from requests import RequestException
-from yaml import YAMLError
-from services.langchain_helpers import *
 from dataModels.job_post import JobPost
 from config import config
 import asyncio
 import concurrent.futures
 from datetime import datetime
+import re
 import time
 from typing import Dict, List, Optional
 
@@ -42,6 +38,8 @@ class ResumeImprover:
         self.skills = None
         self.objective = None
         self.degrees = None
+        self.evidence_inventory = []
+        self.evidence_plan = []
 
         # Thread pool for running sync LLM calls
         self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
@@ -53,6 +51,10 @@ class ResumeImprover:
         """
         try:
             logger.info("=== Creating Complete Tailored Resume (Parallel) ===")
+
+            # Establish the factual boundary before any section is rewritten.
+            self.evidence_inventory = self._build_evidence_inventory()
+            self.evidence_plan = self._build_evidence_plan()
 
             # Try parallel execution first
             try:
@@ -107,9 +109,12 @@ class ResumeImprover:
                 'metadata': {
                     'generated_at': datetime.now().isoformat(),
                     'job_url': self.url,
-                    'tailored': True
+                    'tailored': True,
+                    'match_report': self._match_report(),
                 }
             }
+
+            final_resume = self._validate_tailored_resume(final_resume)
 
             # Step 3: Convert to YAML
             yaml_content = self.dict_to_yaml_string(final_resume)
@@ -119,6 +124,92 @@ class ResumeImprover:
         except Exception as e:
             logger.error(f"Complete resume creation failed: {e}")
             raise
+
+    def _build_evidence_inventory(self) -> list[dict]:
+        """Assign stable IDs to factual source sections before LLM tailoring."""
+        inventory = []
+        for index, experience in enumerate(self.experiences or []):
+            inventory.append({"section_id": f"experience:{index}", "content": experience})
+        for index, project in enumerate(self.projects or []):
+            inventory.append({"section_id": f"project:{index}", "content": project})
+        if self.skills:
+            inventory.append({"section_id": "skills", "content": self.skills})
+        if self.objective:
+            inventory.append({"section_id": "objective", "content": self.objective})
+        return inventory
+
+    def _build_evidence_plan(self) -> list[dict]:
+        """Match job requirements to source sections; invalid model IDs are discarded."""
+        if not self.evidence_inventory or not self.parsed_job:
+            return []
+        try:
+            from dataModels.resume import ResumeEvidencePlanOutput
+            from services.langchain_helpers import invoke_structured
+
+            result = invoke_structured(
+                self.user,
+                "RESUME_EVIDENCE_PLANNER",
+                ResumeEvidencePlanOutput,
+                **self._get_prompt_inputs(),
+            )
+            valid_ids = {item["section_id"] for item in self.evidence_inventory}
+            plan = []
+            for match in result.final_answer:
+                item = match.model_dump()
+                item["source_ids"] = [source_id for source_id in item["source_ids"] if source_id in valid_ids]
+                if not item["source_ids"]:
+                    item["gap"] = True
+                plan.append(item)
+            return plan
+        except Exception as error:
+            logger.warning(f"Evidence planning failed; generation will use source-only safeguards: {error}")
+            return []
+
+    def _match_report(self) -> dict:
+        """Persist an honest, UI-friendly summary of match strength and real gaps."""
+        matches = [match for match in self.evidence_plan if not match.get("gap")]
+        gaps = [match["requirement"] for match in self.evidence_plan if match.get("gap")]
+        return {
+            "matched_requirements": len(matches),
+            "gaps": gaps,
+            "strong_matches": [match["requirement"] for match in matches if match.get("match_strength", 0) >= 4],
+        }
+
+    def _validate_tailored_resume(self, tailored_resume: dict) -> dict:
+        """Revert whole sections when a final factual-grounding review rejects them."""
+        if not self.evidence_inventory:
+            return tailored_resume
+        try:
+            from dataModels.resume import ResumeValidationOutput
+            from services.langchain_helpers import invoke_structured
+
+            tailored_sections = {
+                "objective": tailored_resume["objective"],
+                "skills": tailored_resume["skills"],
+                **{f"experience:{index}": item for index, item in enumerate(tailored_resume["experiences"])},
+                **{f"project:{index}": item for index, item in enumerate(tailored_resume["projects"])},
+            }
+            result = invoke_structured(
+                self.user,
+                "RESUME_GROUNDING_VALIDATOR",
+                ResumeValidationOutput,
+                **self._get_prompt_inputs(tailored_sections=tailored_sections),
+            )
+            originals = {item["section_id"]: item["content"] for item in self.evidence_inventory}
+            rejected_ids = set(result.rejected_section_ids) & set(originals)
+            for section_id in rejected_ids:
+                if section_id == "objective":
+                    tailored_resume["objective"] = originals[section_id]
+                elif section_id == "skills":
+                    tailored_resume["skills"] = originals[section_id]
+                else:
+                    section_type, index = section_id.split(":", 1)
+                    section_key = f"{section_type}s"
+                    tailored_resume[section_key][int(index)] = originals[section_id]
+            tailored_resume["metadata"]["grounding_rejections"] = sorted(rejected_ids)
+        except Exception as error:
+            logger.warning(f"Grounding validation failed; retaining generated sections with source safeguards: {error}")
+        return tailored_resume
 
     async def _generate_content_async_parallel(self, include_objective: bool = True) -> Dict:
         """Generate all resume content in parallel using asyncio.gather."""
@@ -344,14 +435,16 @@ class ResumeImprover:
             f"Using default for {task_name}: {type(default_value)} with {len(default_value) if isinstance(default_value, list) else 'N/A'} items")
         return default_value
 
-    def download_and_parse_job_post(self, url=None):
+    async def download_and_parse_job_post(self, url=None):
         """Download and parse the job post from the provided URL."""
         if url:
             self.url = url
-        self._download_url()
+        downloaded = await self._download_url()
+        if not downloaded or not self.job_post_html_data:
+            raise ValueError(f"Unable to download job posting from {self.url}")
         self._extract_html_data()
         self.job_post = JobPost(self.job_post_raw, self.user)
-        self.parsed_job = self.job_post.parse_job_post(verbose=True)
+        self.parsed_job = await asyncio.to_thread(self.job_post.parse_job_post)
 
     def _extract_html_data(self):
         """Extract text content from HTML, removing all HTML tags.
@@ -366,7 +459,7 @@ class ResumeImprover:
             logger.error(f"Failed to extract HTML data: {e}")
             raise
 
-    def _download_url(self, url=None):
+    async def _download_url(self, url=None):
         """Download the content of the URL and return it as a string.
 
         Args:
@@ -380,36 +473,33 @@ class ResumeImprover:
 
         max_retries = config.get("settings.max_retries", 3)
         backoff_factor = config.get("settings.backoff_factor", 2)
-        use_proxy = False
+        timeout = httpx.Timeout(20.0, connect=10.0)
 
-        for attempt in range(max_retries):
-            response = None
-            try:
-                proxies = None
-                if use_proxy:
-                    proxy = FreeProxy(rand=True).get()
-                    proxies = {"http": proxy, "https": proxy}
+        async with httpx.AsyncClient(
+            headers=config.get_enhanced_headers(self.url),
+            follow_redirects=True,
+            timeout=timeout,
+        ) as client:
+            for attempt in range(max_retries):
+                response = None
+                try:
+                    response = await client.get(self.url)
+                    response.raise_for_status()
+                    self.job_post_html_data = response.text
+                    return True
 
-                response = requests.get(
-                    self.url, headers=config.get_enhanced_headers(), proxies=proxies
-                )
-                response.raise_for_status()
-                if response and response.status_code!= 200:
-                    raise RequestException
-                self.job_post_html_data = response.text
-                return True
-
-            except requests.RequestException as e:
-                if response and (response.status_code == 429 or response.status_code == 999):
-                    logger.warning(
-                        f"Rate limit exceeded. Retrying in {backoff_factor * 2 ** attempt} seconds..."
-                    )
-                    time.sleep(backoff_factor * 2**attempt)
-                    use_proxy = True
-                else:
+                except httpx.HTTPStatusError as e:
+                    status_code = e.response.status_code
+                    if status_code not in (429, 999) or attempt == max_retries - 1:
+                        logger.error(f"Failed to download URL {self.url}: {e}")
+                        break
+                    delay = backoff_factor * 2 ** attempt
+                    logger.warning(f"Job site rate-limited the request; retrying in {delay} seconds")
+                    await asyncio.sleep(delay)
+                except httpx.HTTPError as e:
                     logger.error(f"Failed to download URL {self.url}: {e}")
                     if attempt < max_retries - 1:
-                        time.sleep(backoff_factor * 2**attempt)
+                        await asyncio.sleep(backoff_factor * 2 ** attempt)
 
         logger.error(f"Exceeded maximum retries for URL {self.url}")
         return False
@@ -417,22 +507,13 @@ class ResumeImprover:
     def write_objective(self, **chain_kwargs) -> str:
         """Write an objective for the resume."""
         try:
-            from prompts import Prompts
             from dataModels.resume import ResumeSummarizerOutput
-            from services.langchain_helpers import create_llm
-            from langchain.prompts import ChatPromptTemplate
+            from services.langchain_helpers import invoke_structured
 
-            # Create chain
-            prompt = ChatPromptTemplate(messages=Prompts.lookup["OBJECTIVE_WRITER"])
-            llm = create_llm(self.user, **self.llm_kwargs)
-            chain = prompt | llm.with_structured_output(schema=ResumeSummarizerOutput)
-
-            # Get inputs
-            chain_inputs = self._get_formatted_chain_inputs(chain=chain)
-            logger.debug(f"Objective chain inputs: {list(chain_inputs.keys())}")
-
-            # Generate
-            result = chain.invoke(chain_inputs)
+            prompt_inputs = self._get_prompt_inputs()
+            result = invoke_structured(
+                self.user, "OBJECTIVE_WRITER", ResumeSummarizerOutput, **prompt_inputs
+            )
             if result:
                 # Handle both Pydantic model and dictionary responses
                 if hasattr(result, 'final_answer'):
@@ -448,6 +529,7 @@ class ResumeImprover:
                     objective = result
                     logger.info("Using direct response")
 
+                objective = self._validated_summary(objective)
                 logger.debug(f"Objective result: {objective}")
                 return objective
 
@@ -461,19 +543,15 @@ class ResumeImprover:
     def extract_matched_skills(self, **chain_kwargs) -> list:
         """Extract matched skills from the resume and job post with LLM handling deduplication."""
         try:
-            from prompts import Prompts
             from dataModels.resume import ResumeSkillsMatcherOutput
-            from services.langchain_helpers import create_llm
-            from langchain_core.prompts import ChatPromptTemplate
+            from services.langchain_helpers import invoke_structured
 
-            chain = ChatPromptTemplate(messages=Prompts.lookup["SKILLS_MATCHER"])
-            llm = create_llm(self.user, **self.llm_kwargs)
-
-            # Keep using function_calling method since json_mode requires "json" in prompts
-            runnable = chain | llm.with_structured_output(schema=ResumeSkillsMatcherOutput, method="function_calling")
-
-            chain_inputs = self._get_formatted_chain_inputs(chain=runnable)
-            extracted_skills = runnable.invoke(chain_inputs)
+            extracted_skills = invoke_structured(
+                self.user,
+                "SKILLS_MATCHER",
+                ResumeSkillsMatcherOutput,
+                **self._get_prompt_inputs(),
+            )
 
             if not extracted_skills:
                 logger.warning("No extracted_skills returned from LLM")
@@ -546,7 +624,7 @@ class ResumeImprover:
                 else:
                     logger.info(f"  {category['category']}: {len(category['skills'])} skills")
 
-            return result
+            return self._normalized_skill_groups(result)
 
         except Exception as e:
             logger.error(f"Error in extract_matched_skills: {e}")
@@ -574,7 +652,7 @@ class ResumeImprover:
                     logger.debug(f"    {j + 1}: {highlight}")
 
                 # Rewrite section
-                new_highlights = self.rewrite_section(section=exp, **chain_kwargs)
+                new_highlights = self.rewrite_section(section=exp, section_id=f"experience:{i}", **chain_kwargs)
                 logger.info(f"  New highlights: {len(new_highlights) if new_highlights else 0} items")
 
                 if new_highlights:
@@ -615,7 +693,7 @@ class ResumeImprover:
                     logger.debug(f"    {j + 1}: {highlight}")
 
                 # Rewrite section
-                new_highlights = self.rewrite_section(section=proj, **chain_kwargs)
+                new_highlights = self.rewrite_section(section=proj, section_id=f"project:{i}", **chain_kwargs)
                 logger.info(f"  New highlights: {len(new_highlights) if new_highlights else 0} items")
 
                 if new_highlights:
@@ -636,33 +714,23 @@ class ResumeImprover:
             logger.error(f"Project rewrite traceback: {traceback.format_exc()}")
             return self.projects or []
 
-    def rewrite_section(self, section, **chain_kwargs) -> list:
+    def rewrite_section(self, section, section_id: str = "", **chain_kwargs) -> list:
         """Rewrite a section of the resume."""
+        original_highlights = section.get("highlights", [])
         try:
-            from prompts import Prompts
             from dataModels.resume import ResumeSectionHighlighterOutput
-            from services.langchain_helpers import create_llm
-            from langchain.prompts import ChatPromptTemplate
+            from services.langchain_helpers import invoke_structured
 
             logger.debug(f"Starting rewrite_section for: {section.get('title') or section.get('name', 'Unknown')}")
 
-            prompt = ChatPromptTemplate(messages=Prompts.lookup["SECTION_HIGHLIGHTER"])
-            llm = create_llm(self.user, **self.llm_kwargs)
-            chain = prompt | llm.with_structured_output(schema=ResumeSectionHighlighterOutput)
-
-            chain_inputs = self._get_formatted_chain_inputs(chain=chain, section=section)
-            logger.debug(f"Chain inputs keys: {list(chain_inputs.keys())}")
-
-            # Log some key inputs for debugging
-            if 'section' in chain_inputs:
-                section_info = chain_inputs['section']
-                if isinstance(section_info, str):
-                    logger.debug(f"Section input (first 200 chars): {section_info[:200]}...")
-                else:
-                    logger.debug(f"Section input type: {type(section_info)}")
-
-            logger.debug("Invoking LLM chain...")
-            section_revised = chain.invoke(chain_inputs)
+            prompt_inputs = self._get_prompt_inputs(section=section, section_id=section_id)
+            logger.debug("Invoking structured highlight generation...")
+            section_revised = invoke_structured(
+                self.user,
+                "SECTION_HIGHLIGHTER",
+                ResumeSectionHighlighterOutput,
+                **prompt_inputs,
+            )
             logger.debug(f"LLM response type: {type(section_revised)}")
             logger.debug(f"LLM response: {section_revised}")
 
@@ -686,7 +754,7 @@ class ResumeImprover:
 
                         logger.info(f"Limited to top {limit} highlights for {section_type} section")
                         logger.debug(f"Final highlights: {result}")
-                        return result
+                        return self._validated_highlights(result, original_highlights, limit)
 
                 elif isinstance(section_revised, dict):
                     # Dictionary response
@@ -706,13 +774,12 @@ class ResumeImprover:
 
                         logger.info(f"Limited to top {limit} highlights for {section_type} section")
                         logger.debug(f"Final highlights: {result}")
-                        return result
+                        return self._validated_highlights(result, original_highlights, limit)
                 else:
                     logger.error(f"Unexpected response type: {type(section_revised)}")
                     logger.error(f"Response content: {section_revised}")
 
             logger.warning("No valid highlights generated by LLM, returning original")
-            original_highlights = section.get("highlights", [])
             logger.debug(f"Returning original highlights: {original_highlights}")
             return original_highlights
 
@@ -721,6 +788,66 @@ class ResumeImprover:
             import traceback
             logger.error(f"Rewrite section traceback: {traceback.format_exc()}")
             return section.get("highlights", [])
+
+    def _validated_summary(self, summary) -> Optional[str]:
+        """Keep summaries concise and avoid replacing a usable original with bad output."""
+        if not isinstance(summary, str):
+            return self.objective or None
+        summary = " ".join(summary.split())
+        if not summary or len(re.findall(r"\b\w+\b", summary)) > 55:
+            logger.warning("Discarding empty or oversized generated summary")
+            return self.objective or None
+        return summary
+
+    def _validated_highlights(self, candidates, originals, limit: int) -> list:
+        """Apply deterministic readability checks after structured LLM output."""
+        accepted, seen = [], set()
+        for candidate in candidates or []:
+            if not isinstance(candidate, str):
+                continue
+            candidate = " ".join(candidate.split())
+            word_count = len(re.findall(r"\b\w+\b", candidate))
+            normalized = candidate.casefold()
+            if 3 <= word_count <= 30 and normalized not in seen:
+                accepted.append(candidate)
+                seen.add(normalized)
+
+        if accepted:
+            return accepted[:limit]
+        logger.warning("Discarding invalid generated highlights and preserving source highlights")
+        return list(originals or [])
+
+    def _normalized_skill_groups(self, groups: list) -> list:
+        """Defensively deduplicate and bound LLM-generated skill output."""
+        normalized_groups, seen = [], set()
+        technical_count = 0
+        for group in groups:
+            if group.get("category") == "Technical":
+                subcategories = []
+                for subcategory in group.get("subcategories", [])[:4]:
+                    skills = []
+                    for skill in subcategory.get("skills", []):
+                        if not isinstance(skill, str):
+                            continue
+                        skill = " ".join(skill.split())
+                        normalized = skill.casefold()
+                        if skill and normalized not in seen and technical_count < 25:
+                            skills.append(skill)
+                            seen.add(normalized)
+                            technical_count += 1
+                    if skills:
+                        subcategories.append({"name": subcategory.get("name", "Other"), "skills": skills})
+                if subcategories:
+                    normalized_groups.append({"category": "Technical", "subcategories": subcategories})
+            elif group.get("category") == "Non-technical":
+                skills = []
+                for skill in group.get("skills", []):
+                    if isinstance(skill, str) and skill.strip() and skill.casefold() not in seen:
+                        skills.append(" ".join(skill.split()))
+                        seen.add(skill.casefold())
+                if skills:
+                    normalized_groups.append({"category": "Non-technical", "skills": skills})
+        return normalized_groups
 
     def _determine_section_type(self, section) -> str:
         """Determine if section is experience or project based on its structure."""
@@ -734,8 +861,8 @@ class ResumeImprover:
             # Default fallback
             return 'unknown'
 
-    def _get_formatted_chain_inputs(self, chain, section=None):
-        """Get formatted inputs for chain with proper skills formatting"""
+    def _get_prompt_inputs(self, section=None, section_id: str = "", **extra_values):
+        """Format the full, provider-neutral prompt context for resume generation."""
         from services.langchain_helpers import chain_formatter
 
         output_dict = {}
@@ -744,22 +871,25 @@ class ResumeImprover:
             raw_self_data = raw_self_data.copy()
             raw_self_data["section"] = section
 
-        for key in chain.get_input_schema().schema().get("required", []):
-            value = raw_self_data.get(key) or (self.parsed_job.get(key) if self.parsed_job else None)
+        raw_self_data.update(extra_values)
+        if section_id:
+            raw_self_data["section_evidence"] = [
+                match for match in self.evidence_plan if section_id in match.get("source_ids", [])
+            ]
+        raw_self_data["evidence_inventory"] = self.evidence_inventory
+        raw_self_data["evidence_map"] = self.evidence_plan
 
-            # Special handling for skills - pass the raw structure to chain_formatter
-            # Don't pre-format it here since chain_formatter will handle the formatting
-            if key == "skills" and self.skills:
-                # Pass the raw skills structure to chain_formatter, not a pre-formatted string
-                value = self.skills
-                logger.debug(f"Passing raw skills structure to chain_formatter: {len(self.skills)} categories")
-
+        keys = {
+            "section", "objective", "experiences", "projects", "skills",
+            "company", "job_summary", "duties", "qualifications", "ats_keywords",
+            "technical_skills", "non_technical_skills", "evidence_inventory", "evidence_map",
+            "section_evidence", "tailored_sections",
+        }
+        for key in keys:
+            value = raw_self_data.get(key)
+            if value is None and self.parsed_job:
+                value = self.parsed_job.get(key)
             output_dict[key] = chain_formatter(key, value)
-
-            # Debug log for skills specifically
-            if key == "skills":
-                logger.debug(f"After chain_formatter, skills input type: {type(output_dict[key])}")
-
         return output_dict
 
     def _get_degrees(self, resume: dict):
@@ -776,101 +906,11 @@ class ResumeImprover:
                     result.append(names)
         return result
 
-    def _combine_skills_in_category(self, l1: list[str], l2: list[str]):
-        """Combine two lists of skills without duplicating lowercase entries."""
-        l1_lower = {i.lower() for i in l1}
-        for i in l2:
-            if i.lower() not in l1_lower:
-                l1.append(i)
-
-    def _combine_skill_lists(self, l1: list[dict], l2: list[dict]):
-        """Combine two lists of skill categories without duplicating lowercase entries."""
-        l1_categories_lowercase = {s["category"].lower(): i for i, s in enumerate(l1)}
-
-        for s in l2:
-            category_lower = s["category"].lower()
-
-            if category_lower in l1_categories_lowercase:
-                # Get the existing category
-                existing_idx = l1_categories_lowercase[category_lower]
-                existing_category = l1[existing_idx]
-
-                # Handle different structures: subcategories vs direct skills
-                if "subcategories" in existing_category and "subcategories" in s:
-                    # Both have subcategories - merge subcategories
-                    existing_subcats = {sub["name"].lower(): sub for sub in existing_category["subcategories"]}
-
-                    for new_subcat in s["subcategories"]:
-                        subcat_name_lower = new_subcat["name"].lower()
-                        if subcat_name_lower in existing_subcats:
-                            # Merge skills within the subcategory
-                            self._combine_skills_in_category(
-                                existing_subcats[subcat_name_lower]["skills"],
-                                new_subcat["skills"]
-                            )
-                        else:
-                            # Add new subcategory
-                            existing_category["subcategories"].append(new_subcat)
-
-                elif "skills" in existing_category and "skills" in s:
-                    # Both have direct skills - merge them
-                    self._combine_skills_in_category(
-                        existing_category["skills"],
-                        s["skills"]
-                    )
-
-                elif "subcategories" in existing_category and "skills" in s:
-                    # Existing has subcategories, new has direct skills
-                    # Convert new skills to a subcategory or handle as needed
-                    if not any(sub["name"].lower() == "general" for sub in existing_category["subcategories"]):
-                        existing_category["subcategories"].append({
-                            "name": "General",
-                            "skills": s["skills"][:]
-                        })
-                    else:
-                        # Find General subcategory and add skills
-                        for sub in existing_category["subcategories"]:
-                            if sub["name"].lower() == "general":
-                                self._combine_skills_in_category(sub["skills"], s["skills"])
-                                break
-
-                elif "skills" in existing_category and "subcategories" in s:
-                    # Existing has direct skills, new has subcategories
-                    # Convert existing to subcategories format
-                    existing_skills = existing_category["skills"][:]
-                    existing_category["subcategories"] = [
-                        {"name": "General", "skills": existing_skills}
-                    ]
-                    del existing_category["skills"]
-
-                    # Now merge the subcategories
-                    existing_subcats = {"general": existing_category["subcategories"][0]}
-                    for new_subcat in s["subcategories"]:
-                        subcat_name_lower = new_subcat["name"].lower()
-                        if subcat_name_lower in existing_subcats:
-                            self._combine_skills_in_category(
-                                existing_subcats[subcat_name_lower]["skills"],
-                                new_subcat["skills"]
-                            )
-                        else:
-                            existing_category["subcategories"].append(new_subcat)
-            else:
-                # Add new category
-                l1.append(s)
-
-    def dict_to_yaml_string(self, data: dict) -> str:
-        """Converts a dictionary to a YAML-formatted string."""
-        yaml.allow_unicode = True
-        try:
-            from io import StringIO
-            stream = StringIO()
-            yaml.dump(data, stream=stream, default_flow_style=False, allow_unicode=True)
-            return stream.getvalue()
-        except YAMLError as e:
-            logger.error("Failed to convert dict to YAML string.")
-            raise e
-
     def __del__(self):
-        """Cleanup thread pool on deletion."""
+        self.close()
+
+    def close(self):
+        """Release the LLM worker pool deterministically after a generation."""
         if hasattr(self, 'executor'):
-            self.executor.shutdown(wait=False)
+            self.executor.shutdown(wait=False, cancel_futures=True)
+            del self.executor

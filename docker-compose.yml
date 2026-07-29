@@ -1,40 +1,51 @@
 services:
-  jobtrak-api:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-jobagent}
+      POSTGRES_USER: ${POSTGRES_USER:-jobagent}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-scripts:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
+  api:
     build:
       context: .
       dockerfile: Dockerfile.api
-    container_name: jobtrak-api
-    ports:
-      - "8000:8000"
-    volumes:
-      - .:/app
-      - ./database:/app/database
-      - ./output:/app/output
-      - ./logs:/app/logs
-    restart: unless-stopped
-    networks:
-      - infra-network
+    env_file: .env
     environment:
-      - PYTHONPATH=/app
-      - PYTHONUNBUFFERED=1
-      # --- Database configuration (Pointing to infra-postgres) ---
-      - DATABASE_URL=postgresql://postgres:postgres@infra-postgres:5432/postgres
-      - POSTGRES_HOST=infra-postgres
-      - POSTGRES_PORT=5432
-      - POSTGRES_DB=postgres
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
+      DATABASE_URL: postgresql://${POSTGRES_USER:-jobagent}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-jobagent}
+      REDIS_URL: redis://redis:6379/0
+      HOST: 0.0.0.0
+      PORT: 8000
+    ports:
+      - "${API_PORT:-8000}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
 
-      # --- Redis configuration (Pointing to infra-redis) ---
-      - REDIS_URL=redis://infra-redis:6379/0
-      - REDIS_HOST=infra-redis
-      - REDIS_PORT=6379
-      
-      # --- Other Settings ---
-      - SELENIUM_REMOTE_URL=http://selenium-chrome:4444/wd/hub
-      - OPENAI_API_KEY=your_openai_api_key
-      - MODEL_NAME=gpt-4.1-mini
-
-networks:
-  infra-network:
-    external: true  # Tells Docker this network is managed by your infra compose
+volumes:
+  postgres_data:
+  redis_data:

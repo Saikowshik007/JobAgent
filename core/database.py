@@ -21,10 +21,11 @@ async def initialize_app(app, db_url: Optional[str] = None, job_cache_size: Opti
 
         # Get configuration from environment variables if not provided
         if db_url is None:
-            if config:
-                db_url = config.get("database.path") or os.environ.get('DATABASE_URL')
-            else:
-                db_url = os.environ.get('DATABASE_URL')
+            # Environment configuration must win in containers and production.
+            # The YAML value remains a local-development fallback only.
+            db_url = os.environ.get('DATABASE_URL')
+            if not db_url and config:
+                db_url = config.get("database.path")
 
             if not db_url:
                 # Provide a default SQLite database for development

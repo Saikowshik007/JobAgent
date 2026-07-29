@@ -1,48 +1,31 @@
-#!/bin/bash
-# JobTrak Launcher - POSIX Compliant & Integrated with Shared Infra
+#!/usr/bin/env sh
+set -eu
 
-set -e
-
-# Commands
-DOCKER_CMD="docker"
-COMPOSE_CMD="docker compose"
-
-print_status() { echo -e "\033[0;34m[INFO]\033[0m $1"; }
-print_success() { echo -e "\033[0;32m[SUCCESS]\033[0m $1"; }
-print_error() { echo -e "\033[0;31m[ERROR]\033[0m $1"; }
-
-# 1. Check if Shared Infra is actually running
-if ! $DOCKER_CMD ps | grep -q "infra-postgres"; then
-    print_error "Shared infrastructure (infra-postgres) is not running!"
-    echo "Please run 'docker compose up -d' in your infra folder first."
-    exit 1
+if ! command -v docker >/dev/null 2>&1 || ! docker compose version >/dev/null 2>&1; then
+  echo "Docker Engine with the Compose plugin is required."
+  exit 1
 fi
 
-# 2. Cleanup local orphans
-print_status "Cleaning up JobTrak app..."
-$COMPOSE_CMD down --remove-orphans 2>/dev/null || true
+if [ ! -f .env ]; then
+  echo "Create .env first: cp .env.example .env"
+  exit 1
+fi
 
-# 3. Start Application
-print_status "Starting JobTrak API..."
-$COMPOSE_CMD up --build -d
+# shellcheck disable=SC1091
+. ./.env
+api_port=${API_PORT:-8000}
 
-# 4. Health Check (Wait for API)
-print_status "Waiting for API to respond..."
-timeout=30
-counter=0
-while [ $counter -lt $timeout ]; do
-    if curl -s http://localhost:8000/health > /dev/null; then
-        print_success "🚀 JobTrak API is online!"
-        break
-    fi
-    sleep 2
-    # POSIX compliant increment
-    counter=$((counter + 1))
+docker compose up --build --detach
+
+attempt=0
+while [ "$attempt" -lt 30 ]; do
+  if curl --fail --silent "http://localhost:${api_port}/health" >/dev/null; then
+    echo "JobAgent is running at http://localhost:${api_port}"
+    exit 0
+  fi
+  attempt=$((attempt + 1))
+  sleep 2
 done
 
-if [ $counter -eq $timeout ]; then
-    print_error "API failed to start within $timeout seconds."
-    exit 1
-fi
-
-print_status "Access via: https://jobtrackai.duckdns.org (Ensure Caddy is reloaded)"
+echo "The API did not become healthy. Inspect logs with: docker compose logs api"
+exit 1
