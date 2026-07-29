@@ -1,39 +1,11 @@
 services:
-  postgres:
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_DB: ${POSTGRES_DB:-jobagent}
-      POSTGRES_USER: ${POSTGRES_USER:-jobagent}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./init-scripts:/docker-entrypoint-initdb.d:ro
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
-      interval: 5s
-      timeout: 5s
-      retries: 12
-    restart: unless-stopped
-
-  redis:
-    image: redis:7-alpine
-    command: redis-server --appendonly yes
-    volumes:
-      - redis_data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 12
-    restart: unless-stopped
-
   api:
     build:
       context: .
       dockerfile: Dockerfile.api
     env_file: .env
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-jobagent}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-jobagent}
+      DATABASE_URL: postgresql://postgres:postgres@infra-postgres:5432/postgres
       REDIS_URL: redis://redis:6379/0
       HOST: 0.0.0.0
       PORT: 8000
@@ -41,12 +13,10 @@ services:
       - "${API_PORT:-8000}:8000"
     labels:
       co.elastic.logs/enabled: "true"
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
     restart: unless-stopped
+    networks:
+      - default
+      - infra-network
 
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:9.4.0
@@ -92,3 +62,7 @@ volumes:
   redis_data:
   elasticsearch_data:
   filebeat_data:
+
+networks:
+  infra-network:
+    external: true
