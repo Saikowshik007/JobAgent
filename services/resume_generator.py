@@ -189,18 +189,24 @@ class ResumeGenerator:
             logger.info("resume_generation_completed", extra={"job.id": job_dict.get("id"), "resume.id": resume_id})
 
         except Exception as error:
-            logger.exception("resume_generation_failed", extra={"job.id": job_dict.get("id"), "resume.id": resume_id})
+            logger.exception(
+                "Resume generation failed: %s",
+                error,
+                extra={"job.id": job_dict.get("id"), "resume.id": resume_id},
+            )
 
             # Update cache with failed status
+            failure_reason = str(error)
             await self.cache_manager.set_resume_status(
                 resume_id, user.id, ResumeGenerationStatus.FAILED,
                 data={
                     "stage": "failed",
                     "progress_percentage": 0,
-                    "message": "Resume generation failed",
+                    "message": f"Resume generation failed: {failure_reason}",
+                    "failure_reason": failure_reason,
                     "job_id": job_dict.get("id"),
                 },
-                error=str(error),
+                error=failure_reason,
             )
     async def _update_job_with_resume_id(self, job_id: str, user_id:str, resume_id: str):
         """Update the job record with the generated resume ID."""
@@ -246,8 +252,7 @@ class ResumeGenerator:
             finally:
                 resume_improver.close()
 
-        except Exception as error:
-            logger.error("resume_generation_sync_failed", extra={"job.id": job_dict.get("id"), "error.reason": str(error)})
+        except Exception:
             raise
 
     def _setup_resume_data(self, resume_improver: ResumeImprover, resume_data: Dict[str, Any]):
@@ -280,7 +285,7 @@ class ResumeGenerator:
                 response["error"] = cache_entry["error"]
 
             progress_data = cache_entry.get("data") or {}
-            for field in ("stage", "progress_percentage", "message", "job_id"):
+            for field in ("stage", "progress_percentage", "message", "failure_reason", "job_id"):
                 if field in progress_data:
                     response[field] = progress_data[field]
 

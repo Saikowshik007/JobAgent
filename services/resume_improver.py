@@ -86,8 +86,8 @@ class ResumeImprover:
                 logger.info("resume_tailoring_sections_completed", extra={"event.duration_seconds": round(end_time - start_time, 2)})
 
             except Exception as parallel_error:
-                logger.error("resume_tailoring_sections_failed")
-                raise RuntimeError("Required resume tailoring did not complete") from parallel_error
+                logger.error("resume_tailoring_sections_failed", extra={"error.reason": str(parallel_error)})
+                raise RuntimeError(f"Required resume tailoring did not complete: {parallel_error}") from parallel_error
 
             # Extract results with detailed logging
             objective = results.get('objective', "")
@@ -133,7 +133,6 @@ class ResumeImprover:
             return yaml_content
 
         except Exception:
-            logger.exception("resume_tailoring_failed")
             raise
 
     def _report_progress(self, stage: str, progress_percentage: int, message: str) -> None:
@@ -182,10 +181,8 @@ class ResumeImprover:
                 plan.append(item)
             return plan
         except Exception as error:
-            logger.exception("resume_evidence_planning_failed")
-            raise RuntimeError(
-                "Evidence planning failed; resume generation was not started. Please retry."
-            ) from error
+            logger.error("Evidence planning failed: %s", error)
+            raise RuntimeError(f"Evidence planning failed: {error}") from error
 
     def _match_report(self) -> dict:
         """Persist an honest, UI-friendly summary of match strength and real gaps."""
@@ -230,8 +227,8 @@ class ResumeImprover:
                     + ", ".join(sorted(rejected_ids))
                 )
         except Exception as error:
-            logger.exception("resume_grounding_validation_failed")
-            raise RuntimeError("Final grounding validation failed") from error
+            logger.error("Grounding validation failed: %s", error)
+            raise RuntimeError(f"Final grounding validation failed: {error}") from error
         return tailored_resume
 
     async def _generate_content_async_parallel(self, include_objective: bool = True) -> Dict:
@@ -281,7 +278,7 @@ class ResumeImprover:
         for i, (result, task_name) in enumerate(zip(results, task_names)):
             if isinstance(result, Exception):
                 logger.error("resume_tailoring_task_failed", extra={"task.name": task_name, "error.reason": str(result)})
-                raise RuntimeError(f"Required {task_name} tailoring failed") from result
+                raise RuntimeError(f"Required {task_name} tailoring failed: {result}") from result
             else:
                 logger.debug("resume_tailoring_task_completed", extra={"task.name": task_name})
                 processed_results[task_name] = result
@@ -362,7 +359,7 @@ class ResumeImprover:
 
                     except Exception as error:
                         logger.error("resume_tailoring_task_failed", extra={"task.name": task_name, "error.reason": str(error)})
-                        raise RuntimeError(f"Required {task_name} tailoring failed") from error
+                        raise RuntimeError(f"Required {task_name} tailoring failed: {error}") from error
 
             except concurrent.futures.TimeoutError:
                 logger.error("resume_tailoring_timed_out", extra={"timeout.seconds": self.timeout, "task.completed": completed_tasks, "task.total": total_tasks})
@@ -635,7 +632,7 @@ class ResumeImprover:
             return result
         except Exception as error:
             logger.error("resume_experience_rewrite_failed", extra={"error.reason": str(error)})
-            raise RuntimeError("Experience bullet rewriting failed") from error
+            raise RuntimeError(f"Experience bullet rewriting failed: {error}") from error
 
     def rewrite_unedited_projects(self, **chain_kwargs) -> list:
         """Rewrite unedited projects in the resume."""
@@ -665,7 +662,7 @@ class ResumeImprover:
             return result
         except Exception as error:
             logger.error("resume_project_rewrite_failed", extra={"error.reason": str(error)})
-            raise RuntimeError("Project bullet rewriting failed") from error
+            raise RuntimeError(f"Project bullet rewriting failed: {error}") from error
 
     def rewrite_section(self, section, section_id: str = "", **chain_kwargs) -> list:
         """Rewrite a section of the resume."""
@@ -744,7 +741,7 @@ class ResumeImprover:
 
         except Exception as error:
             logger.error("resume_section_rewrite_failed", extra={"section.id": section_id, "error.reason": str(error)})
-            raise RuntimeError("Section bullet rewriting failed") from error
+            raise RuntimeError(f"Section bullet rewriting failed: {error}") from error
 
     def _validated_summary(self, summary) -> Optional[str]:
         """Keep summaries concise and avoid replacing a usable original with bad output."""
