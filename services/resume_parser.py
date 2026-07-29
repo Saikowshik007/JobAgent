@@ -49,9 +49,7 @@ def parse_source_resume(pdf_content: bytes, user, progress_callback=None) -> dic
     )
     if progress_callback:
         progress_callback("validating", 85, "Validating extracted resume fields")
-    resume_data = result.final_answer
-    if not isinstance(resume_data, dict):
-        raise ValueError("The resume parser returned an invalid structured response")
+    resume_data = result.final_answer.model_dump()
     return _normalise_resume_data(resume_data)
 
 

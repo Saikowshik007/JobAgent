@@ -1,16 +1,76 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Any, List, Dict, Optional
 from prompts.prompts import Prompts
 
 Prompts.initialize()
 
 
-class SourceResumeExtractionOutput(BaseModel):
+class _ClosedSchema(BaseModel):
+    """OpenAI structured outputs require a closed JSON object at every level."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class SourceResumeBasic(_ClosedSchema):
+    name: str
+    address: str
+    email: str
+    phone: str
+    websites: List[str]
+
+
+class SourceResumeDegree(_ClosedSchema):
+    names: List[str]
+    gpa: str
+    dates: str
+
+
+class SourceResumeEducation(_ClosedSchema):
+    school: str
+    degrees: List[SourceResumeDegree]
+
+
+class SourceResumeTitle(_ClosedSchema):
+    name: str
+    startdate: str
+    enddate: str
+
+
+class SourceResumeExperience(_ClosedSchema):
+    company: str
+    skip_name: bool
+    location: str
+    titles: List[SourceResumeTitle]
+    highlights: List[str]
+
+
+class SourceResumeProject(_ClosedSchema):
+    name: str
+    technologies: str
+    link: str
+    hyperlink: bool
+    show_link: bool
+    highlights: List[str]
+
+
+class SourceResumeSkillGroup(_ClosedSchema):
+    category: str
+    skills: List[str]
+
+
+class SourceResumeData(_ClosedSchema):
+    basic: SourceResumeBasic
+    objective: str
+    education: List[SourceResumeEducation]
+    experiences: List[SourceResumeExperience]
+    projects: List[SourceResumeProject]
+    skills: List[SourceResumeSkillGroup]
+
+
+class SourceResumeExtractionOutput(_ClosedSchema):
     """Canonical resume data extracted from a user-uploaded source document."""
 
-    final_answer: Dict[str, Any] = Field(
-        ..., description="A complete JobAgent resume object matching the requested schema."
-    )
+    final_answer: SourceResumeData
 
 
 class ResumeSectionHighlight(BaseModel):
