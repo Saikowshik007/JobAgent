@@ -5,7 +5,6 @@ from config import config
 import asyncio
 import concurrent.futures
 from datetime import datetime
-import hashlib
 import json
 import re
 import time
@@ -259,18 +258,6 @@ class ResumeImprover:
             raise RuntimeError(f"Final grounding validation failed: {error}") from error
         return tailored_resume
 
-    def planning_signature(self) -> str:
-        """Return a stable signature for the planning inputs."""
-        normalized_payload = {
-            "parsed_job": self.parsed_job or {},
-            "experiences": self.experiences or [],
-            "projects": self.projects or [],
-            "skills": self.skills or [],
-            "objective": self.objective or "",
-        }
-        serialized = json.dumps(normalized_payload, sort_keys=True, ensure_ascii=False, default=str)
-        return hashlib.md5(serialized.encode("utf-8")).hexdigest()
-
     async def _generate_content_async_parallel(self, include_objective: bool = True) -> Dict:
         """Generate all resume content in parallel using asyncio.gather."""
         # Create async tasks that run in thread pool (this gives true HTTP parallelism)
@@ -418,43 +405,6 @@ class ResumeImprover:
 
             logger.info("resume_tailoring_tasks_finished", extra={"task.completed": len(results), "task.total": total_tasks})
             return results
-
-    def _generate_content_sequential(self, include_objective: bool = True) -> Dict:
-        """Fallback sequential content generation."""
-        logger.info("resume_tailoring_sequential_mode")
-
-        results = {}
-
-        if include_objective:
-            logger.debug("resume_tailoring_task_started", extra={"task.name": "objective"})
-            results['objective'] = self._safe_write_objective()
-        else:
-            results['objective'] = None
-
-        logger.debug("resume_tailoring_task_started", extra={"task.name": "skills"})
-        results['skills'] = self._safe_extract_matched_skills()
-
-        logger.debug("resume_tailoring_task_started", extra={"task.name": "experiences"})
-        results['experiences'] = self._safe_rewrite_experiences()
-
-        logger.debug("resume_tailoring_task_started", extra={"task.name": "projects"})
-        results['projects'] = self._safe_rewrite_projects()
-
-        logger.info("resume_tailoring_tasks_finished")
-        return results
-
-    def _get_default_value(self, task_name: str):
-        """Get default value for a task that failed or timed out."""
-        defaults = {
-            'objective': None,
-            'skills': self.skills or [],
-            'experiences': self.experiences or [],
-            'projects': self.projects or []
-        }
-        default_value = defaults.get(task_name)
-        logger.debug(
-            f"Using default for {task_name}: {type(default_value)} with {len(default_value) if isinstance(default_value, list) else 'N/A'} items")
-        return default_value
 
     async def download_and_parse_job_post(self, url=None):
         """Download and parse the job post from the provided URL."""
@@ -1071,18 +1021,6 @@ class ResumeImprover:
                 if skills:
                     normalized_groups.append({"category": "Non-technical", "skills": skills})
         return normalized_groups
-
-    def _determine_section_type(self, section) -> str:
-        """Determine if section is experience or project based on its structure."""
-        # Check for experience indicators
-        if 'titles' in section or 'title' in section or 'company' in section:
-            return 'experience'
-        # Check for project indicators
-        elif 'name' in section:
-            return 'project'
-        else:
-            # Default fallback
-            return 'unknown'
 
     def _get_prompt_inputs(self, section=None, section_id: str = "", **extra_values):
         """Format the full, provider-neutral prompt context for resume generation."""

@@ -515,14 +515,6 @@ class RedisCache:
             logger.error(f"Error getting resume plan from Redis cache: {e}")
             return None
 
-    async def remove_resume_plan(self, user_id: str, plan_key: str) -> None:
-        """Remove reusable resume planning artifacts from Redis."""
-        try:
-            cache_key = f"{self.prefixes['resume_plan']}{user_id}:{plan_key}"
-            self.redis_client.delete(cache_key)
-        except Exception as e:
-            logger.error(f"Error removing resume plan from Redis cache: {e}")
-
     # ============= CACHE MANAGEMENT METHODS =============
 
     def clear_user_cache(self, user_id: str) -> None:
