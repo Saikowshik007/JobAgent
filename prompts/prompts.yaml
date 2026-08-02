@@ -116,7 +116,8 @@ RESUME_REPAIR_WRITER:
   criteria_message: |
     Rules:
     - Preserve the same factual boundaries as the source evidence inventory and evidence map.
-    - Do not invent, infer, or strengthen any metric, technology, employer, title, responsibility, scope, certification, or outcome.
+    - Do not invent or strengthen any metric, technology, employer, title, certification, or outcome.
+    - You may rewrite responsibilities and scope into tighter, more job-aligned language when they remain a fair abstraction of matched source evidence.
     - Fix every rejected section identified in validator feedback.
     - Preserve valid alignment elsewhere; do not weaken supported tailoring unnecessarily.
     - Keep the repaired result optimized around the highest-priority supported requirements from the tailoring brief; do not drift back to a generic near-copy of the source resume.
@@ -181,9 +182,16 @@ RESUME_GROUNDING_VALIDATOR:
     {tailored_sections}
   instruction_message: Return the IDs of tailored sections that are factual and the IDs that need correction, plus short correction feedback for each rejected section.
   criteria_message: |
-    Reject a section if it adds or changes a metric, technology, employer, title,
-    responsibility, scope, certification, or outcome that is not supported by its
-    original evidence. Job requirements are not evidence. Prefer rejection when uncertain.
+    Reject a section if it adds or changes a metric, named technology, employer, title,
+    certification, or outcome that is not supported by its original evidence.
+    Do not reject a section merely because it uses stronger recruiter-facing wording,
+    reorders emphasis, or expresses supported work in slightly more general job-aligned language.
+    Responsibilities and scope may be phrased at a somewhat higher level when that phrasing is still
+    a fair summary of the matched source evidence and does not imply materially broader ownership.
+    ATS keywords and job-description phrasing are allowed only when they are already supported by the
+    evidence map or are an unambiguous restatement of matched source evidence.
+    Job requirements are not evidence. Prefer rejection when a rewritten claim would reasonably cause
+    a recruiter to believe the candidate did something materially different, broader, or more senior.
     For each rejected section, include one short reason that tells the editor what unsupported
-    or changed claim must be corrected without inventing any new facts.
+    or materially overstated claim must be corrected without inventing any new facts.
   steps_message: Return structured output only.
