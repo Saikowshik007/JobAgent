@@ -297,27 +297,20 @@ class ResumeGenerator:
         customize: bool,
         include_objective: bool,
     ) -> int:
-        """Return a coarse user-facing estimate based on rewrite workload."""
+        """Return a coarse user-facing estimate for the current pipeline."""
         if not customize:
             return 10
 
         experiences = self.get_dict_field("experiences", resume_data) or []
         projects = self.get_dict_field("projects", resume_data) or []
-        sections_with_highlights = sum(
+        rewritten_sections = sum(
             1 for section in [*experiences, *projects]
             if isinstance(section, dict) and section.get("highlights")
         )
-        parallel_rewrite_batches = 0
-        if any(isinstance(section, dict) and section.get("highlights") for section in experiences):
-            parallel_rewrite_batches += 1
-        if any(isinstance(section, dict) and section.get("highlights") for section in projects):
-            parallel_rewrite_batches += 1
 
-        estimate = 25
-        estimate += 8 if include_objective else 0
-        estimate += 8
-        estimate += 12 * parallel_rewrite_batches
-        estimate += 2 * max(0, sections_with_highlights - parallel_rewrite_batches)
+        estimate = 40
+        estimate += 5 if include_objective else 0
+        estimate += min(20, rewritten_sections * 2)
         return min(180, max(30, estimate))
 
     def _build_resume_plan_key(self, job_dict: Dict[str, Any], resume_data: Dict[str, Any]) -> str:

@@ -1,5 +1,5 @@
 from pydantic import BaseModel, ConfigDict, Field
-from typing import Any, List, Dict, Optional
+from typing import List
 from prompts.prompts import Prompts
 
 Prompts.initialize()
@@ -73,82 +73,30 @@ class SourceResumeExtractionOutput(_ClosedSchema):
     final_answer: SourceResumeData
 
 
-class ResumeSectionHighlight(BaseModel):
-    """Pydantic class that defines each highlight to be returned by the LLM."""
+class TailoredResumeData(_ClosedSchema):
+    """Primary tailored resume content returned by the full writer."""
 
-    source_index: int = Field(
-        ..., ge=1,
-        description="One-based index of the source highlight this rewrite replaces.",
-    )
-    highlight: str = Field(
-        ..., description=Prompts.descriptions["RESUME_SECTION_HIGHLIGHT"]["highlight"]
-    )
-    relevance: int = Field(
+    objective: str
+    experiences: List[SourceResumeExperience]
+    projects: List[SourceResumeProject]
+    skills: List[SourceResumeSkillGroup]
+
+
+class TailoredResumeWriterOutput(_ClosedSchema):
+    """Structured output for the full tailored resume writer."""
+
+    final_answer: TailoredResumeData = Field(
         ...,
-        description=Prompts.descriptions["RESUME_SECTION_HIGHLIGHT"]["relevance"],
-        ge=1,
-        le=5,
+        description=Prompts.descriptions["RESUME_TAILORED_RESUME_OUTPUT"]["final_answer"],
     )
 
 
-class ResumeSectionHighlighterOutput(BaseModel):
-    """Pydantic class that defines a list of highlights to be returned by the LLM."""
+class ResumeRepairWriterOutput(_ClosedSchema):
+    """Structured output for the targeted repair writer."""
 
-    final_answer: List[ResumeSectionHighlight] = Field(
+    final_answer: TailoredResumeData = Field(
         ...,
-        description=Prompts.descriptions["RESUME_SECTION_HIGHLIGHTER_OUTPUT"]["final_answer"],
-    )
-
-
-class ResumeSectionBatchItem(_ClosedSchema):
-    """One rewritten section within a batched rewrite response."""
-
-    section_id: str = Field(
-        ...,
-        description=Prompts.descriptions["RESUME_SECTION_BATCH_ITEM"]["section_id"],
-    )
-    highlights: List[ResumeSectionHighlight] = Field(
-        ...,
-        description=Prompts.descriptions["RESUME_SECTION_BATCH_ITEM"]["highlights"],
-    )
-
-
-class ResumeSectionBatchHighlighterOutput(_ClosedSchema):
-    """Batched structured rewrite output for multiple resume sections."""
-
-    final_answer: List[ResumeSectionBatchItem] = Field(
-        ...,
-        description=Prompts.descriptions["RESUME_SECTION_BATCH_HIGHLIGHTER_OUTPUT"]["final_answer"],
-    )
-
-
-class ResumeSkills(BaseModel):
-    """Pydantic model that defines grouped skills with dynamic subcategories for technical skills and simple list for non-technical."""
-
-    technical_skills: Optional[Dict[str, List[str]]] = Field(
-        default_factory=dict,
-        description=Prompts.descriptions["RESUME_SKILLS"]["technical_skills"]
-    )
-    non_technical_skills: Optional[List[str]] = Field(
-        default_factory=list,
-        description=Prompts.descriptions["RESUME_SKILLS"]["non_technical_skills"]
-    )
-
-
-class ResumeSkillsMatcherOutput(BaseModel):
-    """Pydantic class that defines a list of skills to be returned by the LLM."""
-
-    final_answer: ResumeSkills = Field(
-        description=Prompts.descriptions["RESUME_SKILLS_MATCHER_OUTPUT"]["final_answer"],
-    )
-
-
-class ResumeSummarizerOutput(BaseModel):
-    """Pydantic class that defines a list of skills to be returned by the LLM."""
-
-    final_answer: str = Field(
-        ...,
-        description=Prompts.descriptions["RESUME_OBJECTIVE_OUTPUT"]["final_answer"],
+        description=Prompts.descriptions["RESUME_REPAIR_OUTPUT"]["final_answer"],
     )
 
 
@@ -170,14 +118,6 @@ class ResumeEvidencePlanOutput(BaseModel):
     )
 
 
-class ResumeValidationOutput(BaseModel):
-    """Section-level factual-grounding verdicts for a tailored resume."""
-
-    approved_section_ids: List[str] = Field(default_factory=list)
-    rejected_section_ids: List[str] = Field(default_factory=list)
-    rejected_sections: List["RejectedSectionFeedback"] = Field(default_factory=list)
-
-
 class RejectedSectionFeedback(_ClosedSchema):
     """Validator feedback for one rejected tailored section."""
 
@@ -189,3 +129,11 @@ class RejectedSectionFeedback(_ClosedSchema):
         ...,
         description=Prompts.descriptions["RESUME_REJECTED_SECTION_FEEDBACK"]["reason"],
     )
+
+
+class ResumeValidationOutput(BaseModel):
+    """Section-level factual-grounding verdicts for a tailored resume."""
+
+    approved_section_ids: List[str] = Field(default_factory=list)
+    rejected_section_ids: List[str] = Field(default_factory=list)
+    rejected_sections: List["RejectedSectionFeedback"] = Field(default_factory=list)

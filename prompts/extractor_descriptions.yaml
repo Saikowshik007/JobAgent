@@ -1,26 +1,8 @@
-RESUME_SECTION_HIGHLIGHT:
-  highlight: one highlight
-  relevance: relevance of the bullet point
+RESUME_TAILORED_RESUME_OUTPUT:
+  final_answer: A full, source-grounded tailored resume draft aligned to the target role.
 
-RESUME_SECTION_HIGHLIGHTER_OUTPUT:
-  final_answer: Ranked resume highlights in the requested structured format.
-
-RESUME_SECTION_BATCH_ITEM:
-  section_id: The source section identifier, such as experience:0 or project:1.
-  highlights: Ranked rewritten highlights for that section in the requested structured format.
-
-RESUME_SECTION_BATCH_HIGHLIGHTER_OUTPUT:
-  final_answer: Batched ranked resume highlights grouped by section_id.
-
-RESUME_SKILLS:
-  technical_skills: A dictionary where each key is a technical skill subcategory (e.g., "Languages & Frameworks", "Cloud & DevOps") and the value is a list of relevant skills under that group.
-  non_technical_skills: An itemized list of non-technical skills (simple list, not nested)
-
-RESUME_SKILLS_MATCHER_OUTPUT:
-  final_answer: Deduplicated skills in the requested structured format.
-
-RESUME_OBJECTIVE_OUTPUT:
-  final_answer: A factual, role-targeted professional summary.
+RESUME_REPAIR_OUTPUT:
+  final_answer: A corrected tailored resume draft that fixes validator-rejected sections.
 
 RESUME_EVIDENCE_PLAN_OUTPUT:
   final_answer: Candidate-supported requirement matches with source IDs, safe keywords, match strength, and gaps.

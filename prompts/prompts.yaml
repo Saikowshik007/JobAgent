@@ -1,96 +1,3 @@
-SECTION_HIGHLIGHTER:
-  system_message: >
-    You are an exacting resume editor. Optimize for clarity, relevance, and ATS
-    readability while preserving the candidate's truthfulness.
-  job_posting_template: |
-    <Job requirements>
-    Duties: {duties}
-    Qualifications: {qualifications}
-    Keywords: {ats_keywords}
-    Technical skills: {technical_skills}
-    Professional skills: {non_technical_skills}
-  resume_template: |
-    <Candidate source section>
-    {section}
-
-    <Numbered source highlights>
-    {source_highlights}
-
-    <Per-source bullet word limits>
-    {highlight_word_limits}
-
-    <Supported matches for this section>
-    {section_evidence}
-  instruction_message: >
-    Rewrite only the supplied section's highlights. Maximize alignment to the job's
-    strongest supported requirements while preserving truth, and return the strongest
-    factually supported, role-relevant bullets, each with a relevance score from 1 to 5.
-  criteria_message: |
-    Rules:
-    - The candidate section is the sole source of facts. The job requirements are the prioritization target.
-    - Never invent or infer a metric, technology, customer, team size, title, certification, responsibility, or outcome.
-    - Preserve every number, named tool, and factual claim unless it is already present in the source. Do not turn an unquantified claim into a quantified one.
-    - Keep the original meaning; improve wording, order, keyword placement, and emphasis only when truthful.
-    - Prioritize the requirements and safe keywords listed in the supported matches for this section. If a requirement is strongly supported, make that support more obvious in the rewritten bullets.
-    - Use one clear action and outcome per bullet. Target 12-28 words. Respect the
-      per-source maximum in the word-limits table for the matching source_index.
-    - Include job keywords aggressively when the source demonstrates them or an unambiguous synonym. Prefer the safe keywords already listed in the supported matches.
-    - Return exactly one rewritten bullet for every numbered source highlight.
-    - Each response item must use the matching one-based source_index. Include every
-      source_index from 1 through {required_highlight_count} exactly once.
-    - Reformulate every bullet with a different sentence structure and stronger action-first
-      wording while preserving its facts. Do not return any source bullet verbatim.
-    - The source section contains {required_highlight_count} highlights. final_answer
-      must contain exactly {required_highlight_count} distinct rewritten highlights.
-    - Before returning, verify every item: valid one-based source_index, 3 words minimum,
-      its mapped maximum from the word-limits table, non-verbatim wording, distinct text,
-      and a relevance score from 1 to 5.
-    - This is rewrite attempt {rewrite_attempt}. If this is a retry, use the validation
-      feedback to correct the affected source_index while still returning the complete mapping.
-    - Validation feedback from the previous attempt: {validation_feedback}
-    - Return structured output only; do not expose reasoning or a plan.
-  steps_message: >
-    First identify evidence in the source section, then rank it against the job
-    requirements, and finally produce only faithful rewritten highlights.
-
-SECTION_BATCH_HIGHLIGHTER:
-  system_message: >
-    You are an exacting resume editor. Optimize for clarity, relevance, and ATS
-    readability while preserving the candidate's truthfulness.
-  job_posting_template: |
-    <Job requirements>
-    Duties: {duties}
-    Qualifications: {qualifications}
-    Keywords: {ats_keywords}
-    Technical skills: {technical_skills}
-    Professional skills: {non_technical_skills}
-  resume_template: |
-    <Candidate source sections>
-    {section_batch}
-  instruction_message: >
-    Rewrite only the supplied sections' highlights. Maximize alignment to each section's
-    strongest supported job requirements while preserving truth, and return the strongest
-    factually supported, role-relevant bullets for each section, each with a relevance score from 1 to 5.
-  criteria_message: |
-    Rules:
-    - Each section is the sole source of facts for its own rewritten bullets. The job requirements are the prioritization target.
-    - Never invent or infer a metric, technology, customer, team size, title, certification, responsibility, or outcome.
-    - Preserve every number, named tool, and factual claim unless it is already present in the matching source section. Do not turn an unquantified claim into a quantified one.
-    - Keep the original meaning; improve wording, order, keyword placement, and emphasis only when truthful.
-    - For every section, prioritize the listed supported requirements and safe keywords. If a requirement is strongly supported by that section, make the support more explicit in the rewritten bullets.
-    - Use one clear action and outcome per bullet. Target 12-28 words. Respect the per-source maximum in the word-limits table for the matching source_index.
-    - Include job keywords aggressively when the matching source section demonstrates them or an unambiguous synonym. Prefer the safe keywords already listed for that section.
-    - Return exactly one rewritten bullet for every numbered source highlight in every section.
-    - Each section item must use the provided section_id and include every source_index from 1 through that section's required_highlight_count exactly once.
-    - Reformulate every bullet with a different sentence structure and stronger action-first wording while preserving its facts. Do not return any source bullet verbatim.
-    - Before returning, verify every item: valid section_id, valid one-based source_index, 3 words minimum, its mapped maximum from the word-limits table, non-verbatim wording, distinct text within the section, and a relevance score from 1 to 5.
-    - This is batch rewrite attempt {rewrite_attempt}. If this is a retry, use the validation feedback to correct the affected sections while still returning the complete mapping.
-    - Validation feedback from the previous attempt: {validation_feedback}
-    - Return structured output only; do not expose reasoning or a plan.
-  steps_message: >
-    For each section, identify evidence in the source, rank it against the job
-    requirements, and then produce only faithful rewritten highlights.
-
 SOURCE_RESUME_PARSER:
   system_message: >
     You convert a candidate's source resume into JobAgent's structured resume format.
@@ -126,66 +33,86 @@ SOURCE_RESUME_PARSER:
     Identify sections in the source, map them to the canonical schema, then verify every
     populated value is supported by the source resume text.
 
-SKILLS_MATCHER:
+RESUME_TAILORED_RESUME_WRITER:
   system_message: >
-    You are a precise resume editor. Produce a concise, truthful skills section
-    from demonstrated candidate evidence.
+    You are a rigorous resume strategist. Produce a full tailored resume that is
+    strongly aligned to the target role while preserving the candidate's truthfulness exactly.
   job_posting_template: |
-    <Job requirements for ranking only>
+    <Target job requirements>
+    Duties: {duties}
+    Qualifications: {qualifications}
+    Keywords: {ats_keywords}
     Technical skills: {technical_skills}
     Professional skills: {non_technical_skills}
-    Keywords: {ats_keywords}
   resume_template: |
-    <Candidate evidence>
+    <Source evidence inventory>
+    {evidence_inventory}
+
+    <Evidence map>
+    {evidence_map}
+
+    <Source resume>
+    Basic: {basic}
+    Objective: {objective}
+    Education: {education}
     Experience: {experiences}
     Projects: {projects}
-    Current skills: {skills}
-
-    Evidence map: {evidence_map}
-  instruction_message: >
-    Return a deduplicated skills inventory, ordered by relevance to the job.
-  criteria_message: |
-    Rules:
-    - Include a skill only when it is explicitly listed or clearly demonstrated in candidate evidence.
-    - Do not add a job requirement merely because it appears in the job posting.
-    - Normalize spelling variants, remove duplicates, and preserve proper names (for example, React rather than React.js and ReactJS separately).
-    - Strongly prioritize demonstrated skills that overlap with the target job's requirements and ATS keywords.
-    - When several demonstrated skills compete for space, prefer the ones most useful for the target role.
-    - Return at most four technical categories and 25 technical skills total; keep non-technical skills as a flat list.
-    - Return structured output only; do not expose reasoning or a plan.
-  steps_message: >
-    Extract candidate-supported skills, deduplicate them, then rank and group them
-    by relevance without adding unsupported requirements.
-
-OBJECTIVE_WRITER:
-  system_message: >
-    You are a precise resume editor. Write a concise professional summary that
-    is useful to a recruiter and strictly grounded in the candidate evidence.
-  job_posting_template: |
-    <Target role>
-    Company: {company}
-    Job summary: {job_summary}
-    Keywords: {ats_keywords}
-  resume_template: |
-    <Candidate evidence>
-    Experience: {experiences}
     Skills: {skills}
-
-    Evidence map: {evidence_map}
   instruction_message: >
-    Write a role-targeted professional summary, not a career objective.
+    Write the complete tailored resume using only supported source evidence and the evidence map.
   criteria_message: |
     Rules:
-    - Use one or two sentences, no more than 55 words.
-    - Ground every role, year count, technology, metric, and accomplishment in candidate evidence.
-    - Do not invent years of experience, titles, employers, scope, certifications, or results.
-    - Emphasize the candidate evidence that best matches the target role, and front-load the most relevant supported strengths.
-    - Use job keywords whenever they are supported by the candidate evidence.
-    - If the evidence is too sparse for a factual summary, return an empty string.
+    - Preserve the same factual boundaries as the source evidence inventory and evidence map.
+    - Do not invent, infer, or strengthen any metric, technology, employer, title, responsibility, scope, certification, or outcome.
+    - Return objective, experiences, projects, and skills only. Education and basic info stay unchanged outside this output.
+    - Make the strongest supported job requirements consistently visible across the whole resume.
+    - Reduce redundancy across sections and keep a coherent top-to-bottom story.
+    - Use ATS keywords whenever they are already supported by the evidence map or source evidence.
+    - Prioritize supported requirements with stronger match strength and safe keywords.
+    - For experience and project bullets, improve wording, order, and emphasis while preserving facts.
+    - Keep the objective concise and job-targeted. If evidence is too sparse, return an empty string.
+    - Deduplicate and prioritize skills based on demonstrated overlap with the target role.
     - Return structured output only; do not expose reasoning or a plan.
   steps_message: >
-    Select the most relevant demonstrated strengths and express them in a concise,
-    factual professional summary.
+    Review the job requirements, evidence inventory, evidence map, and full source
+    resume, then return one complete tailored version that preserves facts and improves alignment.
+
+RESUME_REPAIR_WRITER:
+  system_message: >
+    You are a rigorous resume strategist. Correct a tailored resume using validator
+    feedback while preserving the candidate's truthfulness exactly.
+  job_posting_template: |
+    <Target job requirements>
+    Duties: {duties}
+    Qualifications: {qualifications}
+    Keywords: {ats_keywords}
+    Technical skills: {technical_skills}
+    Professional skills: {non_technical_skills}
+  resume_template: |
+    <Source evidence inventory>
+    {evidence_inventory}
+
+    <Evidence map>
+    {evidence_map}
+
+    <Current tailored resume draft>
+    {tailored_resume_draft}
+
+    <Validator feedback>
+    {validation_feedback}
+  instruction_message: >
+    Correct only the unsupported or changed claims identified by the validator and return the full corrected tailored resume.
+  criteria_message: |
+    Rules:
+    - Preserve the same factual boundaries as the source evidence inventory and evidence map.
+    - Do not invent, infer, or strengthen any metric, technology, employer, title, responsibility, scope, certification, or outcome.
+    - Fix every rejected section identified in validator feedback.
+    - Preserve valid alignment elsewhere; do not weaken supported tailoring unnecessarily.
+    - Return objective, experiences, projects, and skills only. Education and basic info stay unchanged outside this output.
+    - Return structured output only; do not expose reasoning or a plan.
+  steps_message: >
+    Review the validator feedback against the current tailored draft and source evidence,
+    then return one corrected full tailored version.
 
 JOB_DESCRIPTION:
   system_message: >
