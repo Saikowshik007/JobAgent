@@ -45,7 +45,7 @@ class ResumeImprover:
         self.evidence_inventory = []
         self.evidence_plan = []
 
-        # Thread pool for running sync LLM calls
+        # Thread pool for running sync LLM calls.
         self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
 
     def create_complete_tailored_resume(self, include_objective) -> str:
@@ -217,6 +217,8 @@ class ResumeImprover:
                 self.user,
                 "RESUME_GROUNDING_VALIDATOR",
                 ResumeValidationOutput,
+                timeout_seconds=45.0,
+                max_retries=1,
                 **self._get_prompt_inputs(tailored_sections=tailored_sections),
             )
             valid_ids = {item["section_id"] for item in self.evidence_inventory}
@@ -493,7 +495,12 @@ class ResumeImprover:
 
             prompt_inputs = self._get_prompt_inputs()
             result = invoke_structured(
-                self.user, "OBJECTIVE_WRITER", ResumeSummarizerOutput, **prompt_inputs
+                self.user,
+                "OBJECTIVE_WRITER",
+                ResumeSummarizerOutput,
+                timeout_seconds=30.0,
+                max_retries=1,
+                **prompt_inputs,
             )
             if result:
                 # Handle both Pydantic model and dictionary responses
@@ -531,6 +538,8 @@ class ResumeImprover:
                 self.user,
                 "SKILLS_MATCHER",
                 ResumeSkillsMatcherOutput,
+                timeout_seconds=30.0,
+                max_retries=1,
                 **self._get_prompt_inputs(),
             )
 
@@ -612,21 +621,7 @@ class ResumeImprover:
                 return []
 
             logger.info("resume_experience_rewrite_started", extra={"resume.experience_count": len(self.experiences)})
-            result = []
-            for i, exp in enumerate(self.experiences):
-                exp = dict(exp)
-
-                original_highlights = exp.get("highlights", [])
-                logger.debug("resume_section_rewrite_started", extra={"section.id": f"experience:{i}", "source.highlight_count": len(original_highlights)})
-
-                if not original_highlights:
-                    result.append(exp)
-                    continue
-
-                new_highlights = self.rewrite_section(section=exp, section_id=f"experience:{i}", **chain_kwargs)
-                exp["highlights"] = new_highlights
-
-                result.append(exp)
+            result = self._rewrite_sections_parallel(self.experiences, "experience", **chain_kwargs)
 
             logger.info("resume_experience_rewrite_completed", extra={"resume.experience_count": len(result)})
             return result
@@ -642,27 +637,52 @@ class ResumeImprover:
                 return []
 
             logger.info("resume_project_rewrite_started", extra={"resume.project_count": len(self.projects)})
-            result = []
-            for i, proj in enumerate(self.projects):
-                proj = dict(proj)
-
-                original_highlights = proj.get("highlights", [])
-                logger.debug("resume_section_rewrite_started", extra={"section.id": f"project:{i}", "source.highlight_count": len(original_highlights)})
-
-                if not original_highlights:
-                    result.append(proj)
-                    continue
-
-                new_highlights = self.rewrite_section(section=proj, section_id=f"project:{i}", **chain_kwargs)
-                proj["highlights"] = new_highlights
-
-                result.append(proj)
+            result = self._rewrite_sections_parallel(self.projects, "project", **chain_kwargs)
 
             logger.info("resume_project_rewrite_completed", extra={"resume.project_count": len(result)})
             return result
         except Exception as error:
             logger.error("resume_project_rewrite_failed", extra={"error.reason": str(error)})
             raise RuntimeError(f"Project bullet rewriting failed: {error}") from error
+
+    def _rewrite_sections_parallel(self, sections: list, section_kind: str, **chain_kwargs) -> list:
+        """Rewrite same-type resume sections concurrently while preserving order."""
+        rewritten_sections = [None] * len(sections)
+        sections_to_rewrite = []
+
+        for index, raw_section in enumerate(sections):
+            section = dict(raw_section)
+            original_highlights = section.get("highlights", [])
+            section_id = f"{section_kind}:{index}"
+            logger.debug(
+                "resume_section_rewrite_started",
+                extra={"section.id": section_id, "source.highlight_count": len(original_highlights)},
+            )
+            if not original_highlights:
+                rewritten_sections[index] = section
+                continue
+            sections_to_rewrite.append((index, section, section_id))
+
+        if not sections_to_rewrite:
+            return rewritten_sections
+
+        max_workers = min(4, len(sections_to_rewrite))
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_section = {
+                executor.submit(self.rewrite_section, section=section, section_id=section_id, **chain_kwargs): (index, section, section_id)
+                for index, section, section_id in sections_to_rewrite
+            }
+            for future in concurrent.futures.as_completed(future_to_section):
+                index, section, section_id = future_to_section[future]
+                try:
+                    updated_section = dict(section)
+                    updated_section["highlights"] = future.result()
+                    rewritten_sections[index] = updated_section
+                except Exception as error:
+                    logger.error("resume_section_parallel_rewrite_failed", extra={"section.id": section_id, "error.reason": str(error)})
+                    raise
+
+        return rewritten_sections
 
     def rewrite_section(self, section, section_id: str = "", **chain_kwargs) -> list:
         """Rewrite a section of the resume."""
@@ -695,6 +715,8 @@ class ResumeImprover:
                     self.user,
                     "SECTION_HIGHLIGHTER",
                     ResumeSectionHighlighterOutput,
+                    timeout_seconds=30.0,
+                    max_retries=1,
                     **prompt_inputs,
                 )
 

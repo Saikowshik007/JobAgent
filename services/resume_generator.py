@@ -71,6 +71,12 @@ class ResumeGenerator:
             job_dict, resume_id, user, template, customize, resume_data, existing_resumes, handle_existing, include_objective
         ))
 
+        estimated_completion_seconds = self._estimate_completion_seconds(
+            resume_data=resume_data,
+            customize=customize,
+            include_objective=include_objective,
+        )
+
         return {
             "status": "generating",
             "message": f"Resume generation started for job {job_dict.get('job_title', 'Unknown')} at {job_dict.get('company', 'Unknown')}",
@@ -81,7 +87,7 @@ class ResumeGenerator:
             "existing_resumes_count": len(existing_resumes),
             "handle_existing": handle_existing,
             "include_objective": include_objective,
-            "estimated_completion_seconds": 60
+            "estimated_completion_seconds": estimated_completion_seconds,
         }
     async def _generate_resume_background(self, job_dict: dict, resume_id: str, user: User, template: str,
                                           customize: bool, resume_data: Optional[Dict[str, Any]],
@@ -265,6 +271,35 @@ class ResumeGenerator:
         resume_improver.skills = self.get_dict_field("skills", resume_data)
         resume_improver.objective = self.get_dict_field("objective", resume_data)
         resume_improver.degrees = resume_improver._get_degrees(resume_data)
+
+    def _estimate_completion_seconds(
+        self,
+        resume_data: Dict[str, Any],
+        customize: bool,
+        include_objective: bool,
+    ) -> int:
+        """Return a coarse user-facing estimate based on rewrite workload."""
+        if not customize:
+            return 10
+
+        experiences = self.get_dict_field("experiences", resume_data) or []
+        projects = self.get_dict_field("projects", resume_data) or []
+        sections_with_highlights = sum(
+            1 for section in [*experiences, *projects]
+            if isinstance(section, dict) and section.get("highlights")
+        )
+        parallel_rewrite_batches = 0
+        if any(isinstance(section, dict) and section.get("highlights") for section in experiences):
+            parallel_rewrite_batches += 1
+        if any(isinstance(section, dict) and section.get("highlights") for section in projects):
+            parallel_rewrite_batches += 1
+
+        estimate = 25
+        estimate += 8 if include_objective else 0
+        estimate += 8
+        estimate += 12 * parallel_rewrite_batches
+        estimate += 2 * max(0, sections_with_highlights - parallel_rewrite_batches)
+        return min(180, max(30, estimate))
 
     async def check_resume_status(self, resume_id: str, user_id:str) -> Dict[str, Any]:
         """Check the status of a resume generation process."""
