@@ -175,3 +175,17 @@ class ResumeValidationOutput(BaseModel):
 
     approved_section_ids: List[str] = Field(default_factory=list)
     rejected_section_ids: List[str] = Field(default_factory=list)
+    rejected_sections: List["RejectedSectionFeedback"] = Field(default_factory=list)
+
+
+class RejectedSectionFeedback(_ClosedSchema):
+    """Validator feedback for one rejected tailored section."""
+
+    section_id: str = Field(
+        ...,
+        description=Prompts.descriptions["RESUME_REJECTED_SECTION_FEEDBACK"]["section_id"],
+    )
+    reason: str = Field(
+        ...,
+        description=Prompts.descriptions["RESUME_REJECTED_SECTION_FEEDBACK"]["reason"],
+    )

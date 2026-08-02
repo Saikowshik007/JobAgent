@@ -225,37 +225,146 @@ class ResumeImprover:
         }
 
     def _validate_tailored_resume(self, tailored_resume: dict) -> dict:
-        """Require the final factual-grounding review to approve every tailored section."""
+        """Attempt targeted correction for rejected sections, then revert only if still invalid."""
         if not self.evidence_inventory:
             return tailored_resume
         try:
             from dataModels.resume import ResumeValidationOutput
             from services.langchain_helpers import invoke_structured
 
-            tailored_sections = {
-                "objective": tailored_resume["objective"],
-                "skills": tailored_resume["skills"],
-                **{f"experience:{index}": item for index, item in enumerate(tailored_resume["experiences"])},
-                **{f"project:{index}": item for index, item in enumerate(tailored_resume["projects"])},
-            }
-            result = invoke_structured(
-                self.user,
-                "RESUME_GROUNDING_VALIDATOR",
-                ResumeValidationOutput,
-                timeout_seconds=45.0,
-                max_retries=1,
-                **self._get_prompt_inputs(tailored_sections=tailored_sections),
-            )
+            result = self._run_grounding_validation(tailored_resume, ResumeValidationOutput)
             valid_ids = {item["section_id"] for item in self.evidence_inventory}
             rejected_ids = set(result.rejected_section_ids) & valid_ids
             if rejected_ids:
-                raise ValueError(
-                    "Grounding review rejected tailored sections: "
-                    + ", ".join(sorted(rejected_ids))
-                )
+                rejection_feedback = self._validation_feedback_by_section(result, valid_ids)
+                logger.warning("resume_grounding_sections_repair_requested", extra={"rejected.section_ids": sorted(rejected_ids)})
+                repaired_resume = self._repair_rejected_sections(tailored_resume, rejection_feedback)
+                repair_result = self._run_grounding_validation(repaired_resume, ResumeValidationOutput)
+                still_rejected_ids = set(repair_result.rejected_section_ids) & valid_ids
+                if still_rejected_ids:
+                    logger.warning(
+                        "resume_grounding_sections_reverted",
+                        extra={"rejected.section_ids": sorted(still_rejected_ids)},
+                    )
+                    repaired_resume = self._revert_rejected_sections(repaired_resume, still_rejected_ids)
+                tailored_resume = repaired_resume
         except Exception as error:
             logger.error("Grounding validation failed: %s", error)
             raise RuntimeError(f"Final grounding validation failed: {error}") from error
+        return tailored_resume
+
+    def _run_grounding_validation(self, tailored_resume: dict, schema):
+        """Run the grounding validator over the current tailored resume."""
+        from services.langchain_helpers import invoke_structured
+
+        tailored_sections = {
+            "objective": tailored_resume["objective"],
+            "skills": tailored_resume["skills"],
+            **{f"experience:{index}": item for index, item in enumerate(tailored_resume["experiences"])},
+            **{f"project:{index}": item for index, item in enumerate(tailored_resume["projects"])},
+        }
+        return invoke_structured(
+            self.user,
+            "RESUME_GROUNDING_VALIDATOR",
+            schema,
+            timeout_seconds=45.0,
+            max_retries=1,
+            **self._get_prompt_inputs(tailored_sections=tailored_sections),
+        )
+
+    def _validation_feedback_by_section(self, validation_result, valid_ids: set[str]) -> dict[str, str]:
+        """Extract validator repair feedback keyed by section ID."""
+        feedback = {}
+        for item in getattr(validation_result, "rejected_sections", []) or []:
+            if hasattr(item, "model_dump"):
+                item = item.model_dump()
+            if not isinstance(item, dict):
+                continue
+            section_id = item.get("section_id")
+            reason = item.get("reason")
+            if section_id in valid_ids and isinstance(reason, str) and reason.strip():
+                feedback[section_id] = " ".join(reason.split())
+        return feedback
+
+    def _repair_rejected_sections(self, tailored_resume: dict, rejection_feedback: dict[str, str]) -> dict:
+        """Retry only the rejected sections using validator feedback."""
+        evidence_by_id = {
+            item["section_id"]: item["content"]
+            for item in self.evidence_inventory
+            if isinstance(item, dict) and item.get("section_id")
+        }
+
+        for section_id, reason in rejection_feedback.items():
+            source_content = evidence_by_id.get(section_id)
+            if source_content is None:
+                continue
+
+            if section_id == "objective":
+                repaired_objective = self.write_objective(validation_feedback_override=reason)
+                tailored_resume["objective"] = repaired_objective or source_content
+                continue
+            if section_id == "skills":
+                repaired_skills = self.extract_matched_skills(validation_feedback_override=reason)
+                tailored_resume["skills"] = repaired_skills or source_content
+                continue
+
+            try:
+                section_kind, raw_index = section_id.split(":", 1)
+                section_index = int(raw_index)
+            except (ValueError, AttributeError):
+                continue
+
+            if section_kind not in {"experience", "project"}:
+                continue
+
+            repaired_highlights = self.rewrite_section(
+                section=source_content,
+                section_id=section_id,
+                validation_feedback_override=reason,
+            )
+            container_key = "experiences" if section_kind == "experience" else "projects"
+            if 0 <= section_index < len(tailored_resume.get(container_key, [])):
+                updated_section = dict(source_content)
+                updated_section["highlights"] = repaired_highlights
+                tailored_resume[container_key][section_index] = updated_section
+
+        metadata = tailored_resume.setdefault("metadata", {})
+        metadata["grounding_repair_attempted_sections"] = sorted(rejection_feedback)
+        return tailored_resume
+
+    def _revert_rejected_sections(self, tailored_resume: dict, rejected_ids: set[str]) -> dict:
+        """Restore validator-rejected sections from the original source evidence."""
+        evidence_by_id = {
+            item["section_id"]: item["content"]
+            for item in self.evidence_inventory
+            if isinstance(item, dict) and item.get("section_id")
+        }
+
+        for section_id in rejected_ids:
+            source_content = evidence_by_id.get(section_id)
+            if source_content is None:
+                continue
+
+            if section_id == "objective":
+                tailored_resume["objective"] = source_content
+                continue
+            if section_id == "skills":
+                tailored_resume["skills"] = source_content
+                continue
+
+            try:
+                section_kind, raw_index = section_id.split(":", 1)
+                section_index = int(raw_index)
+            except (ValueError, AttributeError):
+                continue
+
+            if section_kind == "experience" and 0 <= section_index < len(tailored_resume.get("experiences", [])):
+                tailored_resume["experiences"][section_index] = source_content
+            elif section_kind == "project" and 0 <= section_index < len(tailored_resume.get("projects", [])):
+                tailored_resume["projects"][section_index] = source_content
+
+        metadata = tailored_resume.setdefault("metadata", {})
+        metadata["grounding_reverted_sections"] = sorted(rejected_ids)
         return tailored_resume
 
     async def _generate_content_async_parallel(self, include_objective: bool = True) -> Dict:
@@ -482,6 +591,8 @@ class ResumeImprover:
             from services.langchain_helpers import invoke_structured
 
             prompt_inputs = self._get_prompt_inputs()
+            if chain_kwargs.get("validation_feedback_override"):
+                prompt_inputs["validation_feedback"] = chain_kwargs["validation_feedback_override"]
             result = invoke_structured(
                 self.user,
                 "OBJECTIVE_WRITER",
@@ -522,13 +633,17 @@ class ResumeImprover:
             from dataModels.resume import ResumeSkillsMatcherOutput
             from services.langchain_helpers import invoke_structured
 
+            prompt_inputs = self._get_prompt_inputs()
+            if chain_kwargs.get("validation_feedback_override"):
+                prompt_inputs["validation_feedback"] = chain_kwargs["validation_feedback_override"]
+
             extracted_skills = invoke_structured(
                 self.user,
                 "SKILLS_MATCHER",
                 ResumeSkillsMatcherOutput,
                 timeout_seconds=30.0,
                 max_retries=1,
-                **self._get_prompt_inputs(),
+                **prompt_inputs,
             )
 
             if not extracted_skills:
@@ -780,10 +895,11 @@ class ResumeImprover:
                     for index, highlight in enumerate(original_highlights, start=1)
                 ),
             )
+            feedback_override = chain_kwargs.get("validation_feedback_override")
             last_error = None
             for rewrite_attempt in range(1, 3):
                 prompt_inputs["rewrite_attempt"] = rewrite_attempt
-                prompt_inputs["validation_feedback"] = str(last_error or "None; produce the complete mapping.")
+                prompt_inputs["validation_feedback"] = str(last_error or feedback_override or "None; produce the complete mapping.")
                 logger.debug("resume_section_rewrite_attempt", extra={"section.id": section_id, "rewrite.attempt": rewrite_attempt})
                 section_revised = invoke_structured(
                     self.user,

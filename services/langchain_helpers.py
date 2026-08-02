@@ -1,5 +1,7 @@
 from datetime import datetime
 import json
+import os
+import time
 from dateutil import parser as dateparser
 from dateutil.relativedelta import relativedelta
 from openai import APIError, BadRequestError, OpenAI
@@ -7,6 +9,49 @@ from prompts import Prompts
 import config
 
 logger = config.getLogger("llm_helper")
+
+_LOG_LLM_FLOW = os.getenv("LOG_LLM_FLOW", "true").lower() in {"1", "true", "yes", "on"}
+_LOG_LLM_PROMPTS = os.getenv("LOG_LLM_PROMPTS", "false").lower() in {"1", "true", "yes", "on"}
+_LOG_LLM_RESPONSES = os.getenv("LOG_LLM_RESPONSES", "false").lower() in {"1", "true", "yes", "on"}
+_LOG_LLM_MAX_CHARS = int(os.getenv("LOG_LLM_MAX_CHARS", "4000"))
+
+
+def _truncate_for_log(value, limit: int = _LOG_LLM_MAX_CHARS):
+    """Bound log payload size so one model call does not flood the log stream."""
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        value = json.dumps(value, ensure_ascii=False, default=str)
+    if len(value) <= limit:
+        return value
+    return value[:limit] + f"... [truncated {len(value) - limit} chars]"
+
+
+def _safe_prompt_preview(messages):
+    """Render provider-neutral messages into a bounded log preview."""
+    preview = []
+    for message in messages or []:
+        if not isinstance(message, dict):
+            continue
+        preview.append({
+            "role": message.get("role"),
+            "content": _truncate_for_log(message.get("content", "")),
+        })
+    return preview
+
+
+def _safe_response_preview(response):
+    """Serialize the parsed model response for logs."""
+    if response is None:
+        return None
+    if hasattr(response, "output_parsed") and response.output_parsed is not None:
+        parsed = response.output_parsed
+    else:
+        parsed = response
+
+    if hasattr(parsed, "model_dump"):
+        parsed = parsed.model_dump()
+    return _truncate_for_log(parsed)
 
 
 def invoke_structured(
@@ -20,6 +65,7 @@ def invoke_structured(
 ):
     """Generate and validate a structured response with the official OpenAI SDK."""
     preferences = user.preferences or {}
+    call_started_at = time.perf_counter()
     request = {
         "model": user.model,
         "input": Prompts.render_messages(prompt_type, **prompt_values),
@@ -29,6 +75,27 @@ def invoke_structured(
     temperature = preferences.get("temperature")
     if temperature is not None:
         request["temperature"] = temperature
+    if _LOG_LLM_FLOW:
+        logger.info(
+            "llm_request_started",
+            extra={
+                "prompt.type": prompt_type,
+                "model.name": user.model,
+                "timeout.seconds": timeout_seconds,
+                "max_retries": max_retries,
+                "schema.name": getattr(schema, "__name__", str(schema)),
+                "llm.input_keys": sorted(prompt_values.keys()),
+                "llm.temperature": temperature,
+            },
+        )
+        if _LOG_LLM_PROMPTS:
+            logger.info(
+                "llm_request_prompt",
+                extra={
+                    "prompt.type": prompt_type,
+                    "llm.prompt_preview": _safe_prompt_preview(request["input"]),
+                },
+            )
     try:
         client = OpenAI(
             api_key=user.api_key,
@@ -45,11 +112,49 @@ def invoke_structured(
             response = client.responses.parse(**request)
         if response.output_parsed is None:
             raise ValueError("Model returned no structured output")
+        if _LOG_LLM_FLOW:
+            logger.info(
+                "llm_request_completed",
+                extra={
+                    "prompt.type": prompt_type,
+                    "model.name": user.model,
+                    "event.duration_ms": round((time.perf_counter() - call_started_at) * 1000, 2),
+                },
+            )
+            if _LOG_LLM_RESPONSES:
+                logger.info(
+                    "llm_response_parsed",
+                    extra={
+                        "prompt.type": prompt_type,
+                        "llm.response_preview": _safe_response_preview(response),
+                    },
+                )
         return response.output_parsed
     except APIError as e:
+        if _LOG_LLM_FLOW:
+            logger.warning(
+                "llm_request_api_error",
+                extra={
+                    "prompt.type": prompt_type,
+                    "model.name": user.model,
+                    "event.duration_ms": round((time.perf_counter() - call_started_at) * 1000, 2),
+                    "timeout.seconds": timeout_seconds,
+                    "error.reason": str(e),
+                },
+            )
         logger.warning("llm_request_failed", extra={"prompt.type": prompt_type, "timeout.seconds": timeout_seconds, "error.reason": str(e)})
         raise
     except Exception as e:
+        if _LOG_LLM_FLOW:
+            logger.error(
+                "llm_request_unhandled_error",
+                extra={
+                    "prompt.type": prompt_type,
+                    "model.name": user.model,
+                    "event.duration_ms": round((time.perf_counter() - call_started_at) * 1000, 2),
+                    "error.reason": str(e),
+                },
+            )
         logger.error("llm_structured_generation_failed", extra={"prompt.type": prompt_type, "error.reason": str(e)})
         raise
 

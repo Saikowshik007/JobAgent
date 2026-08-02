@@ -9,6 +9,10 @@ services:
       REDIS_URL: redis://redis:6379/0
       HOST: 0.0.0.0
       PORT: 8000
+      LOG_LLM_FLOW: ${LOG_LLM_FLOW:-true}
+      LOG_LLM_PROMPTS: ${LOG_LLM_PROMPTS:-false}
+      LOG_LLM_RESPONSES: ${LOG_LLM_RESPONSES:-false}
+      LOG_LLM_MAX_CHARS: ${LOG_LLM_MAX_CHARS:-4000}
     ports:
       - "${API_PORT:-8000}:8000"
     labels:

@@ -25,6 +25,10 @@ RESUME_OBJECTIVE_OUTPUT:
 RESUME_EVIDENCE_PLAN_OUTPUT:
   final_answer: Candidate-supported requirement matches with source IDs, safe keywords, match strength, and gaps.
 
+RESUME_REJECTED_SECTION_FEEDBACK:
+  section_id: The tailored section identifier that failed grounding review.
+  reason: Short factual correction feedback describing what unsupported or changed claim must be fixed.
+
 JOB_DESCRIPTION:
   company: >
     Name of the company that has the job opening
