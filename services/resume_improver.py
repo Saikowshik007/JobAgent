@@ -192,7 +192,7 @@ class ResumeImprover:
                 ResumeEvidencePlanOutput,
                 # Evidence planning reads the full source inventory. Give it one
                 # longer attempt instead of several 60-second retries.
-                timeout_seconds=120.0,
+                timeout_seconds=150.0,
                 max_retries=1,
                 **self._get_prompt_inputs(),
             )
@@ -267,7 +267,7 @@ class ResumeImprover:
             self.user,
             "RESUME_GROUNDING_VALIDATOR",
             schema,
-            timeout_seconds=45.0,
+            timeout_seconds=75.0,
             max_retries=1,
             **self._get_prompt_inputs(tailored_sections=tailored_sections),
         )
@@ -597,7 +597,7 @@ class ResumeImprover:
                 self.user,
                 "OBJECTIVE_WRITER",
                 ResumeSummarizerOutput,
-                timeout_seconds=30.0,
+                timeout_seconds=45.0,
                 max_retries=1,
                 **prompt_inputs,
             )
@@ -641,7 +641,7 @@ class ResumeImprover:
                 self.user,
                 "SKILLS_MATCHER",
                 ResumeSkillsMatcherOutput,
-                timeout_seconds=30.0,
+                timeout_seconds=45.0,
                 max_retries=1,
                 **prompt_inputs,
             )
@@ -846,7 +846,7 @@ class ResumeImprover:
                     self.user,
                     "SECTION_BATCH_HIGHLIGHTER",
                     ResumeSectionBatchHighlighterOutput,
-                    timeout_seconds=45.0,
+                    timeout_seconds=75.0,
                     max_retries=1,
                     **prompt_inputs,
                 )
@@ -905,7 +905,7 @@ class ResumeImprover:
                     self.user,
                     "SECTION_HIGHLIGHTER",
                     ResumeSectionHighlighterOutput,
-                    timeout_seconds=30.0,
+                    timeout_seconds=60.0,
                     max_retries=1,
                     **prompt_inputs,
                 )

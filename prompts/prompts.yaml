@@ -22,17 +22,19 @@ SECTION_HIGHLIGHTER:
     <Supported matches for this section>
     {section_evidence}
   instruction_message: >
-    Rewrite only the supplied section's highlights. Return the strongest
+    Rewrite only the supplied section's highlights. Maximize alignment to the job's
+    strongest supported requirements while preserving truth, and return the strongest
     factually supported, role-relevant bullets, each with a relevance score from 1 to 5.
   criteria_message: |
     Rules:
-    - The candidate section is the sole source of facts. The job requirements are only a prioritization signal.
+    - The candidate section is the sole source of facts. The job requirements are the prioritization target.
     - Never invent or infer a metric, technology, customer, team size, title, certification, responsibility, or outcome.
     - Preserve every number, named tool, and factual claim unless it is already present in the source. Do not turn an unquantified claim into a quantified one.
-    - Keep the original meaning; improve wording, order, and keyword placement only when truthful.
+    - Keep the original meaning; improve wording, order, keyword placement, and emphasis only when truthful.
+    - Prioritize the requirements and safe keywords listed in the supported matches for this section. If a requirement is strongly supported, make that support more obvious in the rewritten bullets.
     - Use one clear action and outcome per bullet. Target 12-28 words. Respect the
       per-source maximum in the word-limits table for the matching source_index.
-    - Include a job keyword only when the source demonstrates it or an unambiguous synonym.
+    - Include job keywords aggressively when the source demonstrates them or an unambiguous synonym. Prefer the safe keywords already listed in the supported matches.
     - Return exactly one rewritten bullet for every numbered source highlight.
     - Each response item must use the matching one-based source_index. Include every
       source_index from 1 through {required_highlight_count} exactly once.
@@ -66,16 +68,18 @@ SECTION_BATCH_HIGHLIGHTER:
     <Candidate source sections>
     {section_batch}
   instruction_message: >
-    Rewrite only the supplied sections' highlights. Return the strongest factually
-    supported, role-relevant bullets for each section, each with a relevance score from 1 to 5.
+    Rewrite only the supplied sections' highlights. Maximize alignment to each section's
+    strongest supported job requirements while preserving truth, and return the strongest
+    factually supported, role-relevant bullets for each section, each with a relevance score from 1 to 5.
   criteria_message: |
     Rules:
-    - Each section is the sole source of facts for its own rewritten bullets. The job requirements are only a prioritization signal.
+    - Each section is the sole source of facts for its own rewritten bullets. The job requirements are the prioritization target.
     - Never invent or infer a metric, technology, customer, team size, title, certification, responsibility, or outcome.
     - Preserve every number, named tool, and factual claim unless it is already present in the matching source section. Do not turn an unquantified claim into a quantified one.
-    - Keep the original meaning; improve wording, order, and keyword placement only when truthful.
+    - Keep the original meaning; improve wording, order, keyword placement, and emphasis only when truthful.
+    - For every section, prioritize the listed supported requirements and safe keywords. If a requirement is strongly supported by that section, make the support more explicit in the rewritten bullets.
     - Use one clear action and outcome per bullet. Target 12-28 words. Respect the per-source maximum in the word-limits table for the matching source_index.
-    - Include a job keyword only when the matching source section demonstrates it or an unambiguous synonym.
+    - Include job keywords aggressively when the matching source section demonstrates them or an unambiguous synonym. Prefer the safe keywords already listed for that section.
     - Return exactly one rewritten bullet for every numbered source highlight in every section.
     - Each section item must use the provided section_id and include every source_index from 1 through that section's required_highlight_count exactly once.
     - Reformulate every bullet with a different sentence structure and stronger action-first wording while preserving its facts. Do not return any source bullet verbatim.
@@ -145,6 +149,8 @@ SKILLS_MATCHER:
     - Include a skill only when it is explicitly listed or clearly demonstrated in candidate evidence.
     - Do not add a job requirement merely because it appears in the job posting.
     - Normalize spelling variants, remove duplicates, and preserve proper names (for example, React rather than React.js and ReactJS separately).
+    - Strongly prioritize demonstrated skills that overlap with the target job's requirements and ATS keywords.
+    - When several demonstrated skills compete for space, prefer the ones most useful for the target role.
     - Return at most four technical categories and 25 technical skills total; keep non-technical skills as a flat list.
     - Return structured output only; do not expose reasoning or a plan.
   steps_message: >
@@ -173,7 +179,8 @@ OBJECTIVE_WRITER:
     - Use one or two sentences, no more than 55 words.
     - Ground every role, year count, technology, metric, and accomplishment in candidate evidence.
     - Do not invent years of experience, titles, employers, scope, certifications, or results.
-    - Use job keywords only when supported by the candidate evidence.
+    - Emphasize the candidate evidence that best matches the target role, and front-load the most relevant supported strengths.
+    - Use job keywords whenever they are supported by the candidate evidence.
     - If the evidence is too sparse for a factual summary, return an empty string.
     - Return structured output only; do not expose reasoning or a plan.
   steps_message: >
