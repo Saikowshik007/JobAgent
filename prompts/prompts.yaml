@@ -51,6 +51,42 @@ SECTION_HIGHLIGHTER:
     First identify evidence in the source section, then rank it against the job
     requirements, and finally produce only faithful rewritten highlights.
 
+SECTION_BATCH_HIGHLIGHTER:
+  system_message: >
+    You are an exacting resume editor. Optimize for clarity, relevance, and ATS
+    readability while preserving the candidate's truthfulness.
+  job_posting_template: |
+    <Job requirements>
+    Duties: {duties}
+    Qualifications: {qualifications}
+    Keywords: {ats_keywords}
+    Technical skills: {technical_skills}
+    Professional skills: {non_technical_skills}
+  resume_template: |
+    <Candidate source sections>
+    {section_batch}
+  instruction_message: >
+    Rewrite only the supplied sections' highlights. Return the strongest factually
+    supported, role-relevant bullets for each section, each with a relevance score from 1 to 5.
+  criteria_message: |
+    Rules:
+    - Each section is the sole source of facts for its own rewritten bullets. The job requirements are only a prioritization signal.
+    - Never invent or infer a metric, technology, customer, team size, title, certification, responsibility, or outcome.
+    - Preserve every number, named tool, and factual claim unless it is already present in the matching source section. Do not turn an unquantified claim into a quantified one.
+    - Keep the original meaning; improve wording, order, and keyword placement only when truthful.
+    - Use one clear action and outcome per bullet. Target 12-28 words. Respect the per-source maximum in the word-limits table for the matching source_index.
+    - Include a job keyword only when the matching source section demonstrates it or an unambiguous synonym.
+    - Return exactly one rewritten bullet for every numbered source highlight in every section.
+    - Each section item must use the provided section_id and include every source_index from 1 through that section's required_highlight_count exactly once.
+    - Reformulate every bullet with a different sentence structure and stronger action-first wording while preserving its facts. Do not return any source bullet verbatim.
+    - Before returning, verify every item: valid section_id, valid one-based source_index, 3 words minimum, its mapped maximum from the word-limits table, non-verbatim wording, distinct text within the section, and a relevance score from 1 to 5.
+    - This is batch rewrite attempt {rewrite_attempt}. If this is a retry, use the validation feedback to correct the affected sections while still returning the complete mapping.
+    - Validation feedback from the previous attempt: {validation_feedback}
+    - Return structured output only; do not expose reasoning or a plan.
+  steps_message: >
+    For each section, identify evidence in the source, rank it against the job
+    requirements, and then produce only faithful rewritten highlights.
+
 SOURCE_RESUME_PARSER:
   system_message: >
     You convert a candidate's source resume into JobAgent's structured resume format.

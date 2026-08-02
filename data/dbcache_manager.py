@@ -549,6 +549,32 @@ class DBCacheManager:
         except Exception as e:
             logger.error(f"Error removing resume status for user {user_id}: {e}")
 
+    async def get_resume_plan(self, user_id: str, plan_key: str) -> Optional[Dict]:
+        """Get reusable resume planning artifacts from Redis cache."""
+        try:
+            if self.cache:
+                return await self.cache.get_resume_plan(user_id, plan_key)
+            return None
+        except Exception as e:
+            logger.error(f"Error getting resume plan for user {user_id}: {e}")
+            return None
+
+    async def set_resume_plan(self, user_id: str, plan_key: str, plan_data: Dict[str, Any]):
+        """Persist reusable resume planning artifacts in Redis cache."""
+        try:
+            if self.cache:
+                await self.cache.set_resume_plan(user_id, plan_key, plan_data)
+        except Exception as e:
+            logger.error(f"Error setting resume plan for user {user_id}: {e}")
+
+    async def remove_resume_plan(self, user_id: str, plan_key: str):
+        """Remove reusable resume planning artifacts from Redis cache."""
+        try:
+            if self.cache:
+                await self.cache.remove_resume_plan(user_id, plan_key)
+        except Exception as e:
+            logger.error(f"Error removing resume plan for user {user_id}: {e}")
+
     # Cache Management Methods
     async def clear_user_cache(self, user_id: str):
         """Clear all cache data for a user."""

@@ -5,6 +5,8 @@ from config import config
 import asyncio
 import concurrent.futures
 from datetime import datetime
+import hashlib
+import json
 import re
 import time
 from typing import Dict, List, Optional
@@ -55,11 +57,9 @@ class ResumeImprover:
         """
         try:
             logger.info("resume_tailoring_started", extra={"event.action": "resume_tailoring"})
-
-            self._report_progress("evidence_planning", 20, "Matching job requirements to resume evidence")
-            # Establish the factual boundary before any section is rewritten.
-            self.evidence_inventory = self._build_evidence_inventory()
-            self.evidence_plan = self._build_evidence_plan()
+            if not self.evidence_inventory:
+                self._report_progress("evidence_planning", 20, "Matching job requirements to resume evidence")
+                self.prepare_tailoring_plan()
 
             # Try parallel execution first
             try:
@@ -139,6 +139,32 @@ class ResumeImprover:
         """Publish durable generation progress without coupling tailoring to storage."""
         if self.progress_callback:
             self.progress_callback(stage, progress_percentage, message)
+
+    def prepare_tailoring_plan(self) -> dict:
+        """Build the reusable planning state that grounds all later tailoring."""
+        self.evidence_inventory = self._build_evidence_inventory()
+        self.evidence_plan = self._build_evidence_plan()
+        return self.export_tailoring_plan()
+
+    def export_tailoring_plan(self) -> dict:
+        """Serialize the current planning state for reuse across generations."""
+        return {
+            "evidence_inventory": self.evidence_inventory or [],
+            "evidence_plan": self.evidence_plan or [],
+            "plan_summary": self._match_report(),
+        }
+
+    def load_tailoring_plan(self, plan_data: Optional[dict]) -> bool:
+        """Hydrate a previously prepared planning state if it is well formed."""
+        if not isinstance(plan_data, dict):
+            return False
+        inventory = plan_data.get("evidence_inventory")
+        plan = plan_data.get("evidence_plan")
+        if not isinstance(inventory, list) or not isinstance(plan, list):
+            return False
+        self.evidence_inventory = inventory
+        self.evidence_plan = plan
+        return True
 
     def _build_evidence_inventory(self) -> list[dict]:
         """Assign stable IDs to factual source sections before LLM tailoring."""
@@ -232,6 +258,18 @@ class ResumeImprover:
             logger.error("Grounding validation failed: %s", error)
             raise RuntimeError(f"Final grounding validation failed: {error}") from error
         return tailored_resume
+
+    def planning_signature(self) -> str:
+        """Return a stable signature for the planning inputs."""
+        normalized_payload = {
+            "parsed_job": self.parsed_job or {},
+            "experiences": self.experiences or [],
+            "projects": self.projects or [],
+            "skills": self.skills or [],
+            "objective": self.objective or "",
+        }
+        serialized = json.dumps(normalized_payload, sort_keys=True, ensure_ascii=False, default=str)
+        return hashlib.md5(serialized.encode("utf-8")).hexdigest()
 
     async def _generate_content_async_parallel(self, include_objective: bool = True) -> Dict:
         """Generate all resume content in parallel using asyncio.gather."""
@@ -621,7 +659,7 @@ class ResumeImprover:
                 return []
 
             logger.info("resume_experience_rewrite_started", extra={"resume.experience_count": len(self.experiences)})
-            result = self._rewrite_sections_parallel(self.experiences, "experience", **chain_kwargs)
+            result = self._rewrite_sections_batch(self.experiences, "experience", **chain_kwargs)
 
             logger.info("resume_experience_rewrite_completed", extra={"resume.experience_count": len(result)})
             return result
@@ -637,13 +675,55 @@ class ResumeImprover:
                 return []
 
             logger.info("resume_project_rewrite_started", extra={"resume.project_count": len(self.projects)})
-            result = self._rewrite_sections_parallel(self.projects, "project", **chain_kwargs)
+            result = self._rewrite_sections_batch(self.projects, "project", **chain_kwargs)
 
             logger.info("resume_project_rewrite_completed", extra={"resume.project_count": len(result)})
             return result
         except Exception as error:
             logger.error("resume_project_rewrite_failed", extra={"error.reason": str(error)})
             raise RuntimeError(f"Project bullet rewriting failed: {error}") from error
+
+    def _rewrite_sections_batch(self, sections: list, section_kind: str, **chain_kwargs) -> list:
+        """Rewrite same-type sections in one LLM call, with per-section fallback on failure."""
+        prepared_sections = []
+        rewritten_sections = [None] * len(sections)
+
+        for index, raw_section in enumerate(sections):
+            section = dict(raw_section)
+            original_highlights = section.get("highlights", [])
+            section_id = f"{section_kind}:{index}"
+            logger.debug(
+                "resume_section_rewrite_started",
+                extra={"section.id": section_id, "source.highlight_count": len(original_highlights)},
+            )
+            if not original_highlights:
+                rewritten_sections[index] = section
+                continue
+            prepared_sections.append((index, section, section_id, original_highlights))
+
+        if not prepared_sections:
+            return rewritten_sections
+
+        try:
+            rewritten_map = self.rewrite_sections_batch(
+                [
+                    {
+                        "section_id": section_id,
+                        "section": section,
+                        "original_highlights": original_highlights,
+                    }
+                    for _, section, section_id, original_highlights in prepared_sections
+                ],
+                **chain_kwargs,
+            )
+            for index, section, section_id, _ in prepared_sections:
+                updated_section = dict(section)
+                updated_section["highlights"] = rewritten_map[section_id]
+                rewritten_sections[index] = updated_section
+            return rewritten_sections
+        except Exception as error:
+            logger.warning("resume_section_batch_rewrite_failed", extra={"section.kind": section_kind, "error.reason": str(error)})
+            return self._rewrite_sections_parallel(sections, section_kind, **chain_kwargs)
 
     def _rewrite_sections_parallel(self, sections: list, section_kind: str, **chain_kwargs) -> list:
         """Rewrite same-type resume sections concurrently while preserving order."""
@@ -683,6 +763,50 @@ class ResumeImprover:
                     raise
 
         return rewritten_sections
+
+    def rewrite_sections_batch(self, section_payloads: list[dict], **chain_kwargs) -> dict[str, list[str]]:
+        """Rewrite multiple sections in one structured call and validate each mapping."""
+        try:
+            from dataModels.resume import ResumeSectionBatchHighlighterOutput
+            from services.langchain_helpers import invoke_structured
+
+            prompt_inputs = self._get_prompt_inputs(
+                section_batch=self._format_section_batch(section_payloads),
+            )
+            last_error = None
+            for rewrite_attempt in range(1, 3):
+                prompt_inputs["rewrite_attempt"] = rewrite_attempt
+                prompt_inputs["validation_feedback"] = str(last_error or "None; produce the complete mapping for every section.")
+                batch_revised = invoke_structured(
+                    self.user,
+                    "SECTION_BATCH_HIGHLIGHTER",
+                    ResumeSectionBatchHighlighterOutput,
+                    timeout_seconds=45.0,
+                    max_retries=1,
+                    **prompt_inputs,
+                )
+
+                if hasattr(batch_revised, "final_answer"):
+                    section_items = batch_revised.final_answer or []
+                    raw_result = [item.model_dump() for item in section_items]
+                elif isinstance(batch_revised, dict):
+                    raw_result = batch_revised.get("final_answer", [])
+                else:
+                    last_error = ValueError("The model returned no structured batched highlights")
+                    continue
+
+                try:
+                    return self._validated_batched_highlights(raw_result, section_payloads)
+                except ValueError as error:
+                    last_error = error
+                    logger.warning(
+                        "resume_section_batch_rewrite_validation_failed",
+                        extra={"rewrite.attempt": rewrite_attempt, "error.reason": str(error)},
+                    )
+
+            raise last_error or ValueError("The model returned no rewritten batched highlights")
+        except Exception as error:
+            raise RuntimeError(f"Batched section rewriting failed: {error}") from error
 
     def rewrite_section(self, section, section_id: str = "", **chain_kwargs) -> list:
         """Rewrite a section of the resume."""
@@ -778,6 +902,80 @@ class ResumeImprover:
             logger.warning("resume_objective_generation_invalid")
             return self.objective or None
         return summary
+
+    def _validated_batched_highlights(self, batch_candidates, section_payloads) -> dict[str, list[str]]:
+        """Require complete, valid batched rewrites for every supplied section."""
+        payload_by_id = {payload["section_id"]: payload for payload in section_payloads}
+        accepted_sections = {}
+        errors = []
+
+        for item in batch_candidates or []:
+            if not isinstance(item, dict):
+                errors.append("batch item is not an object")
+                continue
+            section_id = item.get("section_id")
+            if section_id not in payload_by_id:
+                errors.append(f"unexpected section_id {section_id}")
+                continue
+            if section_id in accepted_sections:
+                errors.append(f"section_id {section_id} is duplicated")
+                continue
+            highlights = item.get("highlights")
+            validated = self._validated_highlights(
+                highlights,
+                payload_by_id[section_id]["original_highlights"],
+            )
+            ranked_highlights = sorted(
+                validated,
+                key=lambda candidate: (-candidate["relevance"], candidate["source_index"]),
+            )
+            strongest_score = ranked_highlights[0]["relevance"]
+            relevance_threshold = max(1, strongest_score - 1)
+            selected_highlights = [
+                candidate["highlight"]
+                for candidate in ranked_highlights
+                if candidate["relevance"] >= relevance_threshold
+            ]
+            accepted_sections[section_id] = selected_highlights
+
+        missing_section_ids = sorted(set(payload_by_id) - set(accepted_sections))
+        if missing_section_ids:
+            errors.append(f"missing section_ids {missing_section_ids}")
+        if errors:
+            raise ValueError("; ".join(errors))
+        return accepted_sections
+
+    def _format_section_batch(self, section_payloads: list[dict]) -> str:
+        """Render multiple source sections into one prompt payload for batched rewriting."""
+        rendered_sections = []
+        for payload in section_payloads:
+            original_highlights = payload["original_highlights"]
+            section_id = payload["section_id"]
+            section_evidence = [
+                match for match in self.evidence_plan
+                if section_id in match.get("source_ids", [])
+            ]
+            rendered_sections.append(
+                "\n".join(
+                    [
+                        f"<Section ID>\n{section_id}",
+                        f"<Candidate source section>\n{yaml.safe_dump(payload['section'], sort_keys=False, allow_unicode=True)}".strip(),
+                        "<Numbered source highlights>",
+                        "\n".join(
+                            f"{index}. {highlight}"
+                            for index, highlight in enumerate(original_highlights, start=1)
+                        ),
+                        "<Per-source bullet word limits>",
+                        "\n".join(
+                            f"{index}: 3-{self._highlight_word_limit(highlight)} words"
+                            for index, highlight in enumerate(original_highlights, start=1)
+                        ),
+                        f"<Required highlight count>\n{len(original_highlights)}",
+                        f"<Supported matches for this section>\n{json.dumps(section_evidence, ensure_ascii=False)}",
+                    ]
+                )
+            )
+        return "\n\n".join(rendered_sections)
 
     def _validated_highlights(self, candidates, originals) -> list:
         """Require a complete, materially changed set of grounded bullet rewrites."""
@@ -908,7 +1106,7 @@ class ResumeImprover:
             "section", "objective", "experiences", "projects", "skills",
             "company", "job_summary", "duties", "qualifications", "ats_keywords",
             "technical_skills", "non_technical_skills", "evidence_inventory", "evidence_map",
-            "section_evidence", "tailored_sections", "required_highlight_count", "rewrite_attempt",
+            "section_evidence", "section_batch", "tailored_sections", "required_highlight_count", "rewrite_attempt",
             "source_highlights", "highlight_word_limits", "validation_feedback",
         }
         for key in keys:

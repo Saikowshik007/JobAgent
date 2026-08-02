@@ -100,6 +100,28 @@ class ResumeSectionHighlighterOutput(BaseModel):
     )
 
 
+class ResumeSectionBatchItem(_ClosedSchema):
+    """One rewritten section within a batched rewrite response."""
+
+    section_id: str = Field(
+        ...,
+        description=Prompts.descriptions["RESUME_SECTION_BATCH_ITEM"]["section_id"],
+    )
+    highlights: List[ResumeSectionHighlight] = Field(
+        ...,
+        description=Prompts.descriptions["RESUME_SECTION_BATCH_ITEM"]["highlights"],
+    )
+
+
+class ResumeSectionBatchHighlighterOutput(_ClosedSchema):
+    """Batched structured rewrite output for multiple resume sections."""
+
+    final_answer: List[ResumeSectionBatchItem] = Field(
+        ...,
+        description=Prompts.descriptions["RESUME_SECTION_BATCH_HIGHLIGHTER_OUTPUT"]["final_answer"],
+    )
+
+
 class ResumeSkills(BaseModel):
     """Pydantic model that defines grouped skills with dynamic subcategories for technical skills and simple list for non-technical."""
 

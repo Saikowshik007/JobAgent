@@ -2,6 +2,8 @@ import asyncio
 import uuid
 import yaml
 from datetime import datetime
+import hashlib
+import json
 from typing import Optional, Dict, Any, List
 from yaml import YAMLError
 
@@ -123,6 +125,7 @@ class ResumeGenerator:
                             "progress_percentage": progress_percentage,
                             "message": message,
                             "job_id": job_dict.get("id"),
+                            "plan_cache_key": self._build_resume_plan_key(job_dict, resume_data),
                         },
                     ),
                     event_loop,
@@ -184,6 +187,7 @@ class ResumeGenerator:
                     "progress_percentage": 100,
                     "message": "Resume generated successfully",
                     "job_id": job_dict.get("id"),
+                    "plan_cache_key": self._build_resume_plan_key(job_dict, resume_data),
                 },
             )
 
@@ -252,6 +256,21 @@ class ResumeGenerator:
             try:
                 logger.debug("resume_generation_source_loaded", extra={"job.id": job_dict.get("id")})
                 self._setup_resume_data(resume_improver, resume_data)
+                plan_key = self._build_resume_plan_key(job_dict, resume_data)
+                cached_plan = self._load_cached_plan(user.id, plan_key)
+
+                if cached_plan and resume_improver.load_tailoring_plan(cached_plan):
+                    logger.info("resume_generation_plan_cache_hit", extra={"job.id": job_dict.get("id"), "plan.key": plan_key})
+                    if progress_callback:
+                        progress_callback("planning_ready", 30, "Reusing cached evidence plan")
+                else:
+                    logger.info("resume_generation_plan_cache_miss", extra={"job.id": job_dict.get("id"), "plan.key": plan_key})
+                    if progress_callback:
+                        progress_callback("evidence_planning", 20, "Matching job requirements to resume evidence")
+                    plan_data = resume_improver.prepare_tailoring_plan()
+                    self._store_cached_plan(user.id, plan_key, plan_data)
+                    if progress_callback:
+                        progress_callback("planning_ready", 30, "Saved reusable evidence plan")
 
                 # Let ResumeImprover do all the work with include_objective flag
                 return resume_improver.create_complete_tailored_resume(include_objective)
@@ -301,6 +320,32 @@ class ResumeGenerator:
         estimate += 2 * max(0, sections_with_highlights - parallel_rewrite_batches)
         return min(180, max(30, estimate))
 
+    def _build_resume_plan_key(self, job_dict: Dict[str, Any], resume_data: Dict[str, Any]) -> str:
+        """Build a stable cache key for reusable planning artifacts."""
+        normalized_payload = {
+            "job_id": job_dict.get("id"),
+            "job_url": job_dict.get("job_url"),
+            "job_metadata": job_dict.get("metadata") or {},
+            "resume_data": resume_data or {},
+        }
+        serialized = json.dumps(normalized_payload, sort_keys=True, ensure_ascii=False, default=str)
+        return hashlib.md5(serialized.encode("utf-8")).hexdigest()
+
+    def _load_cached_plan(self, user_id: str, plan_key: str) -> Optional[Dict[str, Any]]:
+        """Load a reusable planning artifact from the cache layer."""
+        try:
+            return asyncio.run(self.cache_manager.get_resume_plan(user_id, plan_key))
+        except Exception as error:
+            logger.warning("resume_generation_plan_cache_load_failed", extra={"plan.key": plan_key, "error.reason": str(error)})
+            return None
+
+    def _store_cached_plan(self, user_id: str, plan_key: str, plan_data: Dict[str, Any]) -> None:
+        """Store a reusable planning artifact in the cache layer."""
+        try:
+            asyncio.run(self.cache_manager.set_resume_plan(user_id, plan_key, plan_data))
+        except Exception as error:
+            logger.warning("resume_generation_plan_cache_store_failed", extra={"plan.key": plan_key, "error.reason": str(error)})
+
     async def check_resume_status(self, resume_id: str, user_id:str) -> Dict[str, Any]:
         """Check the status of a resume generation process."""
         # First check cache
@@ -320,7 +365,7 @@ class ResumeGenerator:
                 response["error"] = cache_entry["error"]
 
             progress_data = cache_entry.get("data") or {}
-            for field in ("stage", "progress_percentage", "message", "failure_reason", "job_id", "operation", "resume_data"):
+            for field in ("stage", "progress_percentage", "message", "failure_reason", "job_id", "operation", "resume_data", "plan_cache_key"):
                 if field in progress_data:
                     response[field] = progress_data[field]
 

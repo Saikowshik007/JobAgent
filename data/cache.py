@@ -56,6 +56,7 @@ class RedisCache:
 
             # Resume generation status
             'resume_status': 'resume_status:',
+            'resume_plan': 'resume_plan:',
 
             # Cache statistics
             'stats': 'cache_stats'
@@ -487,6 +488,41 @@ class RedisCache:
         except Exception as e:
             logger.error(f"Error removing resume status from Redis cache: {e}")
 
+    async def set_resume_plan(self, user_id: str, plan_key: str, plan_data: Dict[str, Any]) -> None:
+        """Persist reusable resume planning artifacts in Redis."""
+        try:
+            cache_key = f"{self.prefixes['resume_plan']}{user_id}:{plan_key}"
+            payload = {
+                "user_id": user_id,
+                "plan_key": plan_key,
+                "plan_data": plan_data,
+                "updated_at": time.time(),
+            }
+            self.redis_client.setex(cache_key, self.default_ttl, pickle.dumps(payload))
+        except Exception as e:
+            logger.error(f"Error setting resume plan in Redis cache: {e}")
+
+    async def get_resume_plan(self, user_id: str, plan_key: str) -> Optional[Dict[str, Any]]:
+        """Get reusable resume planning artifacts from Redis."""
+        try:
+            cache_key = f"{self.prefixes['resume_plan']}{user_id}:{plan_key}"
+            serialized_data = self.redis_client.get(cache_key)
+            if not serialized_data:
+                return None
+            payload = pickle.loads(serialized_data)
+            return payload.get("plan_data")
+        except Exception as e:
+            logger.error(f"Error getting resume plan from Redis cache: {e}")
+            return None
+
+    async def remove_resume_plan(self, user_id: str, plan_key: str) -> None:
+        """Remove reusable resume planning artifacts from Redis."""
+        try:
+            cache_key = f"{self.prefixes['resume_plan']}{user_id}:{plan_key}"
+            self.redis_client.delete(cache_key)
+        except Exception as e:
+            logger.error(f"Error removing resume plan from Redis cache: {e}")
+
     # ============= CACHE MANAGEMENT METHODS =============
 
     def clear_user_cache(self, user_id: str) -> None:
@@ -523,6 +559,11 @@ class RedisCache:
 
             # Clear resume status entries
             pattern = f"{self.prefixes['resume_status']}{user_id}:*"
+            for key in self.redis_client.scan_iter(match=pattern):
+                pipe.delete(key)
+
+            # Clear resume plan entries
+            pattern = f"{self.prefixes['resume_plan']}{user_id}:*"
             for key in self.redis_client.scan_iter(match=pattern):
                 pipe.delete(key)
 
