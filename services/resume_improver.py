@@ -98,6 +98,7 @@ class ResumeImprover:
             "evidence_inventory": self.evidence_inventory or [],
             "evidence_plan": self.evidence_plan or [],
             "plan_summary": self._match_report(),
+            "tailoring_brief": self._tailoring_brief(),
         }
 
     def load_tailoring_plan(self, plan_data: Optional[dict]) -> bool:
@@ -161,6 +162,51 @@ class ResumeImprover:
             "evidence_coverage_percentage": round((len(matches) / requirements_evaluated) * 100) if requirements_evaluated else 0,
             "gaps": gaps,
             "strong_matches": [match["requirement"] for match in matches if match.get("match_strength", 0) >= 4],
+        }
+
+    def _tailoring_brief(self) -> dict:
+        matched = [match for match in self.evidence_plan if not match.get("gap")]
+        ranked_matches = sorted(
+            matched,
+            key=lambda item: (
+                -int(item.get("match_strength", 0)),
+                len(item.get("source_ids", [])),
+                item.get("requirement", ""),
+            ),
+        )
+
+        overall_priorities = []
+        for match in ranked_matches[:12]:
+            overall_priorities.append(
+                {
+                    "requirement": match.get("requirement", ""),
+                    "match_strength": match.get("match_strength", 0),
+                    "source_ids": match.get("source_ids", []),
+                    "safe_keywords": match.get("safe_keywords", []),
+                }
+            )
+
+        section_priorities = {}
+        for item in self.evidence_inventory or []:
+            section_id = item.get("section_id")
+            if not section_id or section_id == "objective":
+                continue
+            section_matches = [
+                {
+                    "requirement": match.get("requirement", ""),
+                    "match_strength": match.get("match_strength", 0),
+                    "safe_keywords": match.get("safe_keywords", []),
+                }
+                for match in ranked_matches
+                if section_id in match.get("source_ids", [])
+            ][:6]
+            if section_matches:
+                section_priorities[section_id] = section_matches
+
+        return {
+            "overall_priorities": overall_priorities,
+            "section_priorities": section_priorities,
+            "gaps": [match.get("requirement", "") for match in self.evidence_plan if match.get("gap")][:8],
         }
 
     def _write_tailored_resume(self, include_objective: bool) -> dict:
@@ -337,12 +383,14 @@ class ResumeImprover:
         raw_self_data.update(extra_values)
         raw_self_data["evidence_inventory"] = self.evidence_inventory
         raw_self_data["evidence_map"] = self.evidence_plan
+        raw_self_data["tailoring_brief"] = self._tailoring_brief()
 
         keys = {
             "basic", "objective", "education", "experiences", "projects", "skills",
             "company", "job_summary", "duties", "qualifications", "ats_keywords",
             "technical_skills", "non_technical_skills", "evidence_inventory", "evidence_map",
             "tailored_sections", "tailored_resume_draft", "validation_feedback", "include_objective",
+            "tailoring_brief",
         }
         for key in keys:
             value = raw_self_data.get(key)

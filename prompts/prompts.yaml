@@ -51,6 +51,9 @@ RESUME_TAILORED_RESUME_WRITER:
     <Evidence map>
     {evidence_map}
 
+    <Tailoring brief>
+    {tailoring_brief}
+
     <Source resume>
     Basic: {basic}
     Objective: {objective}
@@ -64,18 +67,23 @@ RESUME_TAILORED_RESUME_WRITER:
     Rules:
     - Preserve the same factual boundaries as the source evidence inventory and evidence map.
     - Do not invent, infer, or strengthen any metric, technology, employer, title, responsibility, scope, certification, or outcome.
+    - This is not a paraphrase task. Re-rank, trim, and rewrite the resume around the highest-priority supported requirements from the tailoring brief.
     - Return objective, experiences, projects, and skills only. Education and basic info stay unchanged outside this output.
     - Make the strongest supported job requirements consistently visible across the whole resume.
     - Reduce redundancy across sections and keep a coherent top-to-bottom story.
     - Use ATS keywords whenever they are already supported by the evidence map or source evidence.
     - Prioritize supported requirements with stronger match strength and safe keywords.
+    - For each experience and project, prefer bullets tied to that section's mapped requirements in the tailoring brief. Low-priority source bullets may be dropped when they do not improve alignment.
+    - Do not preserve original bullet order by default. Put the most job-relevant supported evidence first.
     - For experience and project bullets, improve wording, order, and emphasis while preserving facts.
+    - Keep only the strongest supported bullets for each section; do not keep weak bullets just because they were in the source.
     - Keep the objective concise and job-targeted. If evidence is too sparse, return an empty string.
-    - Deduplicate and prioritize skills based on demonstrated overlap with the target role.
+    - Deduplicate and prioritize skills based on demonstrated overlap with the target role. Skills that are not supported by the evidence map should be de-emphasized or removed.
+    - Objective, skills, and top bullets should make the role fit obvious to a recruiter reading only the first screen.
     - Return structured output only; do not expose reasoning or a plan.
   steps_message: >
-    Review the job requirements, evidence inventory, evidence map, and full source
-    resume, then return one complete tailored version that preserves facts and improves alignment.
+    Review the job requirements, evidence inventory, evidence map, tailoring brief, and full source
+    resume, then return one complete tailored version that preserves facts and visibly improves alignment.
 
 RESUME_REPAIR_WRITER:
   system_message: >
@@ -95,6 +103,9 @@ RESUME_REPAIR_WRITER:
     <Evidence map>
     {evidence_map}
 
+    <Tailoring brief>
+    {tailoring_brief}
+
     <Current tailored resume draft>
     {tailored_resume_draft}
 
@@ -108,6 +119,7 @@ RESUME_REPAIR_WRITER:
     - Do not invent, infer, or strengthen any metric, technology, employer, title, responsibility, scope, certification, or outcome.
     - Fix every rejected section identified in validator feedback.
     - Preserve valid alignment elsewhere; do not weaken supported tailoring unnecessarily.
+    - Keep the repaired result optimized around the highest-priority supported requirements from the tailoring brief; do not drift back to a generic near-copy of the source resume.
     - Return objective, experiences, projects, and skills only. Education and basic info stay unchanged outside this output.
     - Return structured output only; do not expose reasoning or a plan.
   steps_message: >
