@@ -1,126 +1,139 @@
-from pydantic import BaseModel, Field
-from typing import List, Dict, Optional
+from pydantic import BaseModel, ConfigDict, Field
+from typing import List
 from prompts.prompts import Prompts
 
 Prompts.initialize()
 
 
-class ResumeSectionHighlight(BaseModel):
-    """Pydantic class that defines each highlight to be returned by the LLM."""
+class _ClosedSchema(BaseModel):
+    """OpenAI structured outputs require a closed JSON object at every level."""
 
-    highlight: str = Field(
-        ..., description=Prompts.descriptions["RESUME_SECTION_HIGHLIGHT"]["highlight"]
-    )
-    relevance: int = Field(
+    model_config = ConfigDict(extra="forbid")
+
+
+class SourceResumeBasic(_ClosedSchema):
+    name: str
+    address: str
+    email: str
+    phone: str
+    websites: List[str]
+
+
+class SourceResumeDegree(_ClosedSchema):
+    names: List[str]
+    gpa: str
+    dates: str
+
+
+class SourceResumeEducation(_ClosedSchema):
+    school: str
+    degrees: List[SourceResumeDegree]
+
+
+class SourceResumeTitle(_ClosedSchema):
+    name: str
+    startdate: str
+    enddate: str
+
+
+class SourceResumeExperience(_ClosedSchema):
+    company: str
+    skip_name: bool
+    location: str
+    titles: List[SourceResumeTitle]
+    highlights: List[str]
+
+
+class SourceResumeProject(_ClosedSchema):
+    name: str
+    technologies: str
+    link: str
+    hyperlink: bool
+    show_link: bool
+    highlights: List[str]
+
+
+class SourceResumeSkillGroup(_ClosedSchema):
+    category: str
+    skills: List[str]
+
+
+class SourceResumeData(_ClosedSchema):
+    basic: SourceResumeBasic
+    objective: str
+    education: List[SourceResumeEducation]
+    experiences: List[SourceResumeExperience]
+    projects: List[SourceResumeProject]
+    skills: List[SourceResumeSkillGroup]
+
+
+class SourceResumeExtractionOutput(_ClosedSchema):
+    """Canonical resume data extracted from a user-uploaded source document."""
+
+    final_answer: SourceResumeData
+
+
+class TailoredResumeData(_ClosedSchema):
+    """Primary tailored resume content returned by the full writer."""
+
+    objective: str
+    experiences: List[SourceResumeExperience]
+    projects: List[SourceResumeProject]
+    skills: List[SourceResumeSkillGroup]
+
+
+class TailoredResumeWriterOutput(_ClosedSchema):
+    """Structured output for the full tailored resume writer."""
+
+    final_answer: TailoredResumeData = Field(
         ...,
-        description=Prompts.descriptions["RESUME_SECTION_HIGHLIGHT"]["relevance"],
-        enum=[1, 2, 3, 4, 5],
+        description=Prompts.descriptions["RESUME_TAILORED_RESUME_OUTPUT"]["final_answer"],
     )
 
 
-class ResumeSectionHighlighterOutput(BaseModel):
-    """Pydantic class that defines a list of highlights to be returned by the LLM."""
+class ResumeRepairWriterOutput(_ClosedSchema):
+    """Structured output for the targeted repair writer."""
 
-    plan: List[str] = Field(
+    final_answer: TailoredResumeData = Field(
         ...,
-        description=Prompts.descriptions["RESUME_SECTION_HIGHLIGHTER_OUTPUT"]["plan"],
+        description=Prompts.descriptions["RESUME_REPAIR_OUTPUT"]["final_answer"],
     )
-    additional_steps: List[str] = Field(
+
+
+class EvidenceMatch(_ClosedSchema):
+    """A candidate-supported match between one job requirement and resume evidence."""
+
+    requirement: str
+    source_ids: List[str] = Field(default_factory=list)
+    safe_keywords: List[str] = Field(default_factory=list)
+    match_strength: int = Field(ge=0, le=5)
+    gap: bool
+
+
+class ResumeEvidencePlanOutput(_ClosedSchema):
+    """Structured job-to-resume evidence map used to ground all later edits."""
+
+    final_answer: List[EvidenceMatch] = Field(
+        description=Prompts.descriptions["RESUME_EVIDENCE_PLAN_OUTPUT"]["final_answer"]
+    )
+
+
+class RejectedSectionFeedback(_ClosedSchema):
+    """Validator feedback for one rejected tailored section."""
+
+    section_id: str = Field(
         ...,
-        description=Prompts.descriptions["RESUME_SECTION_HIGHLIGHTER_OUTPUT"]["additional_steps"],
+        description=Prompts.descriptions["RESUME_REJECTED_SECTION_FEEDBACK"]["section_id"],
     )
-    work: List[str] = Field(
+    reason: str = Field(
         ...,
-        description=Prompts.descriptions["RESUME_SECTION_HIGHLIGHTER_OUTPUT"]["work"],
-    )
-    final_answer: List[ResumeSectionHighlight] = Field(
-        ...,
-        description=Prompts.descriptions["RESUME_SECTION_HIGHLIGHTER_OUTPUT"]["final_answer"],
+        description=Prompts.descriptions["RESUME_REJECTED_SECTION_FEEDBACK"]["reason"],
     )
 
 
-class ResumeSkills(BaseModel):
-    """Pydantic model that defines grouped skills with dynamic subcategories for technical skills and simple list for non-technical."""
+class ResumeValidationOutput(_ClosedSchema):
+    """Section-level factual-grounding verdicts for a tailored resume."""
 
-    technical_skills: Optional[Dict[str, List[str]]] = Field(
-        default_factory=dict,
-        description=Prompts.descriptions["RESUME_SKILLS"]["technical_skills"]
-    )
-    non_technical_skills: Optional[List[str]] = Field(
-        default_factory=list,
-        description=Prompts.descriptions["RESUME_SKILLS"]["non_technical_skills"]
-    )
-
-
-class ResumeSkillsMatcherOutput(BaseModel):
-    """Pydantic class that defines a list of skills to be returned by the LLM."""
-
-    plan: List[str] = Field(
-        description=Prompts.descriptions["RESUME_SKILLS_MATCHER_OUTPUT"]["plan"]
-    )
-    additional_steps: List[str] = Field(
-        description=Prompts.descriptions["RESUME_SKILLS_MATCHER_OUTPUT"]["additional_steps"],
-    )
-    work: List[str] = Field(
-        description=Prompts.descriptions["RESUME_SKILLS_MATCHER_OUTPUT"]["work"]
-    )
-    final_answer: ResumeSkills = Field(
-        description=Prompts.descriptions["RESUME_SKILLS_MATCHER_OUTPUT"]["final_answer"],
-    )
-
-
-class ResumeSummarizerOutput(BaseModel):
-    """Pydantic class that defines a list of skills to be returned by the LLM."""
-
-    plan: List[str] = Field(
-        ..., description=Prompts.descriptions["RESUME_OBJECTIVE_OUTPUT"]["plan"]
-    )
-    additional_steps: List[str] = Field(
-        ...,
-        description=Prompts.descriptions["RESUME_OBJECTIVE_OUTPUT"]["additional_steps"],
-    )
-    work: List[str] = Field(
-        ..., description=Prompts.descriptions["RESUME_OBJECTIVE_OUTPUT"]["work"]
-    )
-    final_answer: str = Field(
-        ...,
-        description=Prompts.descriptions["RESUME_OBJECTIVE_OUTPUT"]["final_answer"],
-    )
-
-
-class ResumeImprovements(BaseModel):
-    """Pydantic class that defines a list of improvements to be returned by the LLM."""
-
-    section: str = Field(
-        ...,
-        enum=[
-            "objective",
-            "education",
-            "experiences",
-            "projects",
-            "skills",
-            "spelling and grammar",
-            "other",
-        ],
-    )
-    improvements: List[str] = Field(
-        ..., description=Prompts.descriptions["RESUME_IMPROVEMENTS"]["improvements"]
-    )
-
-
-class ResumeImproverOutput(BaseModel):
-    """Pydantic class that defines a list of improvements to be returned by the LLM."""
-
-    plan: List[str] = Field(
-        ..., description=Prompts.descriptions["RESUME_IMPROVER_OUTPUT"]["plan"]
-    )
-    additional_steps: List[str] = Field(
-        ...,
-        description=Prompts.descriptions["RESUME_IMPROVER_OUTPUT"]["additional_steps"],
-    )
-    work: List[str] = Field(
-        ..., description=Prompts.descriptions["RESUME_IMPROVER_OUTPUT"]["work"]
-    )
-    final_answer: List[ResumeImprovements] = Field(
-        ..., description=Prompts.descriptions["RESUME_IMPROVER_OUTPUT"]["final_answer"]
-    )
+    approved_section_ids: List[str] = Field(default_factory=list)
+    rejected_section_ids: List[str] = Field(default_factory=list)
+    rejected_sections: List["RejectedSectionFeedback"] = Field(default_factory=list)

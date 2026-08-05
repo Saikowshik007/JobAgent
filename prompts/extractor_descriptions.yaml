@@ -1,37 +1,15 @@
-RESUME_SECTION_HIGHLIGHT:
-  highlight: one highlight
-  relevance: relevance of the bullet point
+RESUME_TAILORED_RESUME_OUTPUT:
+  final_answer: A full, source-grounded tailored resume draft aligned to the target role.
 
-RESUME_SECTION_HIGHLIGHTER_OUTPUT:
-  plan: itemized <Plan>
-  additional_steps: itemized <Additional Steps>
-  work: itemized <Work>
-  final_answer: itemized <Final Answer> in the correct format
+RESUME_REPAIR_OUTPUT:
+  final_answer: A corrected tailored resume draft that fixes validator-rejected sections.
 
-RESUME_SKILLS:
-  technical_skills: A dictionary where each key is a technical skill subcategory (e.g., "Languages & Frameworks", "Cloud & DevOps") and the value is a list of relevant skills under that group.
-  non_technical_skills: An itemized list of non-technical skills (simple list, not nested)
+RESUME_EVIDENCE_PLAN_OUTPUT:
+  final_answer: Candidate-supported requirement matches with source IDs, safe keywords, match strength, and gaps.
 
-RESUME_SKILLS_MATCHER_OUTPUT:
-  plan: itemized <Plan>
-  additional_steps: itemized <Additional Steps>
-  work: itemized <Work>
-  final_answer: <Final Answer> in the correct format
-
-RESUME_OBJECTIVE_OUTPUT:
-  plan: itemized <Plan>
-  additional_steps: itemized <Additional Steps>
-  work: itemized <Work>
-  final_answer: <Final Answer> in the correct format
-
-RESUME_IMPROVEMENTS:
-  improvements: itemized list of suggested improvements
-
-RESUME_IMPROVER_OUTPUT:
-  plan: itemized <Plan>
-  additional_steps: itemized <Additional Steps>
-  work: itemized <Work>
-  final_answer: itemized <Final Answer> in the correct format
+RESUME_REJECTED_SECTION_FEEDBACK:
+  section_id: The tailored section identifier that failed grounding review.
+  reason: Short factual correction feedback describing what unsupported or changed claim must be fixed.
 
 JOB_DESCRIPTION:
   company: >

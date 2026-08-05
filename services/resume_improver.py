@@ -1,29 +1,25 @@
-import yaml
-import requests
-from bs4 import BeautifulSoup
-from fp.fp import FreeProxy
-from requests import RequestException
-from yaml import YAMLError
-from services.langchain_helpers import *
-from dataModels.job_post import JobPost
-from config import config
 import asyncio
-import concurrent.futures
-from datetime import datetime
 import time
-from typing import Dict, List, Optional
+from copy import deepcopy
+from datetime import datetime
+from typing import Optional
+
+import httpx
+import yaml
+from bs4 import BeautifulSoup
+from yaml import YAMLError
+
+from config import config
+from dataModels.job_post import JobPost
 
 logger = config.getLogger("ResumeImprover")
 
 
 class ResumeImprover:
-    """
-    Parallel ResumeImprover using asyncio.gather with run_in_executor for true HTTP parallelism.
-    """
+    """Resume tailoring pipeline using planner -> full writer -> validator -> optional repair."""
 
-    def __init__(self, url, user, parsed_job=None, llm_kwargs: dict = None, timeout: int = 500):
-        """Initialize ResumeImprover with the job post URL and optional resume location."""
-        super().__init__()
+    def __init__(self, url, user, parsed_job=None, llm_kwargs: dict = None,
+                 timeout: int = 500, progress_callback=None):
         self.job_post_html_data = None
         self.job_post_raw = None
         self.resume = None
@@ -33,8 +29,7 @@ class ResumeImprover:
         self.user = user
         self.url = url
         self.timeout = timeout
-
-        # Resume data fields
+        self.progress_callback = progress_callback
         self.basic_info = None
         self.education = None
         self.experiences = None
@@ -42,835 +37,506 @@ class ResumeImprover:
         self.skills = None
         self.objective = None
         self.degrees = None
-
-        # Thread pool for running sync LLM calls
-        self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
+        self.evidence_inventory = []
+        self.evidence_plan = []
 
     def create_complete_tailored_resume(self, include_objective) -> str:
-        """
-        NEW main method: Create complete tailored resume with parallel processing.
-        This is what ResumeGenerator calls - does everything.
-        """
-        try:
-            logger.info("=== Creating Complete Tailored Resume (Parallel) ===")
+        """Create a complete tailored resume with one primary writer call."""
+        logger.info("resume_tailoring_started", extra={"event.action": "resume_tailoring"})
+        if not self.evidence_inventory:
+            self._report_progress("evidence_planning", 20, "Matching job requirements to resume evidence")
+            self.prepare_tailoring_plan()
 
-            # Try parallel execution first
-            try:
-                start_time = time.time()
+        self._report_progress("tailored_resume_writer", 55, "Writing the full tailored resume")
+        writer_started_at = time.time()
+        tailored_content = self._write_tailored_resume(include_objective)
+        logger.info(
+            "resume_tailoring_writer_completed",
+            extra={
+                "event.duration_seconds": round(time.time() - writer_started_at, 2),
+                "resume.objective_included": bool(tailored_content.get("objective")),
+                "resume.skill_group_count": len(tailored_content.get("skills", [])),
+                "resume.experience_count": len(tailored_content.get("experiences", [])),
+                "resume.project_count": len(tailored_content.get("projects", [])),
+            },
+        )
 
-                # Check if we're in an async context
-                try:
-                    loop = asyncio.get_event_loop()
-                    if loop.is_running():
-                        # We're in an async context, use thread-based approach
-                        logger.info(f'Using thread-based parallel approach (async context detected) using model: {self.user.model}')
-                        results = self._generate_content_parallel_threads(include_objective)
-                    else:
-                        # No active loop, safe to use asyncio.run
-                        logger.info("Using asyncio-based parallel approach")
-                        results = asyncio.run(self._generate_content_async_parallel(include_objective))
-                except RuntimeError:
-                    # No event loop, safe to use asyncio.run
-                    logger.info("Using asyncio-based parallel approach (no existing loop)")
-                    results = asyncio.run(self._generate_content_async_parallel(include_objective))
-
-                end_time = time.time()
-                logger.info(f"Parallel generation completed in {end_time - start_time:.2f} seconds")
-
-            except Exception as parallel_error:
-                logger.warning(f"Parallel execution failed: {parallel_error}, falling back to sequential")
-                # Fallback to sequential execution
-                results = self._generate_content_sequential()
-
-            # Extract results with detailed logging
-            objective = results.get('objective', "")
-            skills = results.get('skills', [])
-            experiences = results.get('experiences', [])
-            projects = results.get('projects', [])
-
-            logger.info(f"Results summary:")
-            logger.info(f"  - Objective: {'✓' if objective else '✗'}")
-            logger.info(f"  - Skills: {len(skills)} categories")
-            logger.info(f"  - Experiences: {len(experiences)} items")
-            logger.info(f"  - Projects: {len(projects)} items")
-
-            # Step 2: Create final resume
-            logger.info("Assembling final resume...")
-            final_resume = {
-                'editing': False,
-                'basic': self.basic_info or {},
-                'objective': objective,
-                'education': self.education or [],
-                'experiences': experiences or [],
-                'projects': projects or [],
-                'skills': skills or [],
-                'metadata': {
-                    'generated_at': datetime.now().isoformat(),
-                    'job_url': self.url,
-                    'tailored': True
-                }
-            }
-
-            # Step 3: Convert to YAML
-            yaml_content = self.dict_to_yaml_string(final_resume)
-            logger.info("=== Resume Creation Complete ===")
-            return yaml_content
-
-        except Exception as e:
-            logger.error(f"Complete resume creation failed: {e}")
-            raise
-
-    async def _generate_content_async_parallel(self, include_objective: bool = True) -> Dict:
-        """Generate all resume content in parallel using asyncio.gather."""
-        # Create async tasks that run in thread pool (this gives true HTTP parallelism)
-        if not hasattr(self, 'executor'):
-            self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
-
-        loop = asyncio.get_event_loop()
-
-        logger.info("Starting parallel task execution...")
-
-        tasks = []
-        task_names = []
-
-        # Conditionally add objective task
-        if include_objective:
-            tasks.append(loop.run_in_executor(self.executor, self._safe_write_objective))
-            task_names.append('objective')
-
-        # Always add these tasks
-        tasks.extend([
-            loop.run_in_executor(self.executor, self._safe_extract_matched_skills),
-            loop.run_in_executor(self.executor, self._safe_rewrite_experiences),
-            loop.run_in_executor(self.executor, self._safe_rewrite_projects)
-        ])
-        task_names.extend(['skills', 'experiences', 'projects'])
-
-        # Wait for all tasks with timeout
-        try:
-            results = await asyncio.wait_for(
-                asyncio.gather(*tasks, return_exceptions=True),
-                timeout=self.timeout
-            )
-            logger.info(f"All {len(results)} tasks completed")
-        except asyncio.TimeoutError:
-            logger.error(f"Parallel generation timed out after {self.timeout} seconds")
-            # Cancel remaining tasks
-            for task in tasks:
-                if not task.done():
-                    task.cancel()
-            # Use default values
-            default_results = []
-            if include_objective:
-                default_results.append(None)
-            default_results.extend([[], [], []])
-            results = default_results
-
-        # Process results with detailed logging
-        processed_results = {}
-
-        for i, (result, task_name) in enumerate(zip(results, task_names)):
-            if isinstance(result, Exception):
-                logger.error(f"Task '{task_name}' failed with exception: {result}")
-                processed_results[task_name] = self._get_default_value(task_name)
-            else:
-                logger.info(f"Task '{task_name}' completed successfully")
-                processed_results[task_name] = result
-
-        # If objective was not included, set it to None/empty
-        if not include_objective:
-            processed_results['objective'] = None
-
-        return processed_results
-
-    def _safe_write_objective(self) -> Optional[str]:
-        """Thread-safe wrapper for write_objective."""
-        try:
-            logger.debug("Starting objective generation...")
-            result = self.write_objective()
-            logger.debug(f"Objective generation result: {result}")
-            return result
-        except Exception as e:
-            logger.error(f"Error in parallel objective generation: {e}")
-            import traceback
-            logger.error(f"Objective traceback: {traceback.format_exc()}")
-            return None
-
-    def _safe_extract_matched_skills(self) -> List:
-        """Thread-safe wrapper for extract_matched_skills."""
-        try:
-            logger.debug("Starting skills extraction...")
-            result = self.extract_matched_skills()
-            logger.debug(f"Skills extraction result: {len(result) if result else 0} categories")
-            return result
-        except Exception as e:
-            logger.error(f"Error in parallel skills extraction: {e}")
-            import traceback
-            logger.error(f"Skills traceback: {traceback.format_exc()}")
-            return self.skills or []
-
-    def _safe_rewrite_experiences(self) -> List:
-        """Thread-safe wrapper for rewrite_unedited_experiences."""
-        try:
-            logger.debug("Starting experience rewriting...")
-            result = self.rewrite_unedited_experiences()
-            logger.debug(f"Experience rewriting result: {len(result) if result else 0} experiences")
-            return result
-        except Exception as e:
-            logger.error(f"Error in parallel experience rewriting: {e}")
-            import traceback
-            logger.error(f"Experience traceback: {traceback.format_exc()}")
-            return self.experiences or []
-
-    def _safe_rewrite_projects(self) -> List:
-        """Thread-safe wrapper for rewrite_unedited_projects."""
-        try:
-            logger.debug("Starting project rewriting...")
-            result = self.rewrite_unedited_projects()
-            logger.debug(f"Project rewriting result: {len(result) if result else 0} projects")
-            return result
-        except Exception as e:
-            logger.error(f"Error in parallel project rewriting: {e}")
-            import traceback
-            logger.error(f"Project traceback: {traceback.format_exc()}")
-            return self.projects or []
-
-    def _generate_content_parallel_threads(self, include_objective: bool = True) -> Dict:
-        """Generate content using ThreadPoolExecutor for cases where we're already in async context."""
-        logger.info("Using ThreadPoolExecutor for parallel generation...")
-
-        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
-            # Submit tasks conditionally
-            future_to_task = {}
-
-            if include_objective:
-                future_to_task[executor.submit(self._safe_write_objective)] = 'objective'
-
-            future_to_task.update({
-                executor.submit(self._safe_extract_matched_skills): 'skills',
-                executor.submit(self._safe_rewrite_experiences): 'experiences',
-                executor.submit(self._safe_rewrite_projects): 'projects'
-            })
-
-            results = {}
-            completed_tasks = 0
-            total_tasks = len(future_to_task)
-
-            # Wait for completion with timeout
-            try:
-                for future in concurrent.futures.as_completed(future_to_task, timeout=self.timeout):
-                    task_name = future_to_task[future]
-                    completed_tasks += 1
-
-                    try:
-                        result = future.result()
-                        results[task_name] = result
-                        logger.info(f"✓ {task_name} completed successfully ({completed_tasks}/{total_tasks})")
-
-                        # Debug log the result
-                        if task_name == 'experiences':
-                            logger.debug(f"Experiences result: {len(result) if result else 0} items")
-                        elif task_name == 'projects':
-                            logger.debug(f"Projects result: {len(result) if result else 0} items")
-
-                    except Exception as e:
-                        logger.error(f"✗ {task_name} failed with exception: {e}")
-                        import traceback
-                        logger.error(f"{task_name} traceback: {traceback.format_exc()}")
-                        results[task_name] = self._get_default_value(task_name)
-
-            except concurrent.futures.TimeoutError:
-                logger.error(f"Parallel generation timed out after {self.timeout} seconds")
-                logger.error(f"Completed {completed_tasks}/{total_tasks} tasks before timeout")
-
-                # Cancel remaining futures
-                for future in future_to_task:
-                    if not future.done():
-                        future.cancel()
-                        task_name = future_to_task[future]
-                        logger.warning(f"Cancelled task: {task_name}")
-
-                # Fill in defaults for missing results
-                expected_tasks = ['skills', 'experiences', 'projects']
-                if include_objective:
-                    expected_tasks.insert(0, 'objective')
-
-                for task_name in expected_tasks:
-                    if task_name not in results:
-                        results[task_name] = self._get_default_value(task_name)
-                        logger.warning(f"Using default value for {task_name} due to timeout")
-
-            # If objective was not included, set it to None
-            if not include_objective:
-                results['objective'] = None
-
-            logger.info(f"Thread-based parallel execution completed: {len(results)}/{total_tasks} tasks")
-            return results
-
-    def _generate_content_sequential(self, include_objective: bool = True) -> Dict:
-        """Fallback sequential content generation."""
-        logger.info("Running sequential content generation...")
-
-        results = {}
-
-        if include_objective:
-            logger.info("Sequential: Generating objective...")
-            results['objective'] = self._safe_write_objective()
-        else:
-            results['objective'] = None
-
-        logger.info("Sequential: Extracting skills...")
-        results['skills'] = self._safe_extract_matched_skills()
-
-        logger.info("Sequential: Rewriting experiences...")
-        results['experiences'] = self._safe_rewrite_experiences()
-
-        logger.info("Sequential: Rewriting projects...")
-        results['projects'] = self._safe_rewrite_projects()
-
-        logger.info("Sequential content generation completed")
-        return results
-
-    def _get_default_value(self, task_name: str):
-        """Get default value for a task that failed or timed out."""
-        defaults = {
-            'objective': None,
-            'skills': self.skills or [],
-            'experiences': self.experiences or [],
-            'projects': self.projects or []
+        final_resume = {
+            "editing": False,
+            "basic": self.basic_info or {},
+            "objective": tailored_content.get("objective", ""),
+            "education": self.education or [],
+            "experiences": tailored_content.get("experiences", []),
+            "projects": tailored_content.get("projects", []),
+            "skills": tailored_content.get("skills", []),
+            "metadata": {
+                "generated_at": datetime.now().isoformat(),
+                "job_url": self.url,
+                "tailored": True,
+                "match_report": self._match_report(),
+            },
         }
-        default_value = defaults.get(task_name)
-        logger.debug(
-            f"Using default for {task_name}: {type(default_value)} with {len(default_value) if isinstance(default_value, list) else 'N/A'} items")
-        return default_value
 
-    def download_and_parse_job_post(self, url=None):
-        """Download and parse the job post from the provided URL."""
+        self._report_progress("grounding_validation", 85, "Validating the tailored resume")
+        final_resume = self._validate_tailored_resume(final_resume, include_objective)
+
+        self._report_progress("saving_resume", 95, "Preparing the tailored resume")
+        yaml_content = self.dict_to_yaml_string(final_resume)
+        logger.info("resume_tailoring_completed")
+        return yaml_content
+
+    def _report_progress(self, stage: str, progress_percentage: int, message: str) -> None:
+        if self.progress_callback:
+            self.progress_callback(stage, progress_percentage, message)
+
+    def prepare_tailoring_plan(self) -> dict:
+        self.evidence_inventory = self._build_evidence_inventory()
+        self.evidence_plan = self._build_evidence_plan()
+        return self.export_tailoring_plan()
+
+    def export_tailoring_plan(self) -> dict:
+        return {
+            "evidence_inventory": self.evidence_inventory or [],
+            "evidence_plan": self.evidence_plan or [],
+            "plan_summary": self._match_report(),
+            "tailoring_brief": self._tailoring_brief(),
+        }
+
+    def load_tailoring_plan(self, plan_data: Optional[dict]) -> bool:
+        if not isinstance(plan_data, dict):
+            return False
+        inventory = plan_data.get("evidence_inventory")
+        plan = plan_data.get("evidence_plan")
+        if not isinstance(inventory, list) or not isinstance(plan, list):
+            return False
+        if len(plan) < self._expected_requirement_count():
+            return False
+        self.evidence_inventory = inventory
+        self.evidence_plan = plan
+        return True
+
+    def _build_evidence_inventory(self) -> list[dict]:
+        inventory = []
+        for index, education in enumerate(self.education or []):
+            inventory.append({"section_id": f"education:{index}", "content": education})
+        for index, experience in enumerate(self.experiences or []):
+            context = {key: value for key, value in experience.items() if key != "highlights"}
+            inventory.append({"section_id": f"experience:{index}:context", "content": context})
+            for bullet_index, highlight in enumerate(experience.get("highlights", [])):
+                inventory.append({
+                    "section_id": f"experience:{index}:highlight:{bullet_index}",
+                    "content": {"context": context, "highlight": highlight},
+                })
+        for index, project in enumerate(self.projects or []):
+            context = {key: value for key, value in project.items() if key != "highlights"}
+            inventory.append({"section_id": f"project:{index}:context", "content": context})
+            for bullet_index, highlight in enumerate(project.get("highlights", [])):
+                inventory.append({
+                    "section_id": f"project:{index}:highlight:{bullet_index}",
+                    "content": {"context": context, "highlight": highlight},
+                })
+        for index, skill_group in enumerate(self.skills or []):
+            inventory.append({"section_id": f"skills:{index}", "content": skill_group})
+        inventory.append({"section_id": "objective", "content": self.objective or ""})
+        return inventory
+
+    def _build_evidence_plan(self) -> list[dict]:
+        if not self.evidence_inventory or not self.parsed_job:
+            return []
+        try:
+            from dataModels.resume import ResumeEvidencePlanOutput
+            from services.langchain_helpers import invoke_structured
+
+            result = invoke_structured(
+                self.user,
+                "RESUME_EVIDENCE_PLANNER",
+                ResumeEvidencePlanOutput,
+                timeout_seconds=150.0,
+                max_retries=1,
+                **self._get_prompt_inputs(),
+            )
+            valid_ids = {item["section_id"] for item in self.evidence_inventory}
+            plan = []
+            for match in result.final_answer:
+                item = match.model_dump()
+                item["source_ids"] = [source_id for source_id in item["source_ids"] if source_id in valid_ids]
+                if not item["source_ids"]:
+                    item["gap"] = True
+                plan.append(item)
+            if len(plan) < self._expected_requirement_count():
+                raise ValueError("Evidence planner did not evaluate every extracted job requirement")
+            return plan
+        except Exception as error:
+            logger.error("Evidence planning failed: %s", error)
+            raise RuntimeError(f"Evidence planning failed: {error}") from error
+
+    def _match_report(self) -> dict:
+        matches = [match for match in self.evidence_plan if not match.get("gap")]
+        gaps = [match["requirement"] for match in self.evidence_plan if match.get("gap")]
+        requirements_evaluated = len(matches) + len(gaps)
+        return {
+            "matched_requirements": len(matches),
+            "requirements_evaluated": requirements_evaluated,
+            "evidence_coverage_percentage": round((len(matches) / requirements_evaluated) * 100) if requirements_evaluated else 0,
+            "gaps": gaps,
+            "strong_matches": [match["requirement"] for match in matches if match.get("match_strength", 0) >= 4],
+        }
+
+    def _expected_requirement_count(self) -> int:
+        if not isinstance(self.parsed_job, dict):
+            return 0
+        requirements = []
+        for key in ("duties", "qualifications", "ats_keywords", "technical_skills", "non_technical_skills"):
+            values = self.parsed_job.get(key) or []
+            if isinstance(values, list):
+                requirements.extend(str(value).strip().lower() for value in values if str(value).strip())
+        return len(set(requirements))
+
+    def _tailoring_brief(self) -> dict:
+        matched = [match for match in self.evidence_plan if not match.get("gap")]
+        ranked_matches = sorted(
+            matched,
+            key=lambda item: (
+                -int(item.get("match_strength", 0)),
+                len(item.get("source_ids", [])),
+                item.get("requirement", ""),
+            ),
+        )
+
+        overall_priorities = []
+        for match in ranked_matches[:12]:
+            overall_priorities.append(
+                {
+                    "requirement": match.get("requirement", ""),
+                    "match_strength": match.get("match_strength", 0),
+                    "source_ids": match.get("source_ids", []),
+                    "safe_keywords": match.get("safe_keywords", []),
+                }
+            )
+
+        section_priorities = {}
+        for item in self.evidence_inventory or []:
+            section_id = item.get("section_id")
+            if not section_id or section_id == "objective":
+                continue
+            section_matches = [
+                {
+                    "requirement": match.get("requirement", ""),
+                    "match_strength": match.get("match_strength", 0),
+                    "safe_keywords": match.get("safe_keywords", []),
+                }
+                for match in ranked_matches
+                if any(source_id == section_id or source_id.startswith(section_id + ":")
+                       for source_id in match.get("source_ids", []))
+            ][:6]
+            if section_matches:
+                section_priorities[section_id] = section_matches
+
+        return {
+            "overall_priorities": overall_priorities,
+            "section_priorities": section_priorities,
+            "gaps": [match.get("requirement", "") for match in self.evidence_plan if match.get("gap")][:8],
+        }
+
+    def _write_tailored_resume(self, include_objective: bool) -> dict:
+        try:
+            from dataModels.resume import TailoredResumeWriterOutput
+            from services.langchain_helpers import invoke_structured
+
+            result = invoke_structured(
+                self.user,
+                "RESUME_TAILORED_RESUME_WRITER",
+                TailoredResumeWriterOutput,
+                timeout_seconds=90.0,
+                max_retries=1,
+                **self._get_prompt_inputs(include_objective=include_objective),
+            )
+            tailored = result.final_answer.model_dump() if hasattr(result.final_answer, "model_dump") else result.final_answer
+            if not include_objective:
+                tailored["objective"] = ""
+            return self._preserve_section_identity(tailored)
+        except Exception as error:
+            logger.error("Tailored resume writer failed: %s", error)
+            raise RuntimeError(f"Tailored resume writing failed: {error}") from error
+
+    def _validate_tailored_resume(self, tailored_resume: dict, include_objective: bool) -> dict:
+        try:
+            from dataModels.resume import ResumeValidationOutput
+
+            result = self._run_grounding_validation(tailored_resume, ResumeValidationOutput)
+            expected_ids = set(self._tailored_sections(tailored_resume))
+            rejected_ids = self._validated_rejected_ids(result, expected_ids)
+            if rejected_ids:
+                rejection_feedback = self._validation_feedback_by_section(result, expected_ids)
+                if set(rejection_feedback) != rejected_ids:
+                    raise ValueError(
+                        "Grounding review rejected sections without actionable feedback: "
+                        + ", ".join(sorted(rejected_ids))
+                    )
+                logger.warning("resume_grounding_sections_repair_requested", extra={"rejected.section_ids": sorted(rejected_ids)})
+                pre_repair_resume = deepcopy(tailored_resume)
+                repaired_resume = self._repair_tailored_resume(tailored_resume, rejection_feedback, include_objective)
+                self._restore_approved_sections(pre_repair_resume, repaired_resume, rejected_ids)
+                repaired_result = self._run_grounding_validation(repaired_resume, ResumeValidationOutput)
+                still_rejected_ids = self._validated_rejected_ids(
+                    repaired_result, set(self._tailored_sections(repaired_resume))
+                )
+                if still_rejected_ids:
+                    logger.warning("resume_grounding_fallback_to_source", extra={"rejected.section_ids": sorted(still_rejected_ids)})
+                    self._restore_rejected_sections_from_source(repaired_resume, still_rejected_ids)
+                    repaired_resume.setdefault("metadata", {})["grounding_fallback_sections"] = sorted(still_rejected_ids)
+                tailored_resume = repaired_resume
+        except Exception as error:
+            logger.error("Grounding validation failed: %s", error)
+            raise RuntimeError(f"Final grounding validation failed: {error}") from error
+        return tailored_resume
+
+    def _run_grounding_validation(self, tailored_resume: dict, schema):
+        from services.langchain_helpers import invoke_structured
+
+        tailored_sections = self._tailored_sections(tailored_resume)
+        return invoke_structured(
+            self.user,
+            "RESUME_GROUNDING_VALIDATOR",
+            schema,
+            timeout_seconds=75.0,
+            max_retries=1,
+            **self._get_prompt_inputs(tailored_sections=tailored_sections),
+        )
+
+    def _tailored_sections(self, tailored_resume: dict) -> dict:
+        experience_indexes = self._source_indexes(
+            tailored_resume["experiences"], self.experiences or [],
+            ("company", "skip_name", "location", "titles"), "experiences",
+        )
+        project_indexes = self._source_indexes(
+            tailored_resume["projects"], self.projects or [],
+            ("name", "technologies", "link", "hyperlink", "show_link"), "projects",
+        )
+        return {
+            "objective": tailored_resume["objective"],
+            "skills": tailored_resume["skills"],
+            **{f"experience:{source_index}": item for item, source_index in zip(tailored_resume["experiences"], experience_indexes)},
+            **{f"project:{source_index}": item for item, source_index in zip(tailored_resume["projects"], project_indexes)},
+        }
+
+    @staticmethod
+    def _validated_rejected_ids(validation_result, expected_ids: set[str]) -> set[str]:
+        approved_ids = set(validation_result.approved_section_ids)
+        rejected_ids = set(validation_result.rejected_section_ids)
+        if approved_ids & rejected_ids:
+            raise ValueError("Grounding review returned overlapping approved and rejected section IDs")
+        if approved_ids | rejected_ids != expected_ids:
+            raise ValueError("Grounding review did not return one verdict for every tailored section")
+        return rejected_ids
+
+    def _preserve_section_identity(self, tailored: dict) -> dict:
+        """Keep source roles/projects stable while allowing relevance-based ordering."""
+        for section_name, source_items, identity_fields in (
+            ("experiences", self.experiences or [], ("company", "skip_name", "location", "titles")),
+            ("projects", self.projects or [], ("name", "technologies", "link", "hyperlink", "show_link")),
+        ):
+            generated_items = tailored.get(section_name, [])
+            self._source_indexes(generated_items, source_items, identity_fields, section_name)
+        return tailored
+
+    @staticmethod
+    def _source_indexes(generated_items: list, source_items: list, identity_fields: tuple, section_name: str) -> list[int]:
+        if len(generated_items) != len(source_items):
+            raise ValueError(f"Tailored {section_name} must preserve every source section")
+        remaining_indexes = set(range(len(source_items)))
+        source_indexes = []
+        for generated in generated_items:
+            candidates = [
+                index for index in remaining_indexes
+                if all(generated.get(field) == source_items[index].get(field) for field in identity_fields)
+            ]
+            if len(candidates) != 1:
+                raise ValueError(f"Tailored {section_name} changed, duplicated, or omitted a source section")
+            source_index = candidates[0]
+            remaining_indexes.remove(source_index)
+            source_indexes.append(source_index)
+        return source_indexes
+
+    def _restore_approved_sections(self, before: dict, after: dict, rejected_ids: set[str]) -> None:
+        before_sections = self._tailored_sections(before)
+        after_sections = self._tailored_sections(after)
+        if set(before_sections) != set(after_sections):
+            raise ValueError("Repair changed the tailored resume structure")
+        for section_id, original_content in before_sections.items():
+            if section_id not in rejected_ids:
+                self._replace_section(after, section_id, deepcopy(original_content))
+
+    def _restore_rejected_sections_from_source(self, tailored_resume: dict, rejected_ids: set[str]) -> None:
+        for section_id in rejected_ids:
+            if section_id == "objective":
+                tailored_resume["objective"] = self.objective or ""
+            elif section_id == "skills":
+                tailored_resume["skills"] = deepcopy(self.skills or [])
+            elif section_id.startswith("experience:"):
+                source_index = int(section_id.split(":", 1)[1])
+                self._replace_section(tailored_resume, section_id, deepcopy((self.experiences or [])[source_index]))
+            elif section_id.startswith("project:"):
+                source_index = int(section_id.split(":", 1)[1])
+                self._replace_section(tailored_resume, section_id, deepcopy((self.projects or [])[source_index]))
+
+    def _replace_section(self, tailored_resume: dict, section_id: str, content) -> None:
+        if section_id == "objective":
+            tailored_resume["objective"] = content
+            return
+        if section_id == "skills":
+            tailored_resume["skills"] = content
+            return
+        section_type, source_index_text = section_id.split(":", 1)
+        source_index = int(source_index_text)
+        section_name = "experiences" if section_type == "experience" else "projects"
+        source_items = self.experiences or [] if section_type == "experience" else self.projects or []
+        identity_fields = ("company", "skip_name", "location", "titles") if section_type == "experience" else ("name", "technologies", "link", "hyperlink", "show_link")
+        output_index = self._source_indexes(tailored_resume[section_name], source_items, identity_fields, section_name).index(source_index)
+        tailored_resume[section_name][output_index] = content
+
+    def _validation_feedback_by_section(self, validation_result, valid_ids: set[str]) -> dict[str, str]:
+        feedback = {}
+        for item in getattr(validation_result, "rejected_sections", []) or []:
+            if hasattr(item, "model_dump"):
+                item = item.model_dump()
+            if not isinstance(item, dict):
+                continue
+            section_id = item.get("section_id")
+            reason = item.get("reason")
+            if section_id in valid_ids and isinstance(reason, str) and reason.strip():
+                feedback[section_id] = " ".join(reason.split())
+        return feedback
+
+    def _repair_tailored_resume(self, tailored_resume: dict, rejection_feedback: dict[str, str], include_objective: bool) -> dict:
+        try:
+            from dataModels.resume import ResumeRepairWriterOutput
+            from services.langchain_helpers import invoke_structured
+
+            result = invoke_structured(
+                self.user,
+                "RESUME_REPAIR_WRITER",
+                ResumeRepairWriterOutput,
+                timeout_seconds=90.0,
+                max_retries=1,
+                **self._get_prompt_inputs(
+                    include_objective=include_objective,
+                    tailored_resume_draft=tailored_resume,
+                    validation_feedback=rejection_feedback,
+                ),
+            )
+            repaired = result.final_answer.model_dump() if hasattr(result.final_answer, "model_dump") else result.final_answer
+            if not include_objective:
+                repaired["objective"] = ""
+            repaired = self._preserve_section_identity(repaired)
+            tailored_resume["objective"] = repaired["objective"]
+            tailored_resume["experiences"] = repaired["experiences"]
+            tailored_resume["projects"] = repaired["projects"]
+            tailored_resume["skills"] = repaired["skills"]
+            tailored_resume.setdefault("metadata", {})["grounding_repair_attempted_sections"] = sorted(rejection_feedback)
+            return tailored_resume
+        except Exception as error:
+            logger.error("Resume repair failed: %s", error)
+            raise RuntimeError(f"Resume repair failed: {error}") from error
+
+    async def download_and_parse_job_post(self, url=None):
         if url:
             self.url = url
-        self._download_url()
+        downloaded = await self._download_url()
+        if not downloaded or not self.job_post_html_data:
+            raise ValueError(f"Unable to download job posting from {self.url}")
         self._extract_html_data()
         self.job_post = JobPost(self.job_post_raw, self.user)
-        self.parsed_job = self.job_post.parse_job_post(verbose=True)
+        self.parsed_job = await asyncio.to_thread(self.job_post.parse_job_post)
 
     def _extract_html_data(self):
-        """Extract text content from HTML, removing all HTML tags.
-
-        Raises:
-            Exception: If HTML data extraction fails.
-        """
         try:
             soup = BeautifulSoup(self.job_post_html_data, "html.parser")
             self.job_post_raw = soup.get_text(separator=" ", strip=True)
-        except Exception as e:
-            logger.error(f"Failed to extract HTML data: {e}")
+        except Exception as error:
+            logger.error("job_page_text_extraction_failed", extra={"error.reason": str(error)})
             raise
 
-    def _download_url(self, url=None):
-        """Download the content of the URL and return it as a string.
-
-        Args:
-            url (str, optional): The URL to download. Defaults to None.
-
-        Returns:
-            bool: True if download was successful, False otherwise.
-        """
+    async def _download_url(self, url=None):
         if url:
             self.url = url
 
         max_retries = config.get("settings.max_retries", 3)
         backoff_factor = config.get("settings.backoff_factor", 2)
-        use_proxy = False
+        timeout = httpx.Timeout(20.0, connect=10.0)
 
-        for attempt in range(max_retries):
-            response = None
-            try:
-                proxies = None
-                if use_proxy:
-                    proxy = FreeProxy(rand=True).get()
-                    proxies = {"http": proxy, "https": proxy}
-
-                response = requests.get(
-                    self.url, headers=config.get_enhanced_headers(), proxies=proxies
-                )
-                response.raise_for_status()
-                if response and response.status_code!= 200:
-                    raise RequestException
-                self.job_post_html_data = response.text
-                return True
-
-            except requests.RequestException as e:
-                if response and (response.status_code == 429 or response.status_code == 999):
-                    logger.warning(
-                        f"Rate limit exceeded. Retrying in {backoff_factor * 2 ** attempt} seconds..."
-                    )
-                    time.sleep(backoff_factor * 2**attempt)
-                    use_proxy = True
-                else:
-                    logger.error(f"Failed to download URL {self.url}: {e}")
+        async with httpx.AsyncClient(
+            headers=config.get_enhanced_headers(self.url),
+            follow_redirects=True,
+            timeout=timeout,
+        ) as client:
+            for attempt in range(max_retries):
+                try:
+                    response = await client.get(self.url)
+                    response.raise_for_status()
+                    self.job_post_html_data = response.text
+                    return True
+                except httpx.HTTPStatusError as error:
+                    status_code = error.response.status_code
+                    if status_code not in (429, 999) or attempt == max_retries - 1:
+                        logger.error("job_page_download_failed", extra={"error.reason": str(error)})
+                        break
+                    delay = backoff_factor * 2 ** attempt
+                    logger.warning("job_page_rate_limited", extra={"retry.delay_seconds": delay})
+                    await asyncio.sleep(delay)
+                except httpx.HTTPError as error:
+                    logger.error("job_page_download_failed", extra={"error.reason": str(error)})
                     if attempt < max_retries - 1:
-                        time.sleep(backoff_factor * 2**attempt)
+                        await asyncio.sleep(backoff_factor * 2 ** attempt)
 
-        logger.error(f"Exceeded maximum retries for URL {self.url}")
+        logger.error("job_page_download_retries_exhausted")
         return False
 
-    def write_objective(self, **chain_kwargs) -> str:
-        """Write an objective for the resume."""
-        try:
-            from prompts import Prompts
-            from dataModels.resume import ResumeSummarizerOutput
-            from services.langchain_helpers import create_llm
-            from langchain.prompts import ChatPromptTemplate
-
-            # Create chain
-            prompt = ChatPromptTemplate(messages=Prompts.lookup["OBJECTIVE_WRITER"])
-            llm = create_llm(self.user, **self.llm_kwargs)
-            chain = prompt | llm.with_structured_output(schema=ResumeSummarizerOutput)
-
-            # Get inputs
-            chain_inputs = self._get_formatted_chain_inputs(chain=chain)
-            logger.debug(f"Objective chain inputs: {list(chain_inputs.keys())}")
-
-            # Generate
-            result = chain.invoke(chain_inputs)
-            if result:
-                # Handle both Pydantic model and dictionary responses
-                if hasattr(result, 'final_answer'):
-                    # Pydantic model
-                    objective = result.final_answer
-                    logger.info("Using Pydantic model access")
-                elif isinstance(result, dict):
-                    # Dictionary response
-                    objective = result.get('final_answer')
-                    logger.info("Using dictionary access")
-                else:
-                    # Direct string response
-                    objective = result
-                    logger.info("Using direct response")
-
-                logger.debug(f"Objective result: {objective}")
-                return objective
-
-            logger.warning("Objective generation returned None")
-            return None
-
-        except Exception as e:
-            logger.error(f"Error in write_objective: {e}")
-            return None
-
-    def extract_matched_skills(self, **chain_kwargs) -> list:
-        """Extract matched skills from the resume and job post with LLM handling deduplication."""
-        try:
-            from prompts import Prompts
-            from dataModels.resume import ResumeSkillsMatcherOutput
-            from services.langchain_helpers import create_llm
-            from langchain_core.prompts import ChatPromptTemplate
-
-            chain = ChatPromptTemplate(messages=Prompts.lookup["SKILLS_MATCHER"])
-            llm = create_llm(self.user, **self.llm_kwargs)
-
-            # Keep using function_calling method since json_mode requires "json" in prompts
-            runnable = chain | llm.with_structured_output(schema=ResumeSkillsMatcherOutput, method="function_calling")
-
-            chain_inputs = self._get_formatted_chain_inputs(chain=runnable)
-            extracted_skills = runnable.invoke(chain_inputs)
-
-            if not extracted_skills:
-                logger.warning("No extracted_skills returned from LLM")
-                return self.skills or []
-
-            # Handle both Pydantic model and dictionary responses
-            if hasattr(extracted_skills, 'final_answer'):
-                # Pydantic model
-                extracted_skills_dict = extracted_skills.final_answer
-            elif isinstance(extracted_skills, dict):
-                # Dictionary response
-                extracted_skills_dict = extracted_skills.get("final_answer", {})
-            else:
-                logger.error(f"Unexpected response type: {type(extracted_skills)}")
-                return self.skills or []
-
-            logger.info(f"LLM returned skills: {extracted_skills_dict}")
-
-            # Build the final skills structure - LLM has already handled deduplication
-            result = []
-
-            # Handle technical skills - support both Pydantic model and dict
-            if hasattr(extracted_skills_dict, 'technical_skills'):
-                # Pydantic model
-                technical_skills = extracted_skills_dict.technical_skills or {}
-            elif isinstance(extracted_skills_dict, dict):
-                # Dictionary
-                technical_skills = extracted_skills_dict.get("technical_skills", {})
-            else:
-                technical_skills = {}
-
-            if technical_skills and isinstance(technical_skills, dict):
-                # Convert to subcategories format
-                subcategories = []
-                for category_name, skills_list in technical_skills.items():
-                    if skills_list:  # Only add non-empty categories
-                        subcategories.append({
-                            "name": category_name,
-                            "skills": skills_list
-                        })
-
-                if subcategories:
-                    result.append({
-                        "category": "Technical",
-                        "subcategories": subcategories
-                    })
-
-            # Handle non-technical skills - support both Pydantic model and dict
-            if hasattr(extracted_skills_dict, 'non_technical_skills'):
-                # Pydantic model
-                non_technical_skills = extracted_skills_dict.non_technical_skills or []
-            elif isinstance(extracted_skills_dict, dict):
-                # Dictionary
-                non_technical_skills = extracted_skills_dict.get("non_technical_skills", [])
-            else:
-                non_technical_skills = []
-
-            if non_technical_skills and isinstance(non_technical_skills, list):
-                result.append({
-                    "category": "Non-technical",
-                    "skills": non_technical_skills
-                })
-
-            logger.info(f"Final skills structure: {len(result)} categories")
-            for category in result:
-                if "subcategories" in category:
-                    logger.info(f"  {category['category']}: {len(category['subcategories'])} subcategories")
-                    for subcat in category['subcategories']:
-                        logger.info(f"    - {subcat['name']}: {len(subcat['skills'])} skills")
-                else:
-                    logger.info(f"  {category['category']}: {len(category['skills'])} skills")
-
-            return result
-
-        except Exception as e:
-            logger.error(f"Error in extract_matched_skills: {e}")
-            import traceback
-            logger.error(f"Full traceback: {traceback.format_exc()}")
-            return self.skills or []
-
-    def rewrite_unedited_experiences(self, **chain_kwargs) -> list:
-        """Rewrite unedited experiences in the resume."""
-        try:
-            if not self.experiences:
-                logger.info("No experiences to rewrite")
-                return []
-
-            logger.info(f"Rewriting {len(self.experiences)} experiences...")
-            result = []
-            for i, exp in enumerate(self.experiences):
-                logger.info(f"Processing experience {i + 1}: {exp.get('title', 'Unknown')}")
-                exp = dict(exp)
-
-                # Log original highlights
-                original_highlights = exp.get("highlights", [])
-                logger.info(f"  Original highlights: {len(original_highlights)} items")
-                for j, highlight in enumerate(original_highlights):
-                    logger.debug(f"    {j + 1}: {highlight}")
-
-                # Rewrite section
-                new_highlights = self.rewrite_section(section=exp, **chain_kwargs)
-                logger.info(f"  New highlights: {len(new_highlights) if new_highlights else 0} items")
-
-                if new_highlights:
-                    for j, highlight in enumerate(new_highlights):
-                        logger.debug(f"    NEW {j + 1}: {highlight}")
-                    exp["highlights"] = new_highlights
-                else:
-                    logger.warning(f"  No new highlights generated, keeping original")
-                    exp["highlights"] = original_highlights
-
-                result.append(exp)
-
-            logger.info(f"Completed rewriting {len(result)} experiences")
-            return result
-        except Exception as e:
-            logger.error(f"Error in rewrite_unedited_experiences: {e}")
-            import traceback
-            logger.error(f"Experience rewrite traceback: {traceback.format_exc()}")
-            return self.experiences or []
-
-    def rewrite_unedited_projects(self, **chain_kwargs) -> list:
-        """Rewrite unedited projects in the resume."""
-        try:
-            if not self.projects:
-                logger.info("No projects to rewrite")
-                return []
-
-            logger.info(f"Rewriting {len(self.projects)} projects...")
-            result = []
-            for i, proj in enumerate(self.projects):
-                logger.info(f"Processing project {i + 1}: {proj.get('name', 'Unknown')}")
-                proj = dict(proj)
-
-                # Log original highlights
-                original_highlights = proj.get("highlights", [])
-                logger.info(f"  Original highlights: {len(original_highlights)} items")
-                for j, highlight in enumerate(original_highlights):
-                    logger.debug(f"    {j + 1}: {highlight}")
-
-                # Rewrite section
-                new_highlights = self.rewrite_section(section=proj, **chain_kwargs)
-                logger.info(f"  New highlights: {len(new_highlights) if new_highlights else 0} items")
-
-                if new_highlights:
-                    for j, highlight in enumerate(new_highlights):
-                        logger.debug(f"    NEW {j + 1}: {highlight}")
-                    proj["highlights"] = new_highlights
-                else:
-                    logger.warning(f"  No new highlights generated, keeping original")
-                    proj["highlights"] = original_highlights
-
-                result.append(proj)
-
-            logger.info(f"Completed rewriting {len(result)} projects")
-            return result
-        except Exception as e:
-            logger.error(f"Error in rewrite_unedited_projects: {e}")
-            import traceback
-            logger.error(f"Project rewrite traceback: {traceback.format_exc()}")
-            return self.projects or []
-
-    def rewrite_section(self, section, **chain_kwargs) -> list:
-        """Rewrite a section of the resume."""
-        try:
-            from prompts import Prompts
-            from dataModels.resume import ResumeSectionHighlighterOutput
-            from services.langchain_helpers import create_llm
-            from langchain.prompts import ChatPromptTemplate
-
-            logger.debug(f"Starting rewrite_section for: {section.get('title') or section.get('name', 'Unknown')}")
-
-            prompt = ChatPromptTemplate(messages=Prompts.lookup["SECTION_HIGHLIGHTER"])
-            llm = create_llm(self.user, **self.llm_kwargs)
-            chain = prompt | llm.with_structured_output(schema=ResumeSectionHighlighterOutput)
-
-            chain_inputs = self._get_formatted_chain_inputs(chain=chain, section=section)
-            logger.debug(f"Chain inputs keys: {list(chain_inputs.keys())}")
-
-            # Log some key inputs for debugging
-            if 'section' in chain_inputs:
-                section_info = chain_inputs['section']
-                if isinstance(section_info, str):
-                    logger.debug(f"Section input (first 200 chars): {section_info[:200]}...")
-                else:
-                    logger.debug(f"Section input type: {type(section_info)}")
-
-            logger.debug("Invoking LLM chain...")
-            section_revised = chain.invoke(chain_inputs)
-            logger.debug(f"LLM response type: {type(section_revised)}")
-            logger.debug(f"LLM response: {section_revised}")
-
-            if section_revised:
-                # Handle both Pydantic model and dictionary responses
-                if hasattr(section_revised, 'final_answer'):
-                    # Pydantic model
-                    highlights = section_revised.final_answer or []
-                    logger.info(f"Pydantic model: Got {len(highlights)} highlights")
-                    if highlights:
-                        sorted_highlights = sorted(highlights, key=lambda d: d.relevance * -1)
-
-                        # Determine limit based on section type
-                        section_type = self._determine_section_type(section)
-                        limit = 4 if section_type == 'experience' else 2 if section_type == 'project' else len(
-                            sorted_highlights)
-
-                        # Apply limit
-                        limited_highlights = sorted_highlights[:limit]
-                        result = [s.highlight for s in limited_highlights]
-
-                        logger.info(f"Limited to top {limit} highlights for {section_type} section")
-                        logger.debug(f"Final highlights: {result}")
-                        return result
-
-                elif isinstance(section_revised, dict):
-                    # Dictionary response
-                    highlights = section_revised.get("final_answer", [])
-                    logger.info(f"Dictionary: Got {len(highlights)} highlights")
-                    if highlights:
-                        sorted_highlights = sorted(highlights, key=lambda d: d.get("relevance", 0) * -1)
-
-                        # Determine limit based on section type
-                        section_type = self._determine_section_type(section)
-                        limit = 4 if section_type == 'experience' else 2 if section_type == 'project' else len(
-                            sorted_highlights)
-
-                        # Apply limit
-                        limited_highlights = sorted_highlights[:limit]
-                        result = [s.get("highlight", "") for s in limited_highlights]
-
-                        logger.info(f"Limited to top {limit} highlights for {section_type} section")
-                        logger.debug(f"Final highlights: {result}")
-                        return result
-                else:
-                    logger.error(f"Unexpected response type: {type(section_revised)}")
-                    logger.error(f"Response content: {section_revised}")
-
-            logger.warning("No valid highlights generated by LLM, returning original")
-            original_highlights = section.get("highlights", [])
-            logger.debug(f"Returning original highlights: {original_highlights}")
-            return original_highlights
-
-        except Exception as e:
-            logger.error(f"Error in rewrite_section: {e}")
-            import traceback
-            logger.error(f"Rewrite section traceback: {traceback.format_exc()}")
-            return section.get("highlights", [])
-
-    def _determine_section_type(self, section) -> str:
-        """Determine if section is experience or project based on its structure."""
-        # Check for experience indicators
-        if 'titles' in section or 'title' in section or 'company' in section:
-            return 'experience'
-        # Check for project indicators
-        elif 'name' in section:
-            return 'project'
-        else:
-            # Default fallback
-            return 'unknown'
-
-    def _get_formatted_chain_inputs(self, chain, section=None):
-        """Get formatted inputs for chain with proper skills formatting"""
+    def _get_prompt_inputs(self, **extra_values):
         from services.langchain_helpers import chain_formatter
 
         output_dict = {}
-        raw_self_data = self.__dict__
-        if section is not None:
-            raw_self_data = raw_self_data.copy()
-            raw_self_data["section"] = section
+        raw_self_data = self.__dict__.copy()
+        raw_self_data.update(extra_values)
+        raw_self_data["evidence_inventory"] = self.evidence_inventory
+        raw_self_data["evidence_map"] = self.evidence_plan
+        raw_self_data["tailoring_brief"] = self._tailoring_brief()
 
-        for key in chain.get_input_schema().schema().get("required", []):
-            value = raw_self_data.get(key) or (self.parsed_job.get(key) if self.parsed_job else None)
-
-            # Special handling for skills - pass the raw structure to chain_formatter
-            # Don't pre-format it here since chain_formatter will handle the formatting
-            if key == "skills" and self.skills:
-                # Pass the raw skills structure to chain_formatter, not a pre-formatted string
-                value = self.skills
-                logger.debug(f"Passing raw skills structure to chain_formatter: {len(self.skills)} categories")
-
+        keys = {
+            "basic", "objective", "education", "experiences", "projects", "skills",
+            "company", "job_title", "job_summary", "original_description", "duties", "qualifications", "ats_keywords",
+            "technical_skills", "non_technical_skills", "evidence_inventory", "evidence_map",
+            "tailored_sections", "tailored_resume_draft", "validation_feedback", "include_objective",
+            "tailoring_brief",
+        }
+        for key in keys:
+            value = raw_self_data.get(key)
+            if value is None and self.parsed_job:
+                value = self.parsed_job.get(key)
             output_dict[key] = chain_formatter(key, value)
-
-            # Debug log for skills specifically
-            if key == "skills":
-                logger.debug(f"After chain_formatter, skills input type: {type(output_dict[key])}")
-
         return output_dict
 
     def _get_degrees(self, resume: dict):
-        """Extract degrees from the resume."""
         result = []
-        education = resume.get('education', [])
+        education = resume.get("education", [])
         for edu in education:
-            degrees = edu.get('degrees', [])
-            for degree in degrees:
-                names = degree.get('names', [])
+            for degree in edu.get("degrees", []):
+                names = degree.get("names", [])
                 if isinstance(names, list):
                     result.extend(names)
                 elif isinstance(names, str):
                     result.append(names)
         return result
 
-    def _combine_skills_in_category(self, l1: list[str], l2: list[str]):
-        """Combine two lists of skills without duplicating lowercase entries."""
-        l1_lower = {i.lower() for i in l1}
-        for i in l2:
-            if i.lower() not in l1_lower:
-                l1.append(i)
-
-    def _combine_skill_lists(self, l1: list[dict], l2: list[dict]):
-        """Combine two lists of skill categories without duplicating lowercase entries."""
-        l1_categories_lowercase = {s["category"].lower(): i for i, s in enumerate(l1)}
-
-        for s in l2:
-            category_lower = s["category"].lower()
-
-            if category_lower in l1_categories_lowercase:
-                # Get the existing category
-                existing_idx = l1_categories_lowercase[category_lower]
-                existing_category = l1[existing_idx]
-
-                # Handle different structures: subcategories vs direct skills
-                if "subcategories" in existing_category and "subcategories" in s:
-                    # Both have subcategories - merge subcategories
-                    existing_subcats = {sub["name"].lower(): sub for sub in existing_category["subcategories"]}
-
-                    for new_subcat in s["subcategories"]:
-                        subcat_name_lower = new_subcat["name"].lower()
-                        if subcat_name_lower in existing_subcats:
-                            # Merge skills within the subcategory
-                            self._combine_skills_in_category(
-                                existing_subcats[subcat_name_lower]["skills"],
-                                new_subcat["skills"]
-                            )
-                        else:
-                            # Add new subcategory
-                            existing_category["subcategories"].append(new_subcat)
-
-                elif "skills" in existing_category and "skills" in s:
-                    # Both have direct skills - merge them
-                    self._combine_skills_in_category(
-                        existing_category["skills"],
-                        s["skills"]
-                    )
-
-                elif "subcategories" in existing_category and "skills" in s:
-                    # Existing has subcategories, new has direct skills
-                    # Convert new skills to a subcategory or handle as needed
-                    if not any(sub["name"].lower() == "general" for sub in existing_category["subcategories"]):
-                        existing_category["subcategories"].append({
-                            "name": "General",
-                            "skills": s["skills"][:]
-                        })
-                    else:
-                        # Find General subcategory and add skills
-                        for sub in existing_category["subcategories"]:
-                            if sub["name"].lower() == "general":
-                                self._combine_skills_in_category(sub["skills"], s["skills"])
-                                break
-
-                elif "skills" in existing_category and "subcategories" in s:
-                    # Existing has direct skills, new has subcategories
-                    # Convert existing to subcategories format
-                    existing_skills = existing_category["skills"][:]
-                    existing_category["subcategories"] = [
-                        {"name": "General", "skills": existing_skills}
-                    ]
-                    del existing_category["skills"]
-
-                    # Now merge the subcategories
-                    existing_subcats = {"general": existing_category["subcategories"][0]}
-                    for new_subcat in s["subcategories"]:
-                        subcat_name_lower = new_subcat["name"].lower()
-                        if subcat_name_lower in existing_subcats:
-                            self._combine_skills_in_category(
-                                existing_subcats[subcat_name_lower]["skills"],
-                                new_subcat["skills"]
-                            )
-                        else:
-                            existing_category["subcategories"].append(new_subcat)
-            else:
-                # Add new category
-                l1.append(s)
-
     def dict_to_yaml_string(self, data: dict) -> str:
-        """Converts a dictionary to a YAML-formatted string."""
-        yaml.allow_unicode = True
         try:
-            from io import StringIO
-            stream = StringIO()
-            yaml.dump(data, stream=stream, default_flow_style=False, allow_unicode=True)
-            return stream.getvalue()
-        except YAMLError as e:
-            logger.error("Failed to convert dict to YAML string.")
-            raise e
+            return yaml.dump(data, default_flow_style=False, allow_unicode=True)
+        except YAMLError as error:
+            logger.error("resume_yaml_serialization_failed")
+            raise ValueError("Could not serialize the generated resume") from error
 
     def __del__(self):
-        """Cleanup thread pool on deletion."""
-        if hasattr(self, 'executor'):
-            self.executor.shutdown(wait=False)
+        self.close()
+
+    def close(self):
+        return None

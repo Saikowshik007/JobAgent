@@ -2,7 +2,7 @@ from typing import Dict, List, Optional, Any
 import hashlib
 import json
 import logging
-import threading
+import os
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -13,7 +13,7 @@ class DBCacheManager:
     This manager provides a single interface for all database and cache interactions.
     """
 
-    def __init__(self, database=None, redis_cache=None, redis_url="redis://redis:6379"):
+    def __init__(self, database=None, redis_cache=None, redis_url: Optional[str] = None):
         """
         Initialize the unified cache manager with database and Redis cache.
 
@@ -24,10 +24,11 @@ class DBCacheManager:
         """
         self.db = database
 
-        # Initialize Redis cache if not provided
+        # Initialize Redis cache if not provided.  This honors the deployment
+        # configuration instead of assuming a Docker service named "redis".
         if redis_cache is None:
             from data.cache import RedisCache
-            self.cache = RedisCache(redis_url=redis_url)
+            self.cache = RedisCache(redis_url=redis_url or os.getenv("REDIS_URL", "redis://localhost:6379/0"))
         else:
             self.cache = redis_cache
 
@@ -547,6 +548,24 @@ class DBCacheManager:
                 await self.cache.remove_resume_status(resume_id, user_id)
         except Exception as e:
             logger.error(f"Error removing resume status for user {user_id}: {e}")
+
+    async def get_resume_plan(self, user_id: str, plan_key: str) -> Optional[Dict]:
+        """Get reusable resume planning artifacts from Redis cache."""
+        try:
+            if self.cache:
+                return await self.cache.get_resume_plan(user_id, plan_key)
+            return None
+        except Exception as e:
+            logger.error(f"Error getting resume plan for user {user_id}: {e}")
+            return None
+
+    async def set_resume_plan(self, user_id: str, plan_key: str, plan_data: Dict[str, Any]):
+        """Persist reusable resume planning artifacts in Redis cache."""
+        try:
+            if self.cache:
+                await self.cache.set_resume_plan(user_id, plan_key, plan_data)
+        except Exception as e:
+            logger.error(f"Error setting resume plan for user {user_id}: {e}")
 
     # Cache Management Methods
     async def clear_user_cache(self, user_id: str):

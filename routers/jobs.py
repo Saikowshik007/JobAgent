@@ -41,7 +41,7 @@ async def analyze_job(
             url=job_url,
             user = user
         )
-        resume_improver.download_and_parse_job_post()
+        await resume_improver.download_and_parse_job_post()
         job_details = resume_improver.parsed_job
 
         # Create a job ID
@@ -64,6 +64,7 @@ async def analyze_job(
             date_found=datetime.now(),
             metadata={
                 **job_details,
+                "original_description": resume_improver.job_post_raw,
                 "analyzed_with_model": user.model  # Track which model was used
             }
         )
@@ -82,6 +83,11 @@ async def analyze_job(
             "job_details": job.to_dict()
         }
 
+    except HTTPException:
+        raise
+    except ValueError as e:
+        logger.warning(f"Could not retrieve job posting for user {user.id}: {e}")
+        raise HTTPException(status_code=502, detail="Unable to retrieve the job posting") from e
     except Exception as e:
         logger.error(f"Error analyzing job for user {user.id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -437,7 +443,8 @@ async def analyze_job_description(
         # Parse the job description using your existing JobPost class
         from dataModels.job_post import JobPost
         job_post = JobPost(job_description, user)
-        job_details = job_post.parse_job_post(verbose=True)
+        import asyncio
+        job_details = await asyncio.to_thread(job_post.parse_job_post)
 
         # Create a job ID
         job_id = hashlib.md5(f"{user.id}|{pseudo_url}|{datetime.now().isoformat()}".encode()).hexdigest()
@@ -459,7 +466,7 @@ async def analyze_job_description(
             metadata={
                 **job_details,
                 "input_method": "description",
-                "original_description": job_description[:1000],  # Store first 1000 chars
+                "original_description": job_description,
                 "description_length": len(job_description),
                 "description_hash": description_hash
             }

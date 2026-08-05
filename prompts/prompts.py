@@ -1,5 +1,4 @@
-from langchain_core.prompts import ChatPromptTemplate, HumanMessagePromptTemplate
-from langchain_core.messages import HumanMessage, SystemMessage
+from collections import defaultdict
 import yaml
 import config
 
@@ -23,7 +22,7 @@ class Prompts:
     @staticmethod
     def _load_prompts(yaml_path: str) -> dict:
         """
-        Load prompts from a YAML file and organize them into a lookup dictionary.
+        Load provider-neutral prompt definitions from a YAML file.
 
         :param yaml_path: Path to the YAML file containing prompt configurations.
         :return: A dictionary with prompt types as keys and lists of message templates as values.
@@ -31,23 +30,30 @@ class Prompts:
         with open(yaml_path, "r") as file:
             prompts_data = yaml.safe_load(file)
 
-        lookup = {}
-        for prompt_type, sub_data in prompts_data.items():
-            sub_lookup = [
-                SystemMessage(content=sub_data["system_message"]),
-                HumanMessagePromptTemplate.from_template(
-                    sub_data["job_posting_template"]
-                ),
-                HumanMessagePromptTemplate.from_template(
-                    sub_data.get("resume_template", "")
-                ),
-                HumanMessage(content=sub_data["instruction_message"]),
-                HumanMessage(content=sub_data["criteria_message"]),
-                HumanMessage(content=sub_data["steps_message"]),
-            ]
-            lookup[prompt_type] = sub_lookup
+        return prompts_data
 
-        return lookup
+    @classmethod
+    def render_messages(cls, prompt_type: str, **values) -> list[dict[str, str]]:
+        """Render a prompt as provider-neutral Responses API input messages."""
+        if cls.lookup is None:
+            cls.initialize()
+        prompt = cls.lookup[prompt_type]
+        safe_values = defaultdict(str, values)
+        user_content = "\n\n".join(
+            template.format_map(safe_values)
+            for template in (
+                prompt["job_posting_template"],
+                prompt.get("resume_template", ""),
+                prompt["instruction_message"],
+                prompt["criteria_message"],
+                prompt["steps_message"],
+            )
+            if template
+        )
+        return [
+            {"role": "developer", "content": prompt["system_message"]},
+            {"role": "user", "content": user_content},
+        ]
 
     @staticmethod
     def _load_descriptions(yaml_path: str) -> dict:

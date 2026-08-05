@@ -1,8 +1,9 @@
 import asyncio
-import concurrent
 import uuid
 import yaml
 from datetime import datetime
+import hashlib
+import json
 from typing import Optional, Dict, Any, List
 from yaml import YAMLError
 
@@ -10,6 +11,7 @@ import config
 from data.cache import ResumeGenerationStatus
 from dataModels.data_models import JobStatus, Resume
 from dataModels.user_model import User
+from dataModels.resume import SourceResumeData
 from services.resume_improver import ResumeImprover
 
 logger = config.getLogger("Resume Generator")
@@ -23,7 +25,6 @@ class ResumeGenerator:
     def __init__(self, cache_manager):
         """Initialize the ResumeGenerator with unified cache manager and user ID."""
         self.cache_manager = cache_manager
-        self.thread_pool = concurrent.futures.ThreadPoolExecutor(max_workers=4)
 
     async def generate_resume(self, job_id: str, user: User, template: str = "standard",
                               customize: bool = True, resume_data: Optional[Dict[str, Any]] = None,
@@ -43,6 +44,13 @@ class ResumeGenerator:
         job_dict = await self.cache_manager.get_job(job_id, user.id)
         if not job_dict:
             raise ValueError(f"Job not found with ID: {job_id} for user: {user.id}")
+        if not isinstance(resume_data, dict) or not resume_data:
+            raise ValueError("resume_data is required to generate a factual tailored resume")
+        if not customize:
+            raise ValueError("customize=false does not generate a tailored resume; save the source resume without calling this endpoint")
+        if template not in (None, "standard"):
+            raise ValueError(f"Unsupported resume template: {template}")
+        resume_data = self._validate_resume_data(resume_data)
 
         # Check for existing resumes linked to this job
         existing_resumes = await self.cache_manager.get_resumes_for_job(job_id, user.id)
@@ -55,7 +63,15 @@ class ResumeGenerator:
 
         # Set initial status in cache
         await self.cache_manager.set_resume_status(
-            resume_id, user.id, ResumeGenerationStatus.PENDING
+            resume_id,
+            user.id,
+            ResumeGenerationStatus.PENDING,
+            data={
+                "stage": "queued",
+                "progress_percentage": 5,
+                "message": "Resume generation is queued",
+                "job_id": job_id,
+            },
         )
 
         # Start background generation (non-blocking)
@@ -63,9 +79,15 @@ class ResumeGenerator:
             job_dict, resume_id, user, template, customize, resume_data, existing_resumes, handle_existing, include_objective
         ))
 
+        estimated_completion_seconds = self._estimate_completion_seconds(
+            resume_data=resume_data,
+            customize=customize,
+            include_objective=include_objective,
+        )
+
         return {
             "status": "generating",
-            "message": f"Resume generation started for job {job_dict.get('job_title', 'Unknown')} at {job_dict.get('company', 'Unknown')}",
+            "message": self._generation_message(job_dict),
             "resume_id": resume_id,
             "job_id": job_id,
             "user_id": user.id,
@@ -73,7 +95,7 @@ class ResumeGenerator:
             "existing_resumes_count": len(existing_resumes),
             "handle_existing": handle_existing,
             "include_objective": include_objective,
-            "estimated_completion_seconds": 60
+            "estimated_completion_seconds": estimated_completion_seconds,
         }
     async def _generate_resume_background(self, job_dict: dict, resume_id: str, user: User, template: str,
                                           customize: bool, resume_data: Optional[Dict[str, Any]],
@@ -81,19 +103,46 @@ class ResumeGenerator:
                                           include_objective: bool = True):
         """Background task to generate resume with orphaning prevention."""
         try:
-            logger.info(f"Starting resume generation for job {job_dict.get('id')} for user {user.id} with model : {user.model}")
+            logger.info("resume_generation_started", extra={"job.id": job_dict.get("id"), "resume.id": resume_id, "model.name": user.model})
 
             # Update status to in progress
             await self.cache_manager.set_resume_status(
-                resume_id, user.id, ResumeGenerationStatus.IN_PROGRESS
+                resume_id,
+                user.id,
+                ResumeGenerationStatus.IN_PROGRESS,
+                data={
+                    "stage": "initializing",
+                    "progress_percentage": 10,
+                    "message": "Loading the job and source resume",
+                    "job_id": job_dict.get("id"),
+                },
             )
 
-            # Run the blocking resume generation in thread pool
-            loop = asyncio.get_event_loop()
-            yaml_content = await loop.run_in_executor(
-                self.thread_pool,
+            event_loop = asyncio.get_running_loop()
+
+            def report_progress(stage: str, progress_percentage: int, message: str) -> None:
+                future = asyncio.run_coroutine_threadsafe(
+                    self.cache_manager.set_resume_status(
+                        resume_id,
+                        user.id,
+                        ResumeGenerationStatus.IN_PROGRESS,
+                        data={
+                            "stage": stage,
+                            "progress_percentage": progress_percentage,
+                            "message": message,
+                            "job_id": job_dict.get("id"),
+                            "plan_cache_key": self._build_resume_plan_key(job_dict, resume_data),
+                        },
+                    ),
+                    event_loop,
+                )
+                future.result(timeout=5)
+
+            # Run the blocking LLM work outside the request event loop.  Using the
+            # shared asyncio executor avoids creating one thread pool per request.
+            yaml_content = await asyncio.to_thread(
                 self._generate_resume_sync,
-                job_dict, user, resume_data, include_objective  # Pass include_objective here
+                job_dict, user, resume_data, customize, include_objective, report_progress,
             )
 
             # Create the resume object
@@ -112,23 +161,23 @@ class ResumeGenerator:
             # Handle existing resumes BEFORE updating the job
             if existing_resumes:
                 if handle_existing == "replace":
-                    logger.info(f"Replacing {len(existing_resumes)} existing resume(s) for job {job_dict.get('id')}")
+                    logger.info("resume_generation_replacing_existing", extra={"job.id": job_dict.get("id"), "resume.replaced_count": len(existing_resumes)})
 
                     # Delete old resumes (but don't update the job yet since we're about to set the new one)
                     for old_resume in existing_resumes:
                         try:
                             success = await self.cache_manager.delete_resume(old_resume.id, user.id)
                             if success:
-                                logger.info(f"Deleted old resume {old_resume.id} for job {job_dict.get('id')}")
+                                logger.debug("resume_generation_previous_resume_deleted", extra={"job.id": job_dict.get("id")})
                                 # Remove from generation cache too
                                 await self.cache_manager.remove_resume_status(old_resume.id, user.id)
                             else:
-                                logger.warning(f"Failed to delete old resume {old_resume.id}")
-                        except Exception as e:
-                            logger.error(f"Error deleting old resume {old_resume.id}: {e}")
+                                logger.warning("resume_generation_previous_resume_delete_failed", extra={"job.id": job_dict.get("id")})
+                        except Exception as error:
+                            logger.warning("resume_generation_previous_resume_delete_failed", extra={"job.id": job_dict.get("id"), "error.reason": str(error)})
 
                 elif handle_existing == "keep_both":
-                    logger.info(f"Keeping {len(existing_resumes)} existing resume(s) alongside new resume for job {job_dict.get('id')}")
+                    logger.info("resume_generation_existing_resumes_retained", extra={"job.id": job_dict.get("id"), "resume.existing_count": len(existing_resumes)})
                     # Don't delete anything, just add the new resume
                     # Note: Only the newest resume will be linked to the job
 
@@ -138,7 +187,14 @@ class ResumeGenerator:
             # Update cache with completed status
             await self.cache_manager.set_resume_status(
                 resume_id, user.id, ResumeGenerationStatus.COMPLETED,
-                data={"yaml_content": yaml_content}
+                data={
+                    "yaml_content": yaml_content,
+                    "stage": "completed",
+                    "progress_percentage": 100,
+                    "message": "Resume generated successfully",
+                    "job_id": job_dict.get("id"),
+                    "plan_cache_key": self._build_resume_plan_key(job_dict, resume_data),
+                },
             )
 
             # Update job status to RESUME_GENERATED after everything is complete
@@ -146,15 +202,27 @@ class ResumeGenerator:
                 job_dict.get('id'), user.id, JobStatus.RESUME_GENERATED
             )
 
-            logger.info(f"Resume generation completed for job {job_dict.get('id')} for user {user.id}")
+            logger.info("resume_generation_completed", extra={"job.id": job_dict.get("id"), "resume.id": resume_id})
 
-        except Exception as e:
-            logger.error(f"Error generating resume for job {job_dict.get('id')} for user {user.id}: {e}")
+        except Exception as error:
+            logger.exception(
+                "Resume generation failed: %s",
+                error,
+                extra={"job.id": job_dict.get("id"), "resume.id": resume_id},
+            )
 
             # Update cache with failed status
+            failure_reason = str(error)
             await self.cache_manager.set_resume_status(
                 resume_id, user.id, ResumeGenerationStatus.FAILED,
-                error=str(e)
+                data={
+                    "stage": "failed",
+                    "progress_percentage": 0,
+                    "message": f"Resume generation failed: {failure_reason}",
+                    "failure_reason": failure_reason,
+                    "job_id": job_dict.get("id"),
+                },
+                error=failure_reason,
             )
     async def _update_job_with_resume_id(self, job_id: str, user_id:str, resume_id: str):
         """Update the job record with the generated resume ID."""
@@ -163,14 +231,16 @@ class ResumeGenerator:
             success = await self.cache_manager.update_job_resume_id(job_id, user_id, resume_id)
 
             if success:
-                logger.info(f"Successfully updated job {job_id} with resume_id {resume_id}")
+                logger.debug("job_resume_reference_updated", extra={"job.id": job_id, "resume.id": resume_id})
             else:
-                logger.error(f"Failed to update job {job_id} with resume_id {resume_id}")
+                logger.error("job_resume_reference_update_failed", extra={"job.id": job_id, "resume.id": resume_id})
 
-        except Exception as e:
-            logger.error(f"Error updating job {job_id} with resume_id {resume_id}: {e}")
+        except Exception:
+            logger.exception("job_resume_reference_update_failed", extra={"job.id": job_id, "resume.id": resume_id})
 
-    def _generate_resume_sync(self, job_dict: dict, user:User, resume_data: Optional[Dict[str, Any]], include_objective: bool = True) -> str:
+    def _generate_resume_sync(self, job_dict: dict, user: User, resume_data: Dict[str, Any],
+                              customize: bool, include_objective: bool = True,
+                              progress_callback=None) -> str:
         """Synchronous resume generation that runs in thread pool."""
         try:
             job_url = job_dict.get('job_url')
@@ -178,26 +248,47 @@ class ResumeGenerator:
             if not job_url:
                 raise ValueError("Job URL not found in job data")
 
+            if customize and not isinstance(parsed_job, dict):
+                raise ValueError("Job analysis is missing. Re-analyze the job before tailoring a resume.")
+            if customize and not str(parsed_job.get("original_description") or "").strip():
+                raise ValueError("The full job description is unavailable. Re-analyze the job before tailoring a resume.")
+
+            if not customize:
+                logger.info("resume_generation_customization_skipped")
+                return self.dict_to_yaml_string(resume_data)
+
             # Initialize ResumeImprover - it does ALL the work
             resume_improver = ResumeImprover(
                 url=job_url,
                 parsed_job=parsed_job,
-                user = user
+                user=user,
+                progress_callback=progress_callback,
             )
-
-            # Set up resume data if provided
-            if resume_data:
-                logger.info(f"Using user-provided resume data for job {job_dict.get('id')}")
+            try:
+                logger.debug("resume_generation_source_loaded", extra={"job.id": job_dict.get("id")})
                 self._setup_resume_data(resume_improver, resume_data)
-            else:
-                logger.info(f"Using default resume template for job {job_dict.get('id')}")
-                # You'll need to provide default data or handle this case
+                plan_key = self._build_resume_plan_key(job_dict, resume_data)
+                cached_plan = self._load_cached_plan(user.id, plan_key)
 
-            # Let ResumeImprover do all the work with include_objective flag
-            return resume_improver.create_complete_tailored_resume(include_objective)
+                if cached_plan and resume_improver.load_tailoring_plan(cached_plan):
+                    logger.info("resume_generation_plan_cache_hit", extra={"job.id": job_dict.get("id"), "plan.key": plan_key})
+                    if progress_callback:
+                        progress_callback("planning_ready", 30, "Reusing cached evidence plan")
+                else:
+                    logger.info("resume_generation_plan_cache_miss", extra={"job.id": job_dict.get("id"), "plan.key": plan_key})
+                    if progress_callback:
+                        progress_callback("evidence_planning", 20, "Matching job requirements to resume evidence")
+                    plan_data = resume_improver.prepare_tailoring_plan()
+                    self._store_cached_plan(user.id, plan_key, plan_data)
+                    if progress_callback:
+                        progress_callback("planning_ready", 30, "Saved reusable evidence plan")
 
-        except Exception as e:
-            logger.error(f"Synchronous resume generation failed: {e}")
+                # Let ResumeImprover do all the work with include_objective flag
+                return resume_improver.create_complete_tailored_resume(include_objective)
+            finally:
+                resume_improver.close()
+
+        except Exception:
             raise
 
     def _setup_resume_data(self, resume_improver: ResumeImprover, resume_data: Dict[str, Any]):
@@ -210,6 +301,71 @@ class ResumeGenerator:
         resume_improver.skills = self.get_dict_field("skills", resume_data)
         resume_improver.objective = self.get_dict_field("objective", resume_data)
         resume_improver.degrees = resume_improver._get_degrees(resume_data)
+
+    @staticmethod
+    def _validate_resume_data(resume_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Accept only the canonical editable resume fields used by generation."""
+        canonical_keys = {"basic", "objective", "education", "experiences", "projects", "skills"}
+        canonical_data = {key: resume_data.get(key) for key in canonical_keys}
+        try:
+            return SourceResumeData.model_validate(canonical_data).model_dump()
+        except Exception as error:
+            raise ValueError(f"resume_data must match the canonical resume schema: {error}") from error
+
+    @staticmethod
+    def _generation_message(job_dict: Dict[str, Any]) -> str:
+        metadata = job_dict.get("metadata") or {}
+        title = metadata.get("job_title") or "Unknown role"
+        company = metadata.get("company") or "Unknown company"
+        return f"Resume generation started for {title} at {company}"
+
+    def _estimate_completion_seconds(
+        self,
+        resume_data: Dict[str, Any],
+        customize: bool,
+        include_objective: bool,
+    ) -> int:
+        """Return a coarse user-facing estimate for the current pipeline."""
+        if not customize:
+            return 10
+
+        experiences = self.get_dict_field("experiences", resume_data) or []
+        projects = self.get_dict_field("projects", resume_data) or []
+        rewritten_sections = sum(
+            1 for section in [*experiences, *projects]
+            if isinstance(section, dict) and section.get("highlights")
+        )
+
+        estimate = 40
+        estimate += 5 if include_objective else 0
+        estimate += min(20, rewritten_sections * 2)
+        return min(180, max(30, estimate))
+
+    def _build_resume_plan_key(self, job_dict: Dict[str, Any], resume_data: Dict[str, Any]) -> str:
+        """Build a stable cache key for reusable planning artifacts."""
+        normalized_payload = {
+            "job_id": job_dict.get("id"),
+            "job_url": job_dict.get("job_url"),
+            "job_metadata": job_dict.get("metadata") or {},
+            "resume_data": resume_data or {},
+        }
+        serialized = json.dumps(normalized_payload, sort_keys=True, ensure_ascii=False, default=str)
+        return hashlib.md5(serialized.encode("utf-8")).hexdigest()
+
+    def _load_cached_plan(self, user_id: str, plan_key: str) -> Optional[Dict[str, Any]]:
+        """Load a reusable planning artifact from the cache layer."""
+        try:
+            return asyncio.run(self.cache_manager.get_resume_plan(user_id, plan_key))
+        except Exception as error:
+            logger.warning("resume_generation_plan_cache_load_failed", extra={"plan.key": plan_key, "error.reason": str(error)})
+            return None
+
+    def _store_cached_plan(self, user_id: str, plan_key: str, plan_data: Dict[str, Any]) -> None:
+        """Store a reusable planning artifact in the cache layer."""
+        try:
+            asyncio.run(self.cache_manager.set_resume_plan(user_id, plan_key, plan_data))
+        except Exception as error:
+            logger.warning("resume_generation_plan_cache_store_failed", extra={"plan.key": plan_key, "error.reason": str(error)})
 
     async def check_resume_status(self, resume_id: str, user_id:str) -> Dict[str, Any]:
         """Check the status of a resume generation process."""
@@ -229,6 +385,11 @@ class ResumeGenerator:
             if cache_entry.get("error"):
                 response["error"] = cache_entry["error"]
 
+            progress_data = cache_entry.get("data") or {}
+            for field in ("stage", "progress_percentage", "message", "failure_reason", "job_id", "operation", "resume_data", "plan_cache_key"):
+                if field in progress_data:
+                    response[field] = progress_data[field]
+
             if status == ResumeGenerationStatus.COMPLETED.value:
                 # If completed, also get job info from database
                 try:
@@ -239,7 +400,7 @@ class ResumeGenerator:
                             response["job"] = job_dict
                             response["job_id"] = resume.job_id
                 except Exception as e:
-                    logger.warning(f"Could not fetch job info for completed resume: {e}")
+                    logger.warning("resume_completed_job_lookup_failed", extra={"error.reason": str(e)})
 
             return response
 
@@ -333,7 +494,7 @@ class ResumeGenerator:
         except UnicodeDecodeError:
             raise ValueError("Invalid file format. Please upload a text-based resume file.")
         except Exception as e:
-            logger.error(f"Error uploading resume for user {user_id}: {e}")
+            logger.error("resume_upload_failed", extra={"error.reason": str(e)})
             raise
 
     def get_dict_field(self, field: str, data_dict: dict) -> Optional[dict]:
@@ -341,7 +502,7 @@ class ResumeGenerator:
         try:
             return data_dict[field]
         except KeyError as e:
-            logger.warning(f"`{field}` is missing in raw resume.")
+            logger.warning("resume_source_field_missing", extra={"resume.field": field})
         return None
 
     def dict_to_yaml_string(self, data: dict) -> str:
@@ -353,96 +514,5 @@ class ResumeGenerator:
             yaml.dump(data, stream=stream, default_flow_style=False, allow_unicode=True)
             return stream.getvalue()
         except YAMLError as e:
-            logger.error("Failed to convert dict to YAML string.")
+            logger.error("resume_yaml_serialization_failed")
             raise e
-
-    def __del__(self):
-        """Cleanup thread pool on deletion."""
-        if hasattr(self, 'thread_pool'):
-            self.thread_pool.shutdown(wait=False)
-
-    async def replace_job_resume(self, job_id: str, user_id:str, new_resume_id: str) -> Dict[str, Any]:
-        """Replace the current resume for a job with a new one, handling orphaning properly."""
-        try:
-            # Verify the job exists
-            job_dict = await self.cache_manager.get_job(job_id, user_id)
-            if not job_dict:
-                raise ValueError(f"Job not found with ID: {job_id} for user: {user_id}")
-
-            # Verify the new resume exists and belongs to this user
-            new_resume = await self.cache_manager.get_resume(new_resume_id, user_id)
-            if not new_resume:
-                raise ValueError(f"Resume not found with ID: {new_resume_id} for user: {user_id}")
-
-            # Get current resume(s) for this job
-            current_resumes = await self.cache_manager.get_resumes_for_job(job_id, user_id)
-
-            # Update the job to point to the new resume
-            success = await self.cache_manager.update_job_resume_id(job_id, user_id, new_resume_id)
-
-            if not success:
-                raise ValueError("Failed to update job with new resume ID")
-
-            # Update the new resume to point to this job (if it wasn't already)
-            if new_resume.job_id != job_id:
-                new_resume.job_id = job_id
-                await self.cache_manager.save_resume(new_resume, user_id)
-
-            # Optionally orphan the old resumes (don't delete them, just clear their job_id)
-            orphaned_resumes = []
-            for old_resume in current_resumes:
-                if old_resume.id != new_resume_id:  # Don't orphan the new resume we just linked
-                    old_resume.job_id = None  # Orphan it
-                    await self.cache_manager.save_resume(old_resume, user_id)
-                    orphaned_resumes.append(old_resume.id)
-
-            return {
-                "message": f"Successfully replaced resume for job {job_id}",
-                "job_id": job_id,
-                "new_resume_id": new_resume_id,
-                "orphaned_resumes": orphaned_resumes,
-                "user_id": user_id
-            }
-
-        except Exception as e:
-            logger.error(f"Error replacing job resume for job {job_id} for user {user_id}: {e}")
-            raise
-
-    async def cleanup_orphaned_resumes(self, user_id: Optional[str] = None) -> Dict[str, Any]:
-        """Find orphaned resumes (resumes not linked to any job)."""
-        target_user_id = user_id
-
-        try:
-            # Get all resumes for the user
-            all_resumes = await self.cache_manager.get_all_resumes(target_user_id)
-
-            # Find orphaned resumes (job_id is None or points to non-existent job)
-            orphaned_resumes = []
-            for resume in all_resumes:
-                if not resume.job_id:
-                    orphaned_resumes.append({
-                        "resume_id": resume.id,
-                        "reason": "no_job_id",
-                        "date_created": resume.date_created.isoformat() if resume.date_created else None
-                    })
-                else:
-                    # Check if the job still exists
-                    job = await self.cache_manager.get_job(resume.job_id, target_user_id)
-                    if not job:
-                        orphaned_resumes.append({
-                            "resume_id": resume.id,
-                            "reason": "job_not_found",
-                            "missing_job_id": resume.job_id,
-                            "date_created": resume.date_created.isoformat() if resume.date_created else None
-                        })
-
-            return {
-                "user_id": target_user_id,
-                "total_resumes": len(all_resumes),
-                "orphaned_count": len(orphaned_resumes),
-                "orphaned_resumes": orphaned_resumes
-            }
-
-        except Exception as e:
-            logger.error(f"Error finding orphaned resumes for user {target_user_id}: {e}")
-            raise
