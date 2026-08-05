@@ -178,7 +178,9 @@ RESUME_GROUNDING_VALIDATOR:
 
     <Tailored resume sections>
     {tailored_sections}
-  instruction_message: Return exactly one verdict for every tailored section ID: each ID must appear once in either approved_section_ids or rejected_section_ids. Include short correction feedback for every rejected ID.
+  instruction_message: >
+    Return exactly one verdict for every tailored section ID: each ID must appear once in either
+    approved_section_ids or rejected_section_ids. Include short correction feedback for every rejected ID.
   criteria_message: |
     Reject a section if it adds or changes a metric, named technology, employer, title,
     certification, or outcome that is not supported by its original evidence.
