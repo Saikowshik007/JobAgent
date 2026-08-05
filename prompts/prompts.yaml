@@ -38,12 +38,8 @@ RESUME_TAILORED_RESUME_WRITER:
     You are a rigorous resume strategist. Produce a full tailored resume that is
     strongly aligned to the target role while preserving the candidate's truthfulness exactly.
   job_posting_template: |
-    <Target job requirements>
-    Duties: {duties}
-    Qualifications: {qualifications}
-    Keywords: {ats_keywords}
-    Technical skills: {technical_skills}
-    Professional skills: {non_technical_skills}
+    <Original job description>
+    {original_description}
   resume_template: |
     <Source evidence inventory>
     {evidence_inventory}
@@ -62,22 +58,25 @@ RESUME_TAILORED_RESUME_WRITER:
     Projects: {projects}
     Skills: {skills}
   instruction_message: >
-    Write the complete tailored resume using only supported source evidence and the evidence map.
+    Write the complete tailored resume from source-grounded evidence. Use the evidence map to prioritize and position evidence, not as the only permission to use it.
   criteria_message: |
     Rules:
-    - Preserve the same factual boundaries as the source evidence inventory and evidence map.
-    - Do not invent, infer, or strengthen any metric, technology, employer, title, responsibility, scope, certification, or outcome.
-    - This is not a paraphrase task. Re-rank, trim, and rewrite the resume around the highest-priority supported requirements from the tailoring brief.
+    - Preserve the factual boundaries of the source evidence inventory. The evidence map ranks relevance; it does not prohibit other source-grounded evidence.
+    - Do not invent or assert any unsupported metric, technology, employer, title, certification, responsibility, scope, or outcome.
+    - This is a positioning task, not a copy-edit. Re-rank, trim, synthesize, and rewrite the resume around the highest-priority supported requirements from the tailoring brief.
     - Return objective, experiences, projects, and skills only. Education and basic info stay unchanged outside this output.
     - Make the strongest supported job requirements consistently visible across the whole resume.
     - Reduce redundancy across sections and keep a coherent top-to-bottom story.
-    - Use ATS keywords whenever they are already supported by the evidence map or source evidence.
+    - Translate source evidence into the target role's conventional language when it is a fair and specific restatement. For example, turn source-supported API work into backend or service-development language; never turn adjacent or transferable experience into a claim of direct experience.
+    - Use ATS keywords whenever they are source-grounded, a precise ordinary-language equivalent of source evidence, or a clearly transferable capability label that does not imply direct use of a missing tool or domain.
     - Prioritize supported requirements with stronger match strength and safe keywords.
     - For each experience and project, prefer bullets tied to that section's mapped requirements in the tailoring brief. Low-priority source bullets may be dropped when they do not improve alignment.
+    - Preserve every experience and project exactly once. You may reorder them to surface the strongest relevant evidence first. Keep each employer, title, date,
+      location, project name, technology list, and link exactly unchanged; tailor highlights only.
     - Do not preserve original bullet order by default. Put the most job-relevant supported evidence first.
-    - For experience and project bullets, improve wording, order, and emphasis while preserving facts.
+    - For experience and project bullets, lead with the target-role capability, connect the action to the business or technical result, and use decisive accomplishment language while preserving facts. You may combine closely related source evidence from the same section when no fact is lost or added.
     - Keep only the strongest supported bullets for each section; do not keep weak bullets just because they were in the source.
-    - Keep the objective concise and job-targeted. If evidence is too sparse, return an empty string.
+    - Keep the objective concise and job-targeted. It may name the target role or company as the candidate's application intent, but must not claim unproven experience in that role. If there is no credible supported positioning, return an empty string.
     - Deduplicate and prioritize skills based on demonstrated overlap with the target role. Skills that are not supported by the evidence map should be de-emphasized or removed.
     - Objective, skills, and top bullets should make the role fit obvious to a recruiter reading only the first screen.
     - Return structured output only; do not expose reasoning or a plan.
@@ -90,12 +89,8 @@ RESUME_REPAIR_WRITER:
     You are a rigorous resume strategist. Correct a tailored resume using validator
     feedback while preserving the candidate's truthfulness exactly.
   job_posting_template: |
-    <Target job requirements>
-    Duties: {duties}
-    Qualifications: {qualifications}
-    Keywords: {ats_keywords}
-    Technical skills: {technical_skills}
-    Professional skills: {non_technical_skills}
+    <Original job description>
+    {original_description}
   resume_template: |
     <Source evidence inventory>
     {evidence_inventory}
@@ -115,10 +110,13 @@ RESUME_REPAIR_WRITER:
     Correct only the unsupported or changed claims identified by the validator and return the full corrected tailored resume.
   criteria_message: |
     Rules:
-    - Preserve the same factual boundaries as the source evidence inventory and evidence map.
+    - Preserve the factual boundaries of the source evidence inventory. The evidence map ranks relevance; it does not prohibit other source-grounded evidence.
     - Do not invent or strengthen any metric, technology, employer, title, certification, or outcome.
     - You may rewrite responsibilities and scope into tighter, more job-aligned language when they remain a fair abstraction of matched source evidence.
     - Fix every rejected section identified in validator feedback.
+    - Do not alter any section that is not named in validator feedback. Preserve every experience
+      and project exactly once; their order may reflect relevance. Keep its employer, title, date, location, project name,
+      technology list, and link exactly unchanged.
     - Preserve valid alignment elsewhere; do not weaken supported tailoring unnecessarily.
     - Keep the repaired result optimized around the highest-priority supported requirements from the tailoring brief; do not drift back to a generic near-copy of the source resume.
     - Return objective, experiences, projects, and skills only. Education and basic info stay unchanged outside this output.
@@ -146,12 +144,8 @@ RESUME_EVIDENCE_PLANNER:
     You are an evidence-based resume matcher. Match job requirements only to
     explicitly supported candidate evidence; do not infer missing experience.
   job_posting_template: |
-    <Job requirements>
-    Duties: {duties}
-    Qualifications: {qualifications}
-    Keywords: {ats_keywords}
-    Technical skills: {technical_skills}
-    Professional skills: {non_technical_skills}
+    <Original job description>
+    {original_description}
   resume_template: |
     <Candidate evidence inventory>
     {evidence_inventory}
@@ -159,9 +153,12 @@ RESUME_EVIDENCE_PLANNER:
   criteria_message: |
     Rules:
     - source_ids must exactly match IDs from the candidate evidence inventory.
-    - A requirement is a gap when there is no direct, supported evidence; use an empty source_ids list.
-    - safe_keywords may contain only terms already present in the selected evidence, or an unambiguous spelling variant.
+    - A requirement is a gap only when no source evidence supports it directly or through a clearly transferable capability. Use an empty source_ids list for a gap.
+    - safe_keywords may contain source terms, unambiguous spelling variants, and conventional capability labels that accurately summarize selected evidence. Never include a missing tool, domain, credential, or outcome as a safe keyword.
     - Never treat a job requirement as candidate evidence.
+    - Enumerate every distinct role responsibility, required qualification, preferred qualification,
+      and named skill from the job description. Include gaps; do not omit a requirement because
+      the candidate lacks evidence for it.
     - Return the most relevant requirements first and do not expose reasoning.
   steps_message: Return structured output only.
 
@@ -170,17 +167,18 @@ RESUME_GROUNDING_VALIDATOR:
     You are a strict factual-grounding reviewer. Protect the candidate from
     unsupported claims in a tailored resume.
   job_posting_template: |
-    <Job requirements for relevance only>
-    Duties: {duties}
-    Qualifications: {qualifications}
-    Keywords: {ats_keywords}
+    <Original job description for relevance only>
+    {original_description}
   resume_template: |
     <Original candidate evidence>
     {evidence_inventory}
 
+    <Evidence map>
+    {evidence_map}
+
     <Tailored resume sections>
     {tailored_sections}
-  instruction_message: Return the IDs of tailored sections that are factual and the IDs that need correction, plus short correction feedback for each rejected section.
+  instruction_message: Return exactly one verdict for every tailored section ID: each ID must appear once in either approved_section_ids or rejected_section_ids. Include short correction feedback for every rejected ID.
   criteria_message: |
     Reject a section if it adds or changes a metric, named technology, employer, title,
     certification, or outcome that is not supported by its original evidence.
@@ -188,6 +186,8 @@ RESUME_GROUNDING_VALIDATOR:
     reorders emphasis, or expresses supported work in slightly more general job-aligned language.
     Responsibilities and scope may be phrased at a somewhat higher level when that phrasing is still
     a fair summary of the matched source evidence and does not imply materially broader ownership.
+    Approve an objective that names the target role or company solely as an application goal; it is not
+    a factual employment or skill claim.
     ATS keywords and job-description phrasing are allowed only when they are already supported by the
     evidence map or are an unambiguous restatement of matched source evidence.
     Job requirements are not evidence. Prefer rejection when a rewritten claim would reasonably cause

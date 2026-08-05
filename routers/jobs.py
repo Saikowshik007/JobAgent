@@ -64,6 +64,7 @@ async def analyze_job(
             date_found=datetime.now(),
             metadata={
                 **job_details,
+                "original_description": resume_improver.job_post_raw,
                 "analyzed_with_model": user.model  # Track which model was used
             }
         )
@@ -465,7 +466,7 @@ async def analyze_job_description(
             metadata={
                 **job_details,
                 "input_method": "description",
-                "original_description": job_description[:1000],  # Store first 1000 chars
+                "original_description": job_description,
                 "description_length": len(job_description),
                 "description_hash": description_hash
             }

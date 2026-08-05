@@ -1,5 +1,6 @@
 import asyncio
 import time
+from copy import deepcopy
 from datetime import datetime
 from typing import Optional
 
@@ -108,20 +109,35 @@ class ResumeImprover:
         plan = plan_data.get("evidence_plan")
         if not isinstance(inventory, list) or not isinstance(plan, list):
             return False
+        if len(plan) < self._expected_requirement_count():
+            return False
         self.evidence_inventory = inventory
         self.evidence_plan = plan
         return True
 
     def _build_evidence_inventory(self) -> list[dict]:
         inventory = []
+        for index, education in enumerate(self.education or []):
+            inventory.append({"section_id": f"education:{index}", "content": education})
         for index, experience in enumerate(self.experiences or []):
-            inventory.append({"section_id": f"experience:{index}", "content": experience})
+            context = {key: value for key, value in experience.items() if key != "highlights"}
+            inventory.append({"section_id": f"experience:{index}:context", "content": context})
+            for bullet_index, highlight in enumerate(experience.get("highlights", [])):
+                inventory.append({
+                    "section_id": f"experience:{index}:highlight:{bullet_index}",
+                    "content": {"context": context, "highlight": highlight},
+                })
         for index, project in enumerate(self.projects or []):
-            inventory.append({"section_id": f"project:{index}", "content": project})
-        if self.skills:
-            inventory.append({"section_id": "skills", "content": self.skills})
-        if self.objective:
-            inventory.append({"section_id": "objective", "content": self.objective})
+            context = {key: value for key, value in project.items() if key != "highlights"}
+            inventory.append({"section_id": f"project:{index}:context", "content": context})
+            for bullet_index, highlight in enumerate(project.get("highlights", [])):
+                inventory.append({
+                    "section_id": f"project:{index}:highlight:{bullet_index}",
+                    "content": {"context": context, "highlight": highlight},
+                })
+        for index, skill_group in enumerate(self.skills or []):
+            inventory.append({"section_id": f"skills:{index}", "content": skill_group})
+        inventory.append({"section_id": "objective", "content": self.objective or ""})
         return inventory
 
     def _build_evidence_plan(self) -> list[dict]:
@@ -147,6 +163,8 @@ class ResumeImprover:
                 if not item["source_ids"]:
                     item["gap"] = True
                 plan.append(item)
+            if len(plan) < self._expected_requirement_count():
+                raise ValueError("Evidence planner did not evaluate every extracted job requirement")
             return plan
         except Exception as error:
             logger.error("Evidence planning failed: %s", error)
@@ -163,6 +181,16 @@ class ResumeImprover:
             "gaps": gaps,
             "strong_matches": [match["requirement"] for match in matches if match.get("match_strength", 0) >= 4],
         }
+
+    def _expected_requirement_count(self) -> int:
+        if not isinstance(self.parsed_job, dict):
+            return 0
+        requirements = []
+        for key in ("duties", "qualifications", "ats_keywords", "technical_skills", "non_technical_skills"):
+            values = self.parsed_job.get(key) or []
+            if isinstance(values, list):
+                requirements.extend(str(value).strip().lower() for value in values if str(value).strip())
+        return len(set(requirements))
 
     def _tailoring_brief(self) -> dict:
         matched = [match for match in self.evidence_plan if not match.get("gap")]
@@ -198,7 +226,8 @@ class ResumeImprover:
                     "safe_keywords": match.get("safe_keywords", []),
                 }
                 for match in ranked_matches
-                if section_id in match.get("source_ids", [])
+                if any(source_id == section_id or source_id.startswith(section_id + ":")
+                       for source_id in match.get("source_ids", []))
             ][:6]
             if section_matches:
                 section_priorities[section_id] = section_matches
@@ -225,36 +254,37 @@ class ResumeImprover:
             tailored = result.final_answer.model_dump() if hasattr(result.final_answer, "model_dump") else result.final_answer
             if not include_objective:
                 tailored["objective"] = ""
-            return tailored
+            return self._preserve_section_identity(tailored)
         except Exception as error:
             logger.error("Tailored resume writer failed: %s", error)
             raise RuntimeError(f"Tailored resume writing failed: {error}") from error
 
     def _validate_tailored_resume(self, tailored_resume: dict, include_objective: bool) -> dict:
-        if not self.evidence_inventory:
-            return tailored_resume
         try:
             from dataModels.resume import ResumeValidationOutput
 
             result = self._run_grounding_validation(tailored_resume, ResumeValidationOutput)
-            valid_ids = {item["section_id"] for item in self.evidence_inventory}
-            rejected_ids = set(result.rejected_section_ids) & valid_ids
+            expected_ids = set(self._tailored_sections(tailored_resume))
+            rejected_ids = self._validated_rejected_ids(result, expected_ids)
             if rejected_ids:
-                rejection_feedback = self._validation_feedback_by_section(result, valid_ids)
-                if not rejection_feedback:
+                rejection_feedback = self._validation_feedback_by_section(result, expected_ids)
+                if set(rejection_feedback) != rejected_ids:
                     raise ValueError(
                         "Grounding review rejected sections without actionable feedback: "
                         + ", ".join(sorted(rejected_ids))
                     )
                 logger.warning("resume_grounding_sections_repair_requested", extra={"rejected.section_ids": sorted(rejected_ids)})
+                pre_repair_resume = deepcopy(tailored_resume)
                 repaired_resume = self._repair_tailored_resume(tailored_resume, rejection_feedback, include_objective)
+                self._restore_approved_sections(pre_repair_resume, repaired_resume, rejected_ids)
                 repaired_result = self._run_grounding_validation(repaired_resume, ResumeValidationOutput)
-                still_rejected_ids = set(repaired_result.rejected_section_ids) & valid_ids
+                still_rejected_ids = self._validated_rejected_ids(
+                    repaired_result, set(self._tailored_sections(repaired_resume))
+                )
                 if still_rejected_ids:
-                    raise ValueError(
-                        "Grounding review still rejected sections after repair: "
-                        + ", ".join(sorted(still_rejected_ids))
-                    )
+                    logger.warning("resume_grounding_fallback_to_source", extra={"rejected.section_ids": sorted(still_rejected_ids)})
+                    self._restore_rejected_sections_from_source(repaired_resume, still_rejected_ids)
+                    repaired_resume.setdefault("metadata", {})["grounding_fallback_sections"] = sorted(still_rejected_ids)
                 tailored_resume = repaired_resume
         except Exception as error:
             logger.error("Grounding validation failed: %s", error)
@@ -264,12 +294,7 @@ class ResumeImprover:
     def _run_grounding_validation(self, tailored_resume: dict, schema):
         from services.langchain_helpers import invoke_structured
 
-        tailored_sections = {
-            "objective": tailored_resume["objective"],
-            "skills": tailored_resume["skills"],
-            **{f"experience:{index}": item for index, item in enumerate(tailored_resume["experiences"])},
-            **{f"project:{index}": item for index, item in enumerate(tailored_resume["projects"])},
-        }
+        tailored_sections = self._tailored_sections(tailored_resume)
         return invoke_structured(
             self.user,
             "RESUME_GROUNDING_VALIDATOR",
@@ -278,6 +303,97 @@ class ResumeImprover:
             max_retries=1,
             **self._get_prompt_inputs(tailored_sections=tailored_sections),
         )
+
+    def _tailored_sections(self, tailored_resume: dict) -> dict:
+        experience_indexes = self._source_indexes(
+            tailored_resume["experiences"], self.experiences or [],
+            ("company", "skip_name", "location", "titles"), "experiences",
+        )
+        project_indexes = self._source_indexes(
+            tailored_resume["projects"], self.projects or [],
+            ("name", "technologies", "link", "hyperlink", "show_link"), "projects",
+        )
+        return {
+            "objective": tailored_resume["objective"],
+            "skills": tailored_resume["skills"],
+            **{f"experience:{source_index}": item for item, source_index in zip(tailored_resume["experiences"], experience_indexes)},
+            **{f"project:{source_index}": item for item, source_index in zip(tailored_resume["projects"], project_indexes)},
+        }
+
+    @staticmethod
+    def _validated_rejected_ids(validation_result, expected_ids: set[str]) -> set[str]:
+        approved_ids = set(validation_result.approved_section_ids)
+        rejected_ids = set(validation_result.rejected_section_ids)
+        if approved_ids & rejected_ids:
+            raise ValueError("Grounding review returned overlapping approved and rejected section IDs")
+        if approved_ids | rejected_ids != expected_ids:
+            raise ValueError("Grounding review did not return one verdict for every tailored section")
+        return rejected_ids
+
+    def _preserve_section_identity(self, tailored: dict) -> dict:
+        """Keep source roles/projects stable while allowing relevance-based ordering."""
+        for section_name, source_items, identity_fields in (
+            ("experiences", self.experiences or [], ("company", "skip_name", "location", "titles")),
+            ("projects", self.projects or [], ("name", "technologies", "link", "hyperlink", "show_link")),
+        ):
+            generated_items = tailored.get(section_name, [])
+            self._source_indexes(generated_items, source_items, identity_fields, section_name)
+        return tailored
+
+    @staticmethod
+    def _source_indexes(generated_items: list, source_items: list, identity_fields: tuple, section_name: str) -> list[int]:
+        if len(generated_items) != len(source_items):
+            raise ValueError(f"Tailored {section_name} must preserve every source section")
+        remaining_indexes = set(range(len(source_items)))
+        source_indexes = []
+        for generated in generated_items:
+            candidates = [
+                index for index in remaining_indexes
+                if all(generated.get(field) == source_items[index].get(field) for field in identity_fields)
+            ]
+            if len(candidates) != 1:
+                raise ValueError(f"Tailored {section_name} changed, duplicated, or omitted a source section")
+            source_index = candidates[0]
+            remaining_indexes.remove(source_index)
+            source_indexes.append(source_index)
+        return source_indexes
+
+    def _restore_approved_sections(self, before: dict, after: dict, rejected_ids: set[str]) -> None:
+        before_sections = self._tailored_sections(before)
+        after_sections = self._tailored_sections(after)
+        if set(before_sections) != set(after_sections):
+            raise ValueError("Repair changed the tailored resume structure")
+        for section_id, original_content in before_sections.items():
+            if section_id not in rejected_ids:
+                self._replace_section(after, section_id, deepcopy(original_content))
+
+    def _restore_rejected_sections_from_source(self, tailored_resume: dict, rejected_ids: set[str]) -> None:
+        for section_id in rejected_ids:
+            if section_id == "objective":
+                tailored_resume["objective"] = self.objective or ""
+            elif section_id == "skills":
+                tailored_resume["skills"] = deepcopy(self.skills or [])
+            elif section_id.startswith("experience:"):
+                source_index = int(section_id.split(":", 1)[1])
+                self._replace_section(tailored_resume, section_id, deepcopy((self.experiences or [])[source_index]))
+            elif section_id.startswith("project:"):
+                source_index = int(section_id.split(":", 1)[1])
+                self._replace_section(tailored_resume, section_id, deepcopy((self.projects or [])[source_index]))
+
+    def _replace_section(self, tailored_resume: dict, section_id: str, content) -> None:
+        if section_id == "objective":
+            tailored_resume["objective"] = content
+            return
+        if section_id == "skills":
+            tailored_resume["skills"] = content
+            return
+        section_type, source_index_text = section_id.split(":", 1)
+        source_index = int(source_index_text)
+        section_name = "experiences" if section_type == "experience" else "projects"
+        source_items = self.experiences or [] if section_type == "experience" else self.projects or []
+        identity_fields = ("company", "skip_name", "location", "titles") if section_type == "experience" else ("name", "technologies", "link", "hyperlink", "show_link")
+        output_index = self._source_indexes(tailored_resume[section_name], source_items, identity_fields, section_name).index(source_index)
+        tailored_resume[section_name][output_index] = content
 
     def _validation_feedback_by_section(self, validation_result, valid_ids: set[str]) -> dict[str, str]:
         feedback = {}
@@ -312,6 +428,7 @@ class ResumeImprover:
             repaired = result.final_answer.model_dump() if hasattr(result.final_answer, "model_dump") else result.final_answer
             if not include_objective:
                 repaired["objective"] = ""
+            repaired = self._preserve_section_identity(repaired)
             tailored_resume["objective"] = repaired["objective"]
             tailored_resume["experiences"] = repaired["experiences"]
             tailored_resume["projects"] = repaired["projects"]
@@ -387,7 +504,7 @@ class ResumeImprover:
 
         keys = {
             "basic", "objective", "education", "experiences", "projects", "skills",
-            "company", "job_summary", "duties", "qualifications", "ats_keywords",
+            "company", "job_title", "job_summary", "original_description", "duties", "qualifications", "ats_keywords",
             "technical_skills", "non_technical_skills", "evidence_inventory", "evidence_map",
             "tailored_sections", "tailored_resume_draft", "validation_feedback", "include_objective",
             "tailoring_brief",

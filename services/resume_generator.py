@@ -11,6 +11,7 @@ import config
 from data.cache import ResumeGenerationStatus
 from dataModels.data_models import JobStatus, Resume
 from dataModels.user_model import User
+from dataModels.resume import SourceResumeData
 from services.resume_improver import ResumeImprover
 
 logger = config.getLogger("Resume Generator")
@@ -45,6 +46,11 @@ class ResumeGenerator:
             raise ValueError(f"Job not found with ID: {job_id} for user: {user.id}")
         if not isinstance(resume_data, dict) or not resume_data:
             raise ValueError("resume_data is required to generate a factual tailored resume")
+        if not customize:
+            raise ValueError("customize=false does not generate a tailored resume; save the source resume without calling this endpoint")
+        if template not in (None, "standard"):
+            raise ValueError(f"Unsupported resume template: {template}")
+        resume_data = self._validate_resume_data(resume_data)
 
         # Check for existing resumes linked to this job
         existing_resumes = await self.cache_manager.get_resumes_for_job(job_id, user.id)
@@ -81,7 +87,7 @@ class ResumeGenerator:
 
         return {
             "status": "generating",
-            "message": f"Resume generation started for job {job_dict.get('job_title', 'Unknown')} at {job_dict.get('company', 'Unknown')}",
+            "message": self._generation_message(job_dict),
             "resume_id": resume_id,
             "job_id": job_id,
             "user_id": user.id,
@@ -242,6 +248,11 @@ class ResumeGenerator:
             if not job_url:
                 raise ValueError("Job URL not found in job data")
 
+            if customize and not isinstance(parsed_job, dict):
+                raise ValueError("Job analysis is missing. Re-analyze the job before tailoring a resume.")
+            if customize and not str(parsed_job.get("original_description") or "").strip():
+                raise ValueError("The full job description is unavailable. Re-analyze the job before tailoring a resume.")
+
             if not customize:
                 logger.info("resume_generation_customization_skipped")
                 return self.dict_to_yaml_string(resume_data)
@@ -290,6 +301,23 @@ class ResumeGenerator:
         resume_improver.skills = self.get_dict_field("skills", resume_data)
         resume_improver.objective = self.get_dict_field("objective", resume_data)
         resume_improver.degrees = resume_improver._get_degrees(resume_data)
+
+    @staticmethod
+    def _validate_resume_data(resume_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Accept only the canonical editable resume fields used by generation."""
+        canonical_keys = {"basic", "objective", "education", "experiences", "projects", "skills"}
+        canonical_data = {key: resume_data.get(key) for key in canonical_keys}
+        try:
+            return SourceResumeData.model_validate(canonical_data).model_dump()
+        except Exception as error:
+            raise ValueError(f"resume_data must match the canonical resume schema: {error}") from error
+
+    @staticmethod
+    def _generation_message(job_dict: Dict[str, Any]) -> str:
+        metadata = job_dict.get("metadata") or {}
+        title = metadata.get("job_title") or "Unknown role"
+        company = metadata.get("company") or "Unknown company"
+        return f"Resume generation started for {title} at {company}"
 
     def _estimate_completion_seconds(
         self,

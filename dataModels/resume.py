@@ -100,7 +100,7 @@ class ResumeRepairWriterOutput(_ClosedSchema):
     )
 
 
-class EvidenceMatch(BaseModel):
+class EvidenceMatch(_ClosedSchema):
     """A candidate-supported match between one job requirement and resume evidence."""
 
     requirement: str
@@ -110,7 +110,7 @@ class EvidenceMatch(BaseModel):
     gap: bool
 
 
-class ResumeEvidencePlanOutput(BaseModel):
+class ResumeEvidencePlanOutput(_ClosedSchema):
     """Structured job-to-resume evidence map used to ground all later edits."""
 
     final_answer: List[EvidenceMatch] = Field(
@@ -131,7 +131,7 @@ class RejectedSectionFeedback(_ClosedSchema):
     )
 
 
-class ResumeValidationOutput(BaseModel):
+class ResumeValidationOutput(_ClosedSchema):
     """Section-level factual-grounding verdicts for a tailored resume."""
 
     approved_section_ids: List[str] = Field(default_factory=list)
